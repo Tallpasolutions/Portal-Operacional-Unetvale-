@@ -101,9 +101,11 @@ def coletar_produtividade(full=False):
     rows = conn.execute(
         "SELECT dia, empresa, tecnico, tecnico_id, finalidade, sucesso, os FROM os WHERE dia != ''"
     ).fetchall()
+    # Só os campos usados pelo cross-filter (d, e, t, ti). finalidade/sucesso/os
+    # não são plotados em nenhum gráfico/tabela — omitir reduz muito o payload.
     registros = [{
         "d": r["dia"], "e": r["empresa"] or "—", "t": r["tecnico"] or "—",
-        "ti": r["tecnico_id"], "f": r["finalidade"] or "—", "s": r["sucesso"], "os": r["os"],
+        "ti": r["tecnico_id"],
     } for r in rows]
     meta = {m["chave"]: m["valor"] for m in conn.execute("SELECT chave, valor FROM meta")}
     conn.close()
@@ -147,11 +149,28 @@ MODULOS = {
 }
 
 
+def wvsa_alcancavel():
+    """Pré-check: o WVSA responde? Funciona igual na VPN ou na rede Unetvale —
+    o que importa é apenas se há rota até o sistema agora."""
+    base = os.environ.get("W8_BASE", "https://wvsa8.unetvale.com.br").rstrip("/")
+    try:
+        r = requests.get(base + "/login", timeout=8)
+        return r.status_code < 500
+    except requests.RequestException:
+        return False
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--full", action="store_true", help="reconstrói o histórico da Produtividade")
     ap.add_argument("--so", choices=list(MODULOS), help="roda apenas um módulo")
     args = ap.parse_args()
+
+    # Sem rota até o WVSA (fora da VPN e fora da rede Unetvale): pula a rodada
+    # SEM marcar erro e SEM sobrescrever os últimos dados bons.
+    if not wvsa_alcancavel():
+        log("WVSA inalcançável (sem VPN nem rede Unetvale). Rodada ignorada — dados anteriores preservados.")
+        sys.exit(0)
 
     alvos = [args.so] if args.so else list(MODULOS)
     falhas = 0
