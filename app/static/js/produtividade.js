@@ -10,7 +10,7 @@
   let ordenacaoTec = { col: "os", dir: -1 };
   let charts = {};
   const MESES_PT = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
-  const CORES = { os: "#1f8a4c", azul: "#2563eb", laranja: "#ea580c" };
+  const CORES = { os: "#2c7be5", azul: "#27bcfd", laranja: "#f5803e" };
 
   function isoSemana(diaStr) {
     const [y, m, d] = diaStr.split("-").map(Number);

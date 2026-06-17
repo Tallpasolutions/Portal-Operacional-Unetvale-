@@ -7,7 +7,7 @@
   if (!M.meses || !M.meses.length) return;
 
   const MESES = M.meses, METRICAS = M.metricas || [];
-  const CORES = ["#1f8a4c", "#2563eb", "#ea580c", "#e0a200"];
+  const CORES = ["#2c7be5", "#27bcfd", "#f5803e", "#00b074"];
   const corMetrica = (i) => CORES[i % CORES.length];
 
   let iniIdx = 0, fimIdx = MESES.length - 1;
@@ -77,7 +77,7 @@
     const s = serieDiaria(mesDia, metricaDia);
     desenhar("g-diaria", {
       type: "bar",
-      data: { labels: s.map((d) => d.dia), datasets: [{ label: `${metricaDia} — ${mesDia}`, data: s.map((d) => d.valor), backgroundColor: "#2563eb" }] },
+      data: { labels: s.map((d) => d.dia), datasets: [{ label: `${metricaDia} — ${mesDia}`, data: s.map((d) => d.valor), backgroundColor: "#2c7be5" }] },
       options: opcoes({ plugins: { legend: { display: false } } }),
     });
   }
@@ -85,12 +85,12 @@
   function renderCidades() {
     const set = setMeses();
     const rk = rankingCidades(set).slice(0, 20);
-    const cores = rk.map((c) => (cidadeSel && c.cidade === cidadeSel) ? "#15663a" : "#1f8a4c");
+    const cores = rk.map((c) => (cidadeSel && c.cidade === cidadeSel) ? "#1f5fc0" : "#2c7be5");
     desenhar("g-cidades", {
       type: "bar",
       data: { labels: rk.map((c) => c.cidade), datasets: [
         { label: "Sem TP", data: rk.map((c) => c.semTp), backgroundColor: cores, stack: "s" },
-        { label: "Troca de poste", data: rk.map((c) => c.tp), backgroundColor: "#e0a200", stack: "s" },
+        { label: "Troca de poste", data: rk.map((c) => c.tp), backgroundColor: "#f5803e", stack: "s" },
       ] },
       options: opcoes({ indexAxis: "y", scales: { x: { stacked: true }, y: { stacked: true } },
         onClick: (evt) => {

@@ -12,8 +12,8 @@
     <!-- ===== Sidebar ===== -->
     <aside class="sidebar" id="sidebar">
       <div class="brand">
-        <span class="brand-mark">U</span>
-        <span class="brand-text">Unetvale</span>
+        <img class="brand-logo" src="{{ url_for('static', filename='img/unetvale-mark.png') }}" alt="Unetvale">
+        <span class="brand-text">unetvale</span>
       </div>
       <nav class="menu">
         <a href="{{ url_for('dash.dashboard') }}" class="{{ 'on' if ativo=='dashboard' }}"><span class="ic">▦</span><span>Dashboard</span></a>

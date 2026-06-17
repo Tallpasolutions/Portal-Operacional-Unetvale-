@@ -54,7 +54,7 @@
     const dadosTabela = selecionado ? base.filter((d) => d.nome === selecionado) : base;
     const chartData = [...base].sort((a, b) => a.iqi - b.iqi || a.nome.localeCompare(b.nome, "pt"));
 
-    const cores = chartData.map((d) => (selecionado && d.nome === selecionado) ? "#15663a" : "#1f8a4c");
+    const cores = chartData.map((d) => (selecionado && d.nome === selecionado) ? "#1f5fc0" : "#2c7be5");
     if (chart) chart.destroy();
     chart = new Chart(document.getElementById("g-iqi"), {
       type: "bar",
@@ -62,7 +62,7 @@
         labels: chartData.map((d) => d.curto),
         datasets: [
           { label: IND + " %", data: chartData.map((d) => d.iqi), backgroundColor: cores, order: 2 },
-          { label: "Meta", type: "line", data: chartData.map(() => META), borderColor: "#c0392b",
+          { label: "Meta", type: "line", data: chartData.map(() => META), borderColor: "#e63757",
             borderWidth: 1.4, borderDash: [6, 4], pointRadius: 0, order: 1 },
         ],
       },
