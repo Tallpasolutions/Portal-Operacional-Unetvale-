@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Usuários · Unetvale{% endblock %}
+{% block page_title %}Usuários{% endblock %}
+{% block content %}
+<p class="subnote">Todos os usuários têm o mesmo acesso e visualizam todos os dashboards.
+  Novos usuários se cadastram pela tela de <a href="{{ url_for('auth.cadastro') }}">cadastro</a>.</p>
+<div class="card">
+  <div class="card-h">Usuários cadastrados ({{ usuarios|length }})</div>
+  <div class="card-b tabela-wrap">
+    {% if usuarios %}
+    <table class="tbl">
+      <thead><tr><th>Nome</th><th>E-mail</th><th>Criado em</th></tr></thead>
+      <tbody>
+        {% for u in usuarios %}
+          <tr><td>{{ u.nome or '—' }}</td><td>{{ u.email }}</td>
+              <td>{{ (u.criado_em or '')[:10] }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <div class="vazio">Nenhum usuário ainda.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

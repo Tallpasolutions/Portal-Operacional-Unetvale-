@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cadastro · Portal Operacional Unetvale</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <div class="auth">
+    <div class="auth-card">
+      <div class="auth-brand">
+        <span class="brand-mark">U</span>
+        <span class="t">Portal Operacional Unetvale</span>
+      </div>
+      <h1>Criar conta</h1>
+      {% with msgs = get_flashed_messages(with_categories=true) %}
+        {% for cat, msg in msgs %}<div class="alert alert-{{ cat }}">{{ msg }}</div>{% endfor %}
+      {% endwith %}
+      <form method="post">
+        <div class="field">
+          <label>Nome</label>
+          <input type="text" name="nome" autocomplete="name">
+        </div>
+        <div class="field">
+          <label>E-mail</label>
+          <input type="email" name="email" required autocomplete="username">
+        </div>
+        <div class="field">
+          <label>Senha</label>
+          <input type="password" name="senha" required autocomplete="new-password">
+        </div>
+        <div class="field">
+          <label>Confirmar senha</label>
+          <input type="password" name="senha2" required autocomplete="new-password">
+        </div>
+        <button class="btn" type="submit">Cadastrar</button>
+      </form>
+      <div class="auth-foot">Já tem conta? <a href="{{ url_for('auth.login') }}">Entrar</a></div>
+    </div>
+  </div>
+</body>
+</html>

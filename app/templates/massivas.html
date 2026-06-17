@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Massivas · Unetvale{% endblock %}
+{% block page_title %}Massivas{% endblock %}
+{% block content %}
+{% if not payload.meses %}
+  <div class="vazio">Sem dados de Massivas ainda. A próxima coleta automática preencherá este painel.</div>
+{% else %}
+<div class="toolbar">
+  <label>De <select id="m-ini"></select></label>
+  <label>Até <select id="m-fim"></select></label>
+  <label>Mês (visão diária) <select id="m-dia"></select></label>
+  <label>Métrica (visão diária) <select id="m-metrica"></select></label>
+  <button class="btn sec" id="m-limpar">Limpar filtros</button>
+</div>
+<div class="chips" id="chips-massivas"></div>
+
+<div class="kpis" id="m-kpis"></div>
+
+<div class="grid charts-2" style="margin-bottom:16px;">
+  <div class="card"><div class="card-h">Evolução mensal</div><div class="card-b"><div class="chart-box"><canvas id="g-evolucao"></canvas></div></div></div>
+  <div class="card"><div class="card-h">Visão diária</div><div class="card-b"><div class="chart-box"><canvas id="g-diaria"></canvas></div></div></div>
+</div>
+
+<div class="grid charts-2">
+  <div class="card"><div class="card-h">Ranking de cidades (massivas · parcela TP)</div><div class="card-b"><div class="chart-box tall"><canvas id="g-cidades"></canvas></div></div></div>
+  <div class="card">
+    <div class="card-h">Massivas por cidade <input type="text" id="m-busca" placeholder="Buscar cidade…" style="font-weight:400;"></div>
+    <div class="card-b tabela-wrap">
+      <table class="tbl" id="tab-cidades">
+        <thead><tr><th data-col="cidade">Cidade</th><th class="num" data-col="massivas">Massivas</th><th class="num" data-col="tp">Trocas de poste</th><th class="num" data-col="pct">% TP</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>window.__PAYLOAD__ = {{ payload|tojson }};</script>
+<script src="{{ url_for('static', filename='js/massivas.js') }}"></script>
+{% endblock %}

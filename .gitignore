@@ -1,0 +1,23 @@
+# Segredos
+.env
+coletor/.env
+coletor/config.json
+
+# Dados locais do coletor (ficam só na máquina dentro da VPN)
+coletor/dados.db
+coletor/*.log
+coletor/raw/
+coletor/model.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Vercel / Node
+.vercel/
+node_modules/
+
+# OS
+.DS_Store

@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}IQI / IQM · Unetvale{% endblock %}
+{% block page_title %}IQI / IQM — Equipes dentro da Meta{% endblock %}
+{% block content %}
+{% if not pacote %}
+  <div class="vazio">Sem dados de IQI/IQM ainda. A próxima coleta automática preencherá este painel.</div>
+{% else %}
+<p class="subnote" id="sub"></p>
+<div class="toolbar">
+  <label>Indicador <span class="toggle" id="indToggle"></span></label>
+  <label>Mês de referência <select id="mes"></select></label>
+  <label>Meta (%) <input type="number" id="metaInput" step="0.5" min="0" style="width:90px;"></label>
+  <div class="kpi" style="padding:8px 14px;"><span class="l">Equipes na meta</span> <b class="v" id="qtd" style="font-size:18px;">0</b></div>
+  <div class="kpi" style="padding:8px 14px;"><span class="l">Maior recorrência</span> <b class="v" id="rec" style="font-size:18px;">0</b> <span class="estrela">★</span></div>
+</div>
+<div class="chips" id="chips-iqi"></div>
+
+<div class="card" style="margin-bottom:16px;">
+  <div class="card-h"><span id="tituloGrafico">IQI</span> por técnico (crescente) — <span style="color:var(--vermelho);">linha = meta</span></div>
+  <div class="card-b"><div class="chart-box tall"><canvas id="g-iqi"></canvas></div></div>
+</div>
+
+<div class="card">
+  <div class="card-h">Técnicos dentro da meta</div>
+  <div class="card-b tabela-wrap">
+    <table class="tbl" id="tab-iqi">
+      <thead><tr>
+        <th data-key="nome">Técnico</th>
+        <th class="num" data-key="iqi"><span class="colInd">IQI</span> %</th>
+        <th class="num" data-key="os">OSs</th>
+        <th class="num" data-key="cham">OSs c/ chamado</th>
+        <th class="num" data-key="stars">Recorrência</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>window.__PACOTE__ = {{ pacote|tojson }};</script>
+<script src="{{ url_for('static', filename='js/iqi.js') }}"></script>
+{% endblock %}

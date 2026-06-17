@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Configurações · Unetvale{% endblock %}
+{% block page_title %}Configurações{% endblock %}
+{% block content %}
+<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr));max-width:760px;">
+  <div class="card">
+    <div class="card-h">Minha conta</div>
+    <div class="card-b">
+      <div class="field"><label>Nome</label><div>{{ usuario.nome }}</div></div>
+      <div class="field" style="margin-top:10px;"><label>E-mail</label><div>{{ usuario.email }}</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-h">Trocar senha</div>
+    <div class="card-b">
+      <form method="post" action="{{ url_for('auth.trocar_senha') }}">
+        <div class="field"><label>Senha atual</label><input type="password" name="atual" required></div>
+        <div class="field"><label>Nova senha</label><input type="password" name="nova" required></div>
+        <div class="field"><label>Confirmar nova senha</label><input type="password" name="nova2" required></div>
+        <button class="btn" type="submit">Salvar nova senha</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

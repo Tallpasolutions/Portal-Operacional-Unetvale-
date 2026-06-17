@@ -1,0 +1,7 @@
+{
+  "_comentario": "Gerado automaticamente pelo enviar.py a partir do .env. Não precisa editar à mão.",
+  "base_url": "https://wvsa8.unetvale.com.br",
+  "username": "PREENCHIDO_VIA_ENV",
+  "password": "PREENCHIDO_VIA_ENV",
+  "data_inicio_historico": "01/01/2026"
+}

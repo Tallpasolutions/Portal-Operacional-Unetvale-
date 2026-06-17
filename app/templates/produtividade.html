@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Produtividade · Unetvale{% endblock %}
+{% block page_title %}Produtividade Operacional{% endblock %}
+{% block content %}
+<p class="subnote" id="sub-info">Carregando…</p>
+
+{% if not payload.registros %}
+  <div class="vazio">Sem dados de produtividade ainda. A próxima coleta automática preencherá este painel.</div>
+{% else %}
+<div class="toolbar">
+  <label>Empresa <select id="f-empresa"></select></label>
+  <label>Técnico <select id="f-tecnico"></select></label>
+  <label>Mês <select id="f-mes"></select></label>
+  <label>Semana <select id="f-semana"></select></label>
+  <button class="btn sec" id="btn-limpar">Limpar filtros</button>
+</div>
+<div class="chips" id="chips"></div>
+
+<div class="kpis" id="kpis"></div>
+
+<div class="grid charts-2" style="margin-bottom:16px;">
+  <div class="card"><div class="card-h">OS encerradas + equipes por dia</div><div class="card-b"><div class="chart-box"><canvas id="g-dia"></canvas></div></div></div>
+  <div class="card"><div class="card-h">OS por empresa</div><div class="card-b"><div class="chart-box"><canvas id="g-empresa"></canvas></div></div></div>
+  <div class="card"><div class="card-h">Top técnicos por OS</div><div class="card-b"><div class="chart-box"><canvas id="g-tecnico"></canvas></div></div></div>
+  <div class="card"><div class="card-h">Dias em atuação por técnico</div><div class="card-b"><div class="chart-box"><canvas id="g-dias"></canvas></div></div></div>
+</div>
+
+<div class="grid charts-2">
+  <div class="card">
+    <div class="card-h">Produtividade por técnico
+      <input type="text" id="busca-tec" placeholder="Buscar…" style="font-weight:400;">
+    </div>
+    <div class="card-b tabela-wrap">
+      <table class="tbl" id="tab-tecnicos">
+        <thead><tr>
+          <th data-col="empresa">Empresa</th><th data-col="tecnico">Técnico</th>
+          <th class="num" data-col="os">OS</th><th class="num" data-col="dias">Dias</th>
+          <th class="num" data-col="media">Média OS/dia</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-h">Equipes por dia</div>
+    <div class="card-b tabela-wrap">
+      <table class="tbl" id="tab-dias">
+        <thead><tr><th>Dia</th><th class="num">Equipes</th><th class="num">OS</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>window.__PAYLOAD__ = {{ payload|tojson }};</script>
+<script src="{{ url_for('static', filename='js/produtividade.js') }}"></script>
+{% endblock %}
