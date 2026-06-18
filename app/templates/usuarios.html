@@ -24,10 +24,19 @@
     <div class="card-b tabela-wrap">
       {% if usuarios %}
       <table class="tbl">
-        <thead><tr><th>Nome</th><th>E-mail</th><th>Criado em</th></tr></thead>
+        <thead><tr><th>Nome</th><th>E-mail</th><th>Criado em</th><th>Redefinir senha</th></tr></thead>
         <tbody>
           {% for u in usuarios %}
-            <tr><td>{{ u.nome or '—' }}</td><td>{{ u.email }}</td><td>{{ (u.criado_em or '')[:10] }}</td></tr>
+            <tr>
+              <td>{{ u.nome or '—' }}</td><td>{{ u.email }}</td><td>{{ (u.criado_em or '')[:10] }}</td>
+              <td>
+                <form method="post" action="{{ url_for('auth.redefinir_senha_usuario') }}" style="display:flex;gap:6px;align-items:center;">
+                  <input type="hidden" name="email" value="{{ u.email }}">
+                  <input type="password" name="senha" placeholder="Nova senha" minlength="6" required style="padding:5px 8px;">
+                  <button class="btn-ghost" type="submit">Aplicar</button>
+                </form>
+              </td>
+            </tr>
           {% endfor %}
         </tbody>
       </table>

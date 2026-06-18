@@ -138,11 +138,23 @@ def trocar_senha():
     return render_template("configuracoes.html", usuario=usuario_atual())
 
 
-@bp.route("/recuperar", methods=["GET", "POST"])
-def recuperar_senha():
-    """Recuperação de senha por e-mail. (Envio de e-mail pendente de provedor —
-    ver tarefa de e-mail; por ora informa o usuário.)"""
-    if request.method == "POST":
-        flash("Em breve você receberá um e-mail com instruções, se a conta existir.", "ok")
-        return redirect(url_for("auth.login"))
-    return render_template("recuperar.html")
+@bp.route("/usuarios/senha", methods=["POST"])
+@admin_obrigatorio
+def redefinir_senha_usuario():
+    """Admin redefine a senha de qualquer usuário (não há recuperação por e-mail)."""
+    email = (request.form.get("email") or "").strip().lower()
+    nova = request.form.get("senha") or ""
+    if not email or len(nova) < 6:
+        flash("Informe o usuário e uma senha de ao menos 6 caracteres.", "erro")
+        return redirect(url_for("dash.usuarios"))
+    try:
+        alvo = supa.select_one("usuarios", {"email": f"eq.{email}", "select": "id"})
+        if not alvo:
+            flash("Usuário não encontrado.", "erro")
+            return redirect(url_for("dash.usuarios"))
+        supa.update("usuarios", {"email": email}, {"senha_hash": generate_password_hash(nova)})
+    except Exception as e:
+        flash(f"Erro ao redefinir senha: {e}", "erro")
+        return redirect(url_for("dash.usuarios"))
+    flash(f"Senha de {email} redefinida.", "ok")
+    return redirect(url_for("dash.usuarios"))
