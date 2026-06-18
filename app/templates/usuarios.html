@@ -2,24 +2,37 @@
 {% block title %}Usuários · Unetvale{% endblock %}
 {% block page_title %}Usuários{% endblock %}
 {% block content %}
-<p class="subnote">Todos os usuários têm o mesmo acesso e visualizam todos os dashboards.
-  Novos usuários se cadastram pela tela de <a href="{{ url_for('auth.cadastro') }}">cadastro</a>.</p>
-<div class="card">
-  <div class="card-h">Usuários cadastrados ({{ usuarios|length }})</div>
-  <div class="card-b tabela-wrap">
-    {% if usuarios %}
-    <table class="tbl">
-      <thead><tr><th>Nome</th><th>E-mail</th><th>Criado em</th></tr></thead>
-      <tbody>
-        {% for u in usuarios %}
-          <tr><td>{{ u.nome or '—' }}</td><td>{{ u.email }}</td>
-              <td>{{ (u.criado_em or '')[:10] }}</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-      <div class="vazio">Nenhum usuário ainda.</div>
-    {% endif %}
+<div class="grid" style="grid-template-columns:1fr;max-width:920px;gap:16px;">
+  <div class="card">
+    <div class="card-h">Novo usuário</div>
+    <div class="card-b">
+      <form method="post" action="{{ url_for('auth.criar_usuario') }}" class="toolbar" style="margin:0;align-items:flex-end;">
+        <label style="flex-direction:column;align-items:flex-start;gap:4px;">Nome
+          <input type="text" name="nome" placeholder="Nome do usuário"></label>
+        <label style="flex-direction:column;align-items:flex-start;gap:4px;">E-mail
+          <input type="email" name="email" required placeholder="email@unetvale.net"></label>
+        <label style="flex-direction:column;align-items:flex-start;gap:4px;">Senha inicial
+          <input type="password" name="senha" required minlength="6"></label>
+        <button class="btn" type="submit">Criar usuário</button>
+      </form>
+      <p class="subnote" style="margin:12px 0 0;">Apenas você (admin) pode criar usuários. Todos os criados visualizam todos os dashboards.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-h">Usuários cadastrados ({{ usuarios|length }})</div>
+    <div class="card-b tabela-wrap">
+      {% if usuarios %}
+      <table class="tbl">
+        <thead><tr><th>Nome</th><th>E-mail</th><th>Criado em</th></tr></thead>
+        <tbody>
+          {% for u in usuarios %}
+            <tr><td>{{ u.nome or '—' }}</td><td>{{ u.email }}</td><td>{{ (u.criado_em or '')[:10] }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}<div class="vazio">Nenhum usuário ainda.</div>{% endif %}
+    </div>
   </div>
 </div>
 {% endblock %}

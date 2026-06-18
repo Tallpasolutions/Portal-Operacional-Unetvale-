@@ -1,19 +1,35 @@
-"""Autenticação simples: login, cadastro e troca de senha.
+"""Autenticação. Apenas o ADMIN (e-mail em ADMIN_EMAIL) pode criar usuários e
+acessar Usuários/Configurações. Os demais só visualizam os dashboards e podem
+pedir recuperação de senha por e-mail. Sem cadastro público.
 
-Todos os usuários têm exatamente a mesma permissão (sem RBAC, sem perfis).
-Senhas guardadas com hash (werkzeug) na tabela `usuarios` do Supabase.
-Sessão via cookie assinado do Flask (stateless — funciona no serverless).
+Senhas com hash (werkzeug) na tabela `usuarios` do Supabase. Sessão via cookie
+assinado do Flask (stateless — funciona no serverless).
 """
 import functools
+import os
 
 from flask import (
-    Blueprint, redirect, render_template, request, session, url_for, flash
+    Blueprint, redirect, render_template, request, session, url_for, flash, abort
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from . import supa
 
 bp = Blueprint("auth", __name__)
+
+
+def _admin_email():
+    return (os.environ.get("ADMIN_EMAIL", "") or "").strip().lower()
+
+
+def usuario_atual():
+    email = session.get("email")
+    return {
+        "id": session.get("uid"),
+        "nome": session.get("nome"),
+        "email": email,
+        "is_admin": bool(email) and email == _admin_email(),
+    }
 
 
 def login_obrigatorio(view):
@@ -25,8 +41,15 @@ def login_obrigatorio(view):
     return wrapped
 
 
-def usuario_atual():
-    return {"id": session.get("uid"), "nome": session.get("nome"), "email": session.get("email")}
+def admin_obrigatorio(view):
+    @functools.wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("uid"):
+            return redirect(url_for("auth.login", next=request.path))
+        if (session.get("email") or "").lower() != _admin_email():
+            abort(403)
+        return view(*args, **kwargs)
+    return wrapped
 
 
 @bp.route("/login", methods=["GET", "POST"])
@@ -46,43 +69,9 @@ def login():
         session["uid"] = u["id"]
         session["nome"] = u.get("nome") or email.split("@")[0]
         session["email"] = u["email"]
-        destino = request.args.get("next") or url_for("dash.dashboard")
+        destino = request.args.get("next") or url_for("dash.produtividade")
         return redirect(destino)
     return render_template("login.html")
-
-
-@bp.route("/cadastro", methods=["GET", "POST"])
-def cadastro():
-    if request.method == "POST":
-        nome = (request.form.get("nome") or "").strip()
-        email = (request.form.get("email") or "").strip().lower()
-        senha = request.form.get("senha") or ""
-        senha2 = request.form.get("senha2") or ""
-        if not email or not senha:
-            flash("Preencha e-mail e senha.", "erro")
-            return render_template("cadastro.html")
-        if senha != senha2:
-            flash("As senhas não conferem.", "erro")
-            return render_template("cadastro.html")
-        if len(senha) < 6:
-            flash("A senha deve ter ao menos 6 caracteres.", "erro")
-            return render_template("cadastro.html")
-        try:
-            existe = supa.select_one("usuarios", {"email": f"eq.{email}", "select": "id"})
-            if existe:
-                flash("Já existe um usuário com este e-mail.", "erro")
-                return render_template("cadastro.html")
-            supa.insert("usuarios", {
-                "email": email,
-                "nome": nome or email.split("@")[0],
-                "senha_hash": generate_password_hash(senha),
-            })
-        except Exception as e:
-            flash(f"Erro ao cadastrar: {e}", "erro")
-            return render_template("cadastro.html")
-        flash("Conta criada! Faça login.", "ok")
-        return redirect(url_for("auth.login"))
-    return render_template("cadastro.html")
 
 
 @bp.route("/logout")
@@ -91,8 +80,38 @@ def logout():
     return redirect(url_for("auth.login"))
 
 
+@bp.route("/usuarios/criar", methods=["POST"])
+@admin_obrigatorio
+def criar_usuario():
+    """Cria um novo usuário (somente admin). Formulário fica na tela Usuários."""
+    nome = (request.form.get("nome") or "").strip()
+    email = (request.form.get("email") or "").strip().lower()
+    senha = request.form.get("senha") or ""
+    if not email or not senha:
+        flash("Preencha e-mail e senha.", "erro")
+        return redirect(url_for("dash.usuarios"))
+    if len(senha) < 6:
+        flash("A senha deve ter ao menos 6 caracteres.", "erro")
+        return redirect(url_for("dash.usuarios"))
+    try:
+        existe = supa.select_one("usuarios", {"email": f"eq.{email}", "select": "id"})
+        if existe:
+            flash("Já existe um usuário com este e-mail.", "erro")
+            return redirect(url_for("dash.usuarios"))
+        supa.insert("usuarios", {
+            "email": email,
+            "nome": nome or email.split("@")[0],
+            "senha_hash": generate_password_hash(senha),
+        })
+    except Exception as e:
+        flash(f"Erro ao criar usuário: {e}", "erro")
+        return redirect(url_for("dash.usuarios"))
+    flash(f"Usuário {email} criado.", "ok")
+    return redirect(url_for("dash.usuarios"))
+
+
 @bp.route("/senha", methods=["GET", "POST"])
-@login_obrigatorio
+@admin_obrigatorio
 def trocar_senha():
     if request.method == "POST":
         atual = request.form.get("atual") or ""
@@ -117,3 +136,13 @@ def trocar_senha():
         flash("Senha alterada com sucesso.", "ok")
         return redirect(url_for("dash.configuracoes"))
     return render_template("configuracoes.html", usuario=usuario_atual())
+
+
+@bp.route("/recuperar", methods=["GET", "POST"])
+def recuperar_senha():
+    """Recuperação de senha por e-mail. (Envio de e-mail pendente de provedor —
+    ver tarefa de e-mail; por ora informa o usuário.)"""
+    if request.method == "POST":
+        flash("Em breve você receberá um e-mail com instruções, se a conta existir.", "ok")
+        return redirect(url_for("auth.login"))
+    return render_template("recuperar.html")

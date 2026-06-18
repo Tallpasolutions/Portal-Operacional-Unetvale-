@@ -55,25 +55,54 @@
     const chartData = [...base].sort((a, b) => a.iqi - b.iqi || a.nome.localeCompare(b.nome, "pt"));
 
     const cores = chartData.map((d) => (selecionado && d.nome === selecionado) ? "#1f5fc0" : "#2c7be5");
+
+    // Plugin: desenha o valor % e as ESTRELAS de recorrência sobre cada barra
+    // (a barra já é a 1ª estrela; cada ★ acima = um mês consecutivo a mais).
+    const rotulosPlugin = {
+      id: "rotulosIqi",
+      afterDatasetsDraw(ch) {
+        const ctx = ch.ctx;
+        const meta = ch.getDatasetMeta(0);
+        ctx.save();
+        ctx.textAlign = "center";
+        meta.data.forEach((bar, i) => {
+          const d = chartData[i]; if (!d) return;
+          ctx.font = "600 10px -apple-system, Segoe UI, Roboto, Arial";
+          ctx.fillStyle = "#344050";
+          ctx.fillText(fmt(d.iqi), bar.x, bar.y - 6);
+          const extra = d.stars - 1;
+          if (extra > 0) {
+            const s = "★".repeat(extra);
+            ctx.font = "13px -apple-system, Segoe UI, Roboto, Arial";
+            ctx.lineJoin = "round"; ctx.lineWidth = 3; ctx.strokeStyle = "#fff";
+            ctx.strokeText(s, bar.x, bar.y - 19);
+            ctx.fillStyle = "#e5a000";
+            ctx.fillText(s, bar.x, bar.y - 19);
+          }
+        });
+        ctx.restore();
+      },
+    };
+
     if (chart) chart.destroy();
     chart = new Chart(document.getElementById("g-iqi"), {
       type: "bar",
       data: {
         labels: chartData.map((d) => d.curto),
         datasets: [
-          { label: IND + " %", data: chartData.map((d) => d.iqi), backgroundColor: cores, order: 2 },
+          { label: IND + " %", data: chartData.map((d) => d.iqi), backgroundColor: cores, order: 2, maxBarThickness: 38 },
           { label: "Meta", type: "line", data: chartData.map(() => META), borderColor: "#e63757",
             borderWidth: 1.4, borderDash: [6, 4], pointRadius: 0, order: 1 },
         ],
       },
       options: {
-        responsive: true, maintainAspectRatio: false,
+        layout: { padding: { top: 30 } },
         plugins: {
           legend: { display: false },
           tooltip: { callbacks: { label: (c) => {
             if (c.datasetIndex === 1) return "Meta: " + fmtMeta(META);
             const d = chartData[c.dataIndex];
-            return [`${d.nome}`, `${IND}: ${fmt(d.iqi)} | OSs: ${d.os} | c/ chamado: ${d.cham} | recorrência: ${d.stars}`];
+            return [`${d.nome}`, `${IND}: ${fmt(d.iqi)} | OSs: ${d.os} | c/ chamado: ${d.cham} | recorrência: ${d.stars} ${d.stars > 1 ? "meses" : "mês"}`];
           } } },
         },
         scales: { y: { beginAtZero: true, ticks: { callback: (v) => v + "%" } } },
@@ -85,8 +114,32 @@
           desenhar();
         },
       },
+      plugins: [rotulosPlugin],
     });
     renderTabela(dadosTabela);
+  }
+
+  // Exporta o gráfico como PNG nítido (cabeçalho + todos os dados) p/ apresentação.
+  function exportarImagem() {
+    if (!chart) return;
+    const dpr = Math.max(window.devicePixelRatio || 1, 2);
+    const cssW = chart.width, cssH = chart.height, headH = 56;
+    const out = document.createElement("canvas");
+    out.width = cssW * dpr; out.height = (cssH + headH) * dpr;
+    const ctx = out.getContext("2d");
+    ctx.scale(dpr, dpr);
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, cssW, cssH + headH);
+    const mesTxt = document.getElementById("mes").selectedOptions[0].textContent;
+    ctx.textAlign = "left"; ctx.fillStyle = "#13243f";
+    ctx.font = "700 18px -apple-system, Segoe UI, Roboto, Arial";
+    ctx.fillText(`${IND} — ${mesTxt} — Meta < ${fmtMeta(META)}`, 16, 26);
+    ctx.fillStyle = "#5e6e82"; ctx.font = "12px -apple-system, Segoe UI, Roboto, Arial";
+    ctx.fillText(`Equipes na meta: ${document.getElementById("qtd").textContent}  ·  ★ = meses consecutivos batendo a meta`, 16, 45);
+    ctx.drawImage(chart.canvas, 0, headH, cssW, cssH);
+    const a = document.createElement("a");
+    a.href = out.toDataURL("image/png");
+    a.download = `${IND}_${mesTxt.replace("/", "-")}.png`;
+    a.click();
   }
 
   function renderChips() {
@@ -132,6 +185,7 @@
   document.querySelectorAll("#tab-iqi thead th").forEach((th) => th.addEventListener("click", () => {
     const k = th.dataset.key; if (tableSort.key === k) tableSort.dir *= -1; else { tableSort.key = k; tableSort.dir = 1; } desenhar();
   }));
+  document.getElementById("btn-export-iqi").addEventListener("click", exportarImagem);
 
   aplicar(PACOTE[inds[0]]);
 })();

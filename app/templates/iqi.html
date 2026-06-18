@@ -16,7 +16,13 @@
 <div class="chips" id="chips-iqi"></div>
 
 <div class="card" style="margin-bottom:16px;">
-  <div class="card-h"><span id="tituloGrafico">IQI</span> por técnico (crescente) — <span style="color:var(--vermelho);">linha = meta</span></div>
+  <div class="card-h">
+    <span><span id="tituloGrafico">IQI</span> por técnico (crescente) — <span style="color:var(--danger);">linha = meta</span> · <span class="estrela">★</span> = meses consecutivos na meta</span>
+    <button class="btn-ghost" id="btn-export-iqi" title="Exportar imagem nítida do gráfico (para apresentação)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Exportar imagem
+    </button>
+  </div>
   <div class="card-b"><div class="chart-box tall"><canvas id="g-iqi"></canvas></div></div>
 </div>
 

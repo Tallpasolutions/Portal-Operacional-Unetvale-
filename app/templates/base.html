@@ -6,6 +6,7 @@
   <title>{% block title %}Portal Operacional Unetvale{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   <script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/chart-setup.js') }}"></script>
 </head>
 <body>
   <div class="layout" id="layout">
@@ -16,20 +17,33 @@
         <span class="brand-text">unetvale</span>
       </div>
       <nav class="menu">
-        <a href="{{ url_for('dash.dashboard') }}" class="{{ 'on' if ativo=='dashboard' }}"><span class="ic">▦</span><span>Dashboard</span></a>
-        <a href="{{ url_for('dash.produtividade') }}" class="{{ 'on' if ativo=='produtividade' }}"><span class="ic">📈</span><span>Produtividade</span></a>
-        <a href="{{ url_for('dash.iqi') }}" class="{{ 'on' if ativo=='iqi' }}"><span class="ic">★</span><span>IQI / IQM</span></a>
-        <a href="{{ url_for('dash.massivas') }}" class="{{ 'on' if ativo=='massivas' }}"><span class="ic">⚡</span><span>Massivas</span></a>
+        <a href="{{ url_for('dash.produtividade') }}" class="{{ 'on' if ativo=='produtividade' }}">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          <span>Produtividade</span></a>
+        <a href="{{ url_for('dash.iqi') }}" class="{{ 'on' if ativo=='iqi' }}">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="6"/><path d="M15.477 12.89 17 22l-5-3-5 3 1.523-9.11"/></svg>
+          <span>IQI / IQM</span></a>
+        <a href="{{ url_for('dash.massivas') }}" class="{{ 'on' if ativo=='massivas' }}">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          <span>Massivas</span></a>
+        {% if usuario.is_admin %}
         <div class="menu-sep"></div>
-        <a href="{{ url_for('dash.usuarios') }}" class="{{ 'on' if ativo=='usuarios' }}"><span class="ic">👥</span><span>Usuários</span></a>
-        <a href="{{ url_for('dash.configuracoes') }}" class="{{ 'on' if ativo=='configuracoes' }}"><span class="ic">⚙</span><span>Configurações</span></a>
+        <a href="{{ url_for('dash.usuarios') }}" class="{{ 'on' if ativo=='usuarios' }}">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <span>Usuários</span></a>
+        <a href="{{ url_for('dash.configuracoes') }}" class="{{ 'on' if ativo=='configuracoes' }}">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span>Configurações</span></a>
+        {% endif %}
       </nav>
     </aside>
 
     <!-- ===== Conteúdo ===== -->
     <div class="main">
       <header class="topbar">
-        <button class="hamburguer" id="toggle-menu" aria-label="Menu">☰</button>
+        <button class="hamburguer" id="toggle-menu" aria-label="Menu">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
         <div class="page-title">{% block page_title %}{% endblock %}</div>
         <div class="topbar-right">
           <div class="upd" title="Atualização automática às {{ status_upd.horarios|join(', ') }}h">
@@ -40,14 +54,19 @@
             {% else %}
               <span class="dot dot-green"></span><span>Atualizado</span>
             {% endif %}
-            <span class="upd-sep">·</span>
-            <span>Última: <b>{{ status_upd.ultima }}</b></span>
-            <span class="upd-sep">·</span>
-            <span>Próxima: <b>{{ status_upd.proxima }}</b></span>
+            <span class="upd-sep">·</span><span>Última: <b>{{ status_upd.ultima }}</b></span>
+            <span class="upd-sep">·</span><span>Próxima: <b>{{ status_upd.proxima }}</b></span>
           </div>
           <div class="user">
             <span class="user-name">{{ usuario.nome or 'usuário' }}</span>
-            <a class="logout" href="{{ url_for('auth.logout') }}" title="Sair">⏻</a>
+            {% if not usuario.is_admin %}
+            <a class="icon-btn" href="{{ url_for('auth.recuperar_senha') }}" title="Recuperar senha por e-mail">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            </a>
+            {% endif %}
+            <a class="icon-btn" href="{{ url_for('auth.logout') }}" title="Sair">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            </a>
           </div>
         </div>
       </header>

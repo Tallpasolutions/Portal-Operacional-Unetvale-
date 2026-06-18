@@ -8,6 +8,13 @@
   <div class="vazio">Sem dados de produtividade ainda. A próxima coleta automática preencherá este painel.</div>
 {% else %}
 <div class="toolbar">
+  <label>Equipe
+    <span class="toggle" id="f-grupo">
+      <button data-g="todos" class="active">Todas</button>
+      <button data-g="infra">Infra</button>
+      <button data-g="operacional">Operacional</button>
+    </span>
+  </label>
   <label>Empresa <select id="f-empresa"></select></label>
   <label>Técnico <select id="f-tecnico"></select></label>
   <label>Mês <select id="f-mes"></select></label>
@@ -18,11 +25,20 @@
 
 <div class="kpis" id="kpis"></div>
 
+<!-- Gráfico principal (barras + linha) sozinho no contêiner para boa leitura -->
+<div class="card" style="margin-bottom:16px;">
+  <div class="card-h">OS encerradas + equipes por dia</div>
+  <div class="card-b"><div class="chart-box full"><canvas id="g-dia"></canvas></div></div>
+</div>
+
 <div class="grid charts-2" style="margin-bottom:16px;">
-  <div class="card"><div class="card-h">OS encerradas + equipes por dia</div><div class="card-b"><div class="chart-box"><canvas id="g-dia"></canvas></div></div></div>
-  <div class="card"><div class="card-h">OS por empresa</div><div class="card-b"><div class="chart-box"><canvas id="g-empresa"></canvas></div></div></div>
-  <div class="card"><div class="card-h">Top técnicos por OS</div><div class="card-b"><div class="chart-box"><canvas id="g-tecnico"></canvas></div></div></div>
-  <div class="card"><div class="card-h">Dias em atuação por técnico</div><div class="card-b"><div class="chart-box"><canvas id="g-dias"></canvas></div></div></div>
+  <div class="card"><div class="card-h">Top técnicos por OS</div><div class="card-b"><div class="chart-box tall"><canvas id="g-tecnico"></canvas></div></div></div>
+  <div class="card"><div class="card-h">Dias em atuação por técnico</div><div class="card-b"><div class="chart-box tall"><canvas id="g-dias"></canvas></div></div></div>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+  <div class="card-h">OS por empresa</div>
+  <div class="card-b"><div class="chart-box"><canvas id="g-empresa"></canvas></div></div>
 </div>
 
 <div class="grid charts-2">

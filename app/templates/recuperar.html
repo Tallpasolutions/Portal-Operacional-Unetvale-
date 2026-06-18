@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Entrar · Portal Operacional Unetvale</title>
+  <title>Recuperar senha · Portal Operacional Unetvale</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
@@ -11,24 +11,20 @@
     <div class="auth-card">
       <div class="auth-brand">
         <img class="brand-logo" src="{{ url_for('static', filename='img/unetvale-mark.png') }}" alt="Unetvale">
-        <span class="t">Portal Operacional</span>
+        <span class="t">Recuperar senha</span>
       </div>
-      <h1>Entrar na sua conta</h1>
+      <h1>Informe seu e-mail</h1>
       {% with msgs = get_flashed_messages(with_categories=true) %}
         {% for cat, msg in msgs %}<div class="alert alert-{{ cat }}">{{ msg }}</div>{% endfor %}
       {% endwith %}
       <form method="post">
         <div class="field">
-          <label>E-mail</label>
+          <label>E-mail da conta</label>
           <input type="email" name="email" required autofocus autocomplete="username">
         </div>
-        <div class="field">
-          <label>Senha</label>
-          <input type="password" name="senha" required autocomplete="current-password">
-        </div>
-        <button class="btn" type="submit">Entrar</button>
+        <button class="btn" type="submit">Enviar link de recuperação</button>
       </form>
-      <div class="auth-foot"><a href="{{ url_for('auth.recuperar_senha') }}">Esqueci minha senha</a></div>
+      <div class="auth-foot"><a href="{{ url_for('auth.login') }}">Voltar ao login</a></div>
     </div>
   </div>
 </body>

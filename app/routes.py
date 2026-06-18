@@ -8,7 +8,7 @@ import os
 from flask import Blueprint, render_template, jsonify, request, abort
 
 from . import supa, dados
-from .auth import login_obrigatorio, usuario_atual
+from .auth import login_obrigatorio, admin_obrigatorio, usuario_atual
 
 bp = Blueprint("dash", __name__)
 
@@ -25,8 +25,10 @@ def injeta_status():
 
 @bp.route("/")
 @login_obrigatorio
-def dashboard():
-    return render_template("dashboard.html", ativo="dashboard", modulos=dados.get_todos())
+def home():
+    # Sem tela inicial: cai direto na Produtividade.
+    from flask import redirect, url_for
+    return redirect(url_for("dash.produtividade"))
 
 
 @bp.route("/produtividade")
@@ -62,7 +64,7 @@ def massivas():
 
 
 @bp.route("/usuarios")
-@login_obrigatorio
+@admin_obrigatorio
 def usuarios():
     try:
         lista = supa.select("usuarios", {"select": "nome,email,criado_em", "order": "criado_em.asc"})
@@ -72,7 +74,7 @@ def usuarios():
 
 
 @bp.route("/configuracoes")
-@login_obrigatorio
+@admin_obrigatorio
 def configuracoes():
     return render_template("configuracoes.html", ativo="configuracoes", usuario=usuario_atual())
 

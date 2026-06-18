@@ -6,6 +6,8 @@
 
   let REGISTROS = [];
   const filtros = { e: new Set(), t: new Set(), mes: new Set(), semana: new Set(), d: new Set() };
+  let grupo = "todos"; // todos | infra | operacional (equipes com "INFRA" no nome = infra)
+  const ehInfra = (r) => /infra/i.test(r.e);
   const NOMES_DIM = { e: "Empresa", t: "Técnico", mes: "Mês", semana: "Semana", d: "Dia" };
   let ordenacaoTec = { col: "os", dir: -1 };
   let charts = {};
@@ -61,7 +63,8 @@
   }
 
   function passa(r) {
-    return (filtros.e.size === 0 || filtros.e.has(r.e)) &&
+    return (grupo === "todos" || ehInfra(r) === (grupo === "infra")) &&
+      (filtros.e.size === 0 || filtros.e.has(r.e)) &&
       (filtros.t.size === 0 || filtros.t.has(r.t)) &&
       (filtros.mes.size === 0 || filtros.mes.has(r.mes)) &&
       (filtros.semana.size === 0 || filtros.semana.has(r.semana)) &&
@@ -203,7 +206,19 @@
   document.getElementById("f-tecnico").addEventListener("change", (e) => definir("t", e.target.value));
   document.getElementById("f-mes").addEventListener("change", (e) => definir("mes", e.target.value));
   document.getElementById("f-semana").addEventListener("change", (e) => definir("semana", e.target.value));
-  document.getElementById("btn-limpar").addEventListener("click", () => { Object.values(filtros).forEach((s) => s.clear()); sincronizarSelects(); renderTudo(); });
+  // Segmentado Infra / Operacional
+  document.querySelectorAll("#f-grupo button").forEach((b) => b.addEventListener("click", () => {
+    document.querySelectorAll("#f-grupo button").forEach((x) => x.classList.toggle("active", x === b));
+    grupo = b.dataset.g;
+    filtros.e.clear(); filtros.t.clear();  // evita conflito empresa/técnico ao trocar de grupo
+    sincronizarSelects(); renderTudo();
+  }));
+  document.getElementById("btn-limpar").addEventListener("click", () => {
+    Object.values(filtros).forEach((s) => s.clear());
+    grupo = "todos";
+    document.querySelectorAll("#f-grupo button").forEach((x) => x.classList.toggle("active", x.dataset.g === "todos"));
+    sincronizarSelects(); renderTudo();
+  });
   document.getElementById("busca-tec").addEventListener("input", () => renderTabelaTecnicos(filtrados()));
   document.querySelectorAll("#tab-tecnicos th").forEach((th) => th.addEventListener("click", () => {
     const col = th.dataset.col; ordenacaoTec.dir = ordenacaoTec.col === col ? -ordenacaoTec.dir : -1; ordenacaoTec.col = col; renderTabelaTecnicos(filtrados());
