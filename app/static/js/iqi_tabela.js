@@ -14,11 +14,8 @@
     "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
   const inds = Object.keys(PACOTE);
   let indAtual = inds[0];
-  let grupo = "todas"; // todas | infra | operacional
 
-  // mesma regra do filtro de Produtividade
-  const EXTRA_INFRA = /fandaruff/i;
-  const ehInfra = (nome) => /\binfra\b/i.test(nome) || EXTRA_INFRA.test(nome);
+  // Infra não participa do IQI/IQM — o backend já entrega só operacional.
   const empresaDe = (nome) => (nome.includes(" - ") ? nome.split(" - ")[0].trim() : "(Sem equipe)");
   const fmtPct = (v) => (v || 0).toFixed(2).replace(".", ",") + "%";
 
@@ -42,12 +39,9 @@
   const empresasDisponiveis = () => [...new Set(dados().tecnicos.map((t) => empresaDe(t.nome)))].sort();
 
   function tecnicosFiltrados() {
-    return dados().tecnicos.filter((t) => {
-      if (empresasSel.size && !empresasSel.has(empresaDe(t.nome))) return false;
-      if (grupo === "infra" && !ehInfra(t.nome)) return false;
-      if (grupo === "operacional" && ehInfra(t.nome)) return false;
-      return true;
-    }).sort((a, b) => a.nome.localeCompare(b.nome, "pt"));
+    return dados().tecnicos
+      .filter((t) => !empresasSel.size || empresasSel.has(empresaDe(t.nome)))
+      .sort((a, b) => a.nome.localeCompare(b.nome, "pt"));
   }
 
   function mesesExibidos() {
@@ -57,7 +51,6 @@
 
   function renderFiltros() {
     document.querySelectorAll(".tm-ind-nome").forEach((e) => (e.textContent = dados().label || indAtual));
-    document.querySelectorAll("#tm-grupo button").forEach((b) => b.classList.toggle("active", b.dataset.g === grupo));
 
     const empBox = document.getElementById("tm-empresas");
     empBox.innerHTML = empresasDisponiveis().map((e) =>
@@ -114,11 +107,6 @@
     }
     document.getElementById("tab-mensal").innerHTML = `<thead><tr>${h1}</tr><tr>${h2}</tr></thead><tbody>${body}</tbody>`;
   }
-
-  // Equipe (Infra/Operacional)
-  document.querySelectorAll("#tm-grupo button").forEach((b) => b.addEventListener("click", () => {
-    grupo = b.dataset.g; renderFiltros(); renderTabela();
-  }));
 
   // Segue o indicador do seletor compartilhado (#indToggle do iqi.js), sem alterá-lo.
   document.getElementById("indToggle").addEventListener("click", (e) => {

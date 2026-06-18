@@ -4,6 +4,7 @@ Cada página de módulo injeta o payload (JSON vindo do Supabase) no template;
 o cross-filter e os gráficos rodam no cliente (sem round-trip por clique).
 """
 import os
+import re
 
 from flask import Blueprint, render_template, jsonify, request, abort
 
@@ -40,6 +41,18 @@ def produtividade():
                            meta=_meta(row))
 
 
+# Equipes de infraestrutura NÃO participam do IQI/IQM (só time operacional).
+_INFRA = re.compile(r"\binfra\b|fandaruff", re.I)
+
+
+def _so_operacional(payload):
+    if not payload or "tecnicos" not in payload:
+        return payload
+    p = dict(payload)
+    p["tecnicos"] = [t for t in payload["tecnicos"] if not _INFRA.search(t.get("nome", ""))]
+    return p
+
+
 @bp.route("/iqi")
 @login_obrigatorio
 def iqi():
@@ -47,9 +60,9 @@ def iqi():
     iqm_row = dados.get_modulo("iqm")
     pacote = {}
     if iqi_row and iqi_row.get("payload"):
-        pacote["IQI"] = iqi_row["payload"]
+        pacote["IQI"] = _so_operacional(iqi_row["payload"])
     if iqm_row and iqm_row.get("payload"):
-        pacote["IQM"] = iqm_row["payload"]
+        pacote["IQM"] = _so_operacional(iqm_row["payload"])
     return render_template("iqi.html", ativo="iqi", pacote=pacote,
                            meta=_meta(iqi_row or iqm_row))
 
