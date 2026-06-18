@@ -28,8 +28,9 @@ body.collapsed .brand-text, body.collapsed .menu a span:not(.ic){ display:none; 
 
 .brand{ display:flex; align-items:center; gap:10px; height:var(--top-h); padding:0 16px;
   background:rgba(255,255,255,.10); border-bottom:1px solid rgba(255,255,255,.15); }
-.brand-logo{ height:30px; width:auto; flex-shrink:0; filter:brightness(0) invert(1); }
-.brand-text{ font-weight:700; font-size:17px; letter-spacing:.2px; color:#fff; white-space:nowrap; }
+.brand-logo{ height:30px; width:auto; flex-shrink:0; }
+.sidebar .brand-logo{ filter:brightness(0) invert(1); }  /* U branco só na sidebar (fundo azul) */
+.brand-text{ font-weight:700; font-size:14.5px; letter-spacing:.2px; color:#fff; white-space:nowrap; }
 
 .menu{ padding:14px 10px; display:flex; flex-direction:column; gap:3px; }
 .menu a{ display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:9px; color:#eaf3fe;
@@ -123,7 +124,10 @@ table.tbl tr.total td{ font-weight:800; background:var(--fundo); }
 .auth{ min-height:100vh; display:grid; place-items:center; background:linear-gradient(135deg,var(--navy),var(--brand)); padding:20px; }
 .auth-card{ background:#fff; border-radius:16px; box-shadow:0 12px 40px rgba(11,23,39,.25); width:100%; max-width:380px; padding:34px 30px; }
 .auth-brand{ display:flex; align-items:center; gap:12px; justify-content:center; margin-bottom:22px; }
-.auth-brand .brand-logo{ height:42px; }
+.auth-brand .logo-badge{ width:52px; height:52px; border-radius:14px; flex-shrink:0;
+  background:linear-gradient(180deg,#2f86f0,#1f5fc0); display:grid; place-items:center;
+  box-shadow:0 6px 16px rgba(31,95,192,.35); }
+.auth-brand .logo-badge .brand-logo{ height:32px; filter:brightness(0) invert(1); }  /* U branco no selo */
 .auth-brand .brand-mark{ width:42px; height:42px; font-size:22px; }
 .auth-brand .t{ font-size:19px; font-weight:800; color:var(--ink-d); }
 .auth h1{ font-size:16px; text-align:center; color:var(--muted); font-weight:600; margin:0 0 20px; }

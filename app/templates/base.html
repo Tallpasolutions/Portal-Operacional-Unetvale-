@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Portal Operacional Unetvale{% endblock %}</title>
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/unetvale-mark.png') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   <script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
   <script src="{{ url_for('static', filename='js/chart-setup.js') }}"></script>
@@ -14,7 +15,7 @@
     <aside class="sidebar" id="sidebar">
       <div class="brand">
         <img class="brand-logo" src="{{ url_for('static', filename='img/unetvale-mark.png') }}" alt="Unetvale">
-        <span class="brand-text">unetvale</span>
+        <span class="brand-text">Dashboard Unetvale</span>
       </div>
       <nav class="menu">
         <a href="{{ url_for('dash.produtividade') }}" class="{{ 'on' if ativo=='produtividade' }}">
