@@ -78,6 +78,7 @@
     const d = dados();
     const idxMes = meses.map((m) => d.meses.indexOf(m));
     const pctLabel = (d.label || indAtual) + " %";
+    const META = d.meta, MINOS = d.minOS;
 
     let h1 = `<th class="sticky-col" rowspan="2">Técnicos</th>`;
     let h2 = "";
@@ -95,9 +96,11 @@
         const reg = t.m[i] || [0, 0, 0];
         const cls = mesFechado(meses[k]) ? "" : " parcial-cell";
         if (reg[0] > 0) {
-          row += `<td class="num${cls}">${reg[0]}</td><td class="num${cls}">${reg[1]}</td><td class="num${cls}">${fmtPct(reg[2])}</td>`;
+          // % colorido: verde dentro da meta, vermelho fora, cinza se poucas OSs
+          const pctCls = reg[0] > MINOS ? (reg[2] < META ? "meta-ok" : "meta-fora") : "meta-neutro";
+          row += `<td class="num${cls}">${reg[0]}</td><td class="num${cls}">${reg[1]}</td><td class="num ${pctCls}">${fmtPct(reg[2])}</td>`;
         } else {
-          row += `<td class="num${cls}"></td><td class="num${cls}"></td><td class="num${cls}"></td>`;
+          row += `<td class="num vazio-cel">—</td>`.repeat(3); // sem OS no mês
         }
       });
       body += `<tr>${row}</tr>`;
