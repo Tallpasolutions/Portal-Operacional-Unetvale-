@@ -5,40 +5,78 @@
 {% if not pacote %}
   <div class="vazio">Sem dados de IQI/IQM ainda. A próxima coleta automática preencherá este painel.</div>
 {% else %}
-<p class="subnote" id="sub"></p>
-<div class="toolbar">
-  <label>Indicador <span class="toggle" id="indToggle"></span></label>
-  <label>Mês de referência <select id="mes"></select></label>
-  <label>Meta (%) <input type="number" id="metaInput" step="0.5" min="0" style="width:90px;"></label>
-  <div class="kpi" style="padding:8px 14px;"><span class="l">Equipes na meta</span> <b class="v" id="qtd" style="font-size:18px;">0</b></div>
-  <div class="kpi" style="padding:8px 14px;"><span class="l">Maior recorrência</span> <b class="v" id="rec" style="font-size:18px;">0</b> <span class="estrela">★</span></div>
-</div>
-<div class="chips" id="chips-iqi"></div>
 
-<div class="card" style="margin-bottom:16px;">
-  <div class="card-h">
-    <span><span id="tituloGrafico">IQI</span> por técnico (crescente) — <span style="color:var(--danger);">linha = meta</span> · <span class="estrela">★</span> = meses consecutivos na meta</span>
-    <button class="btn-ghost" id="btn-export-iqi" title="Exportar imagem nítida do gráfico (para apresentação)">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-      Exportar imagem
-    </button>
+<!-- Barra compartilhada: alterna a visualização + indicador (controla as duas telas) -->
+<div class="view-bar">
+  <span class="view-switch" id="view-switch">
+    <button data-view="grafico" class="active">Gráfico</button>
+    <button data-view="tabela">Tabela mensal</button>
+  </span>
+  <label class="ind-label">Indicador <span class="toggle" id="indToggle"></span></label>
+</div>
+
+<!-- ===== Visualização 1: gráfico (existente, intacta) ===== -->
+<div id="view-grafico">
+  <p class="subnote" id="sub"></p>
+  <div class="toolbar">
+    <label>Mês de referência <select id="mes"></select></label>
+    <label>Meta (%) <input type="number" id="metaInput" step="0.5" min="0" style="width:90px;"></label>
+    <div class="kpi" style="padding:8px 14px;"><span class="l">Equipes na meta</span> <b class="v" id="qtd" style="font-size:18px;">0</b></div>
+    <div class="kpi" style="padding:8px 14px;"><span class="l">Maior recorrência</span> <b class="v" id="rec" style="font-size:18px;">0</b> <span class="estrela">★</span></div>
   </div>
-  <div class="card-b"><div class="chart-box tall"><canvas id="g-iqi"></canvas></div></div>
+  <div class="chips" id="chips-iqi"></div>
+
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-h">
+      <span><span id="tituloGrafico">IQI</span> por técnico (crescente) — <span style="color:var(--danger);">linha = meta</span> · <span class="estrela">★</span> = meses consecutivos na meta</span>
+      <button class="btn-ghost" id="btn-export-iqi" title="Exportar imagem nítida do gráfico (para apresentação)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Exportar imagem
+      </button>
+    </div>
+    <div class="card-b"><div class="chart-box tall"><canvas id="g-iqi"></canvas></div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-h">Técnicos dentro da meta</div>
+    <div class="card-b tabela-wrap">
+      <table class="tbl" id="tab-iqi">
+        <thead><tr>
+          <th data-key="nome">Técnico</th>
+          <th class="num" data-key="iqi"><span class="colInd">IQI</span> %</th>
+          <th class="num" data-key="os">OSs</th>
+          <th class="num" data-key="cham">OSs c/ chamado</th>
+          <th class="num" data-key="stars">Recorrência</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
-<div class="card">
-  <div class="card-h">Técnicos dentro da meta</div>
-  <div class="card-b tabela-wrap">
-    <table class="tbl" id="tab-iqi">
-      <thead><tr>
-        <th data-key="nome">Técnico</th>
-        <th class="num" data-key="iqi"><span class="colInd">IQI</span> %</th>
-        <th class="num" data-key="os">OSs</th>
-        <th class="num" data-key="cham">OSs c/ chamado</th>
-        <th class="num" data-key="stars">Recorrência</th>
-      </tr></thead>
-      <tbody></tbody>
-    </table>
+<!-- ===== Visualização 2: tabela mensal estilo planilha (nova) ===== -->
+<div id="view-tabela" hidden>
+  <div class="toolbar">
+    <label>Equipe
+      <span class="toggle" id="tm-grupo">
+        <button data-g="todas" class="active">Todas</button>
+        <button data-g="infra">Infra</button>
+        <button data-g="operacional">Operacional</button>
+      </span>
+    </label>
+  </div>
+  <div class="filtros-multi">
+    <div class="fm-bloco"><span class="fm-label">Empresa</span><div class="fchips" id="tm-empresas"></div></div>
+    <div class="fm-bloco"><span class="fm-label">Período</span><div class="fchips" id="tm-periodo"></div></div>
+  </div>
+  <div class="card">
+    <div class="card-h">
+      <span><span class="tm-ind-nome">IQI</span> mensal por técnico</span>
+      <span class="subnote" style="margin:0;font-weight:500;"><span class="tag-parcial">Parcial</span> = mês ainda em auditoria (até 30 dias após o fechamento)</span>
+    </div>
+    <div class="card-b tabela-wrap">
+      <table class="tbl tbl-mensal" id="tab-mensal"></table>
+    </div>
   </div>
 </div>
 {% endif %}
@@ -47,4 +85,5 @@
 {% block scripts %}
 <script>window.__PACOTE__ = {{ pacote|tojson }};</script>
 <script src="{{ url_for('static', filename='js/iqi.js') }}"></script>
+<script src="{{ url_for('static', filename='js/iqi_tabela.js') }}"></script>
 {% endblock %}
