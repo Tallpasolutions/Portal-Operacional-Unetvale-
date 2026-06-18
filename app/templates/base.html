@@ -10,6 +10,7 @@
   <script src="{{ url_for('static', filename='js/chart-setup.js') }}"></script>
 </head>
 <body>
+  <script>try{ if((localStorage.getItem('sidebar')||'collapsed')==='collapsed'){ document.body.classList.add('collapsed'); } }catch(e){}</script>
   <div class="layout" id="layout">
     <!-- ===== Sidebar ===== -->
     <aside class="sidebar" id="sidebar">

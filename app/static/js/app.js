@@ -4,7 +4,9 @@
   if (!btn) return;
   const ehMobile = () => window.matchMedia("(max-width:820px)").matches;
   btn.addEventListener("click", () => {
-    document.body.classList.toggle(ehMobile() ? "menu-open" : "collapsed");
+    if (ehMobile()) { document.body.classList.toggle("menu-open"); return; }
+    const recolhido = document.body.classList.toggle("collapsed");
+    try { localStorage.setItem("sidebar", recolhido ? "collapsed" : "expanded"); } catch (e) {}
   });
   // fecha o menu ao clicar fora (mobile)
   document.addEventListener("click", (e) => {
