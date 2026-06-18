@@ -145,3 +145,6 @@ table.tbl tr.total td{ font-weight:800; background:var(--fundo); }
   .upd{ display:none; }
 }
 .subnote{ font-size:12.5px; color:var(--muted); margin:-6px 0 16px; }
+.secao{ font-size:14px; font-weight:800; color:var(--ink-d); margin:24px 0 12px; padding-bottom:8px;
+  border-bottom:2px solid var(--brand-l); letter-spacing:.2px; }
+.btn.sec.on{ background:var(--brand); color:#fff; border-color:var(--brand); }

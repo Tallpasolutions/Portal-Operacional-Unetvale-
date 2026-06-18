@@ -19,6 +19,7 @@
   <label>Técnico <select id="f-tecnico"></select></label>
   <label>Mês <select id="f-mes"></select></label>
   <label>Semana <select id="f-semana"></select></label>
+  <button class="btn sec" id="btn-rej">Só rejeitadas</button>
   <button class="btn sec" id="btn-limpar">Limpar filtros</button>
 </div>
 <div class="chips" id="chips"></div>
@@ -39,6 +40,16 @@
 <div class="card" style="margin-bottom:16px;">
   <div class="card-h">OS por empresa</div>
   <div class="card-b"><div class="chart-box"><canvas id="g-empresa"></canvas></div></div>
+</div>
+
+<h3 class="secao">Qualidade &amp; Tipos de OS</h3>
+<div class="card" style="margin-bottom:16px;">
+  <div class="card-h">Tipos de OS (finalidade)</div>
+  <div class="card-b"><div class="chart-box tall"><canvas id="g-finalidade"></canvas></div></div>
+</div>
+<div class="grid charts-2" style="margin-bottom:16px;">
+  <div class="card"><div class="card-h">Motivos de não-conclusão</div><div class="card-b"><div class="chart-box tall"><canvas id="g-motivo"></canvas></div></div></div>
+  <div class="card"><div class="card-h">Interno × Externo</div><div class="card-b"><div class="chart-box"><canvas id="g-tipoatend"></canvas></div></div></div>
 </div>
 
 <div class="grid charts-2">

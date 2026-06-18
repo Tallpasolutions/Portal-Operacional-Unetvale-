@@ -5,14 +5,17 @@
   if (!document.getElementById("kpis")) return; // estado vazio
 
   let REGISTROS = [];
-  const filtros = { e: new Set(), t: new Set(), mes: new Set(), semana: new Set(), d: new Set() };
+  let FIN = [], MOT = []; // dicionários: finalidade e motivo (índices nos registros)
+  const filtros = { e: new Set(), t: new Set(), mes: new Set(), semana: new Set(), d: new Set(),
+    fin: new Set(), mo: new Set(), ta: new Set(), rj: new Set() };
   let grupo = "todos"; // todos | infra | operacional
   // Infra = "INFRA" como palavra isolada (INFRA UNET/WAVE/SCHISTEL) + exceções por
   // nome (ex.: FANDARUFF). NÃO conta INFRASEG (operacional). Adicione novas equipes
   // infra sem "INFRA" no nome ao regex EXTRA_INFRA abaixo.
   const EXTRA_INFRA = /fandaruff/i;
   const ehInfra = (r) => /\binfra\b/i.test(r.e) || EXTRA_INFRA.test(r.e);
-  const NOMES_DIM = { e: "Empresa", t: "Técnico", mes: "Mês", semana: "Semana", d: "Dia" };
+  const NOMES_DIM = { e: "Empresa", t: "Técnico", mes: "Mês", semana: "Semana", d: "Dia",
+    fin: "Tipo de OS", mo: "Motivo", ta: "Atendimento", rj: "Rejeitada" };
   let ordenacaoTec = { col: "os", dir: -1 };
   let charts = {};
   const MESES_PT = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
@@ -47,6 +50,7 @@
 
   function carregar() {
     const j = window.__PAYLOAD__ || { registros: [] };
+    FIN = j.fin || []; MOT = j.mot || [];
     REGISTROS = j.registros.map((x) => ({ ...x, mes: x.d.slice(0, 7), semana: isoSemana(x.d) }));
     const ua = j.ultima_atualizacao ? new Date(j.ultima_atualizacao).toLocaleString("pt-BR") : "—";
     document.getElementById("sub-info").textContent =
@@ -72,7 +76,11 @@
       (filtros.t.size === 0 || filtros.t.has(r.t)) &&
       (filtros.mes.size === 0 || filtros.mes.has(r.mes)) &&
       (filtros.semana.size === 0 || filtros.semana.has(r.semana)) &&
-      (filtros.d.size === 0 || filtros.d.has(r.d));
+      (filtros.d.size === 0 || filtros.d.has(r.d)) &&
+      (filtros.fin.size === 0 || filtros.fin.has(r.f)) &&
+      (filtros.mo.size === 0 || filtros.mo.has(r.mo)) &&
+      (filtros.ta.size === 0 || filtros.ta.has(r.ta)) &&
+      (filtros.rj.size === 0 || filtros.rj.has(r.rj));
   }
   function filtrados() { return REGISTROS.filter(passa); }
   function alternar(dim, valor) { const s = filtros[dim]; if (s.has(valor)) s.delete(valor); else s.add(valor); sincronizarSelects(); renderTudo(); }
@@ -99,15 +107,25 @@
     preencher("f-tecnico", permitidos, filtros.e.size ? "Todos os técnicos da equipe" : "Todos os técnicos", (v) => v);
     document.getElementById("f-tecnico").value = atual;
   }
+  const DIMS_NUM = new Set(["fin", "mo", "ta", "rj"]);
+  function rotuloDim(dim, v) {
+    if (dim === "mes") return rotuloMes(v);
+    if (dim === "semana") return rotuloSemana(v);
+    if (dim === "d") return rotuloDia(v);
+    if (dim === "fin") return FIN[v] || "—";
+    if (dim === "mo") return MOT[v] || "—";
+    if (dim === "ta") return v ? "Externo" : "Interno";
+    if (dim === "rj") return v ? "Sim" : "Não";
+    return v;
+  }
   function renderChips() {
     const box = document.getElementById("chips"); const chips = [];
     for (const dim of Object.keys(filtros)) for (const v of filtros[dim]) {
-      let txt = v;
-      if (dim === "mes") txt = rotuloMes(v); else if (dim === "semana") txt = rotuloSemana(v); else if (dim === "d") txt = rotuloDia(v);
-      chips.push(`<span class="chip">${NOMES_DIM[dim]}: ${txt}<button data-dim="${dim}" data-v="${v}">×</button></span>`);
+      chips.push(`<span class="chip">${NOMES_DIM[dim]}: ${rotuloDim(dim, v)}<button data-dim="${dim}" data-v="${v}">×</button></span>`);
     }
     box.innerHTML = chips.join("");
-    box.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => alternar(b.dataset.dim, b.dataset.v)));
+    box.querySelectorAll("button").forEach((b) => b.addEventListener("click", () =>
+      alternar(b.dataset.dim, DIMS_NUM.has(b.dataset.dim) ? +b.dataset.v : b.dataset.v)));
   }
 
   function renderTudo() {
@@ -115,6 +133,7 @@
     const dados = filtrados();
     renderChips(); renderKpis(dados);
     renderGraficoDia(dados); renderGraficoEmpresa(dados); renderGraficoTecnico(dados); renderGraficoDias(dados);
+    renderGraficoFinalidade(dados); renderGraficoMotivo(dados); renderGraficoTipoAtend(dados);
     renderTabelaTecnicos(dados); renderTabelaDias(dados);
   }
 
@@ -124,6 +143,9 @@
     const porDia = {}; dados.forEach((r) => { (porDia[r.d] ||= new Set()).add(r.ti); });
     const equipesDia = Object.values(porDia).map((s) => s.size);
     const mediaEquipes = equipesDia.length ? media(equipesDia) : 0;
+    const n = dados.length || 1;
+    const taxaSucesso = (dados.filter((r) => r.su === 1).length / n * 100).toFixed(1).replace(".", ",");
+    const taxaRej = (dados.filter((r) => r.rj === 1).length / n * 100).toFixed(1).replace(".", ",");
     const kpis = [
       ["Total de OS encerradas", dados.length.toLocaleString("pt-BR")],
       ["Técnicos ativos", tecnicos.length],
@@ -131,6 +153,8 @@
       ["Média OS/dia", dias.length ? (dados.length / dias.length).toFixed(1) : "0"],
       ["Média equipes/dia", mediaEquipes.toFixed(1)],
       ["Média OS/técnico", tecnicos.length ? (dados.length / tecnicos.length).toFixed(1) : "0"],
+      ["Taxa de sucesso", taxaSucesso + "%"],
+      ["Taxa de rejeição", taxaRej + "%"],
     ];
     document.getElementById("kpis").innerHTML = kpis.map(([l, v]) => `<div class="kpi"><div class="v">${v}</div><div class="l">${l}</div></div>`).join("");
   }
@@ -167,6 +191,39 @@
     desenhar("g-dias", { type: "bar", data: { labels: pares.map((p) => p[0]), datasets: [{ label: "Dias", data: pares.map((p) => p[1]), backgroundColor: CORES.laranja }] },
       options: opcoes({ indexAxis: "y", onClick: cliqueChart("t", pares.map((p) => p[0])), plugins: { legend: { display: false } } }) });
   }
+  // ----------- Tipos de OS (finalidade) -----------
+  function renderGraficoFinalidade(dados) {
+    const c = {}; dados.forEach((r) => { c[r.f] = (c[r.f] || 0) + 1; });
+    const pares = Object.entries(c).map(([k, v]) => [+k, v]).sort((a, b) => b[1] - a[1]);
+    desenhar("g-finalidade", {
+      type: "bar",
+      data: { labels: pares.map((p) => FIN[p[0]] || "—"), datasets: [{ label: "OS", data: pares.map((p) => p[1]), backgroundColor: CORES.os }] },
+      options: opcoes({ indexAxis: "y", onClick: cliqueChart("fin", pares.map((p) => p[0])), plugins: { legend: { display: false } } }),
+    });
+  }
+
+  // ----------- Motivos de não-conclusão (só OS sem sucesso) -----------
+  function renderGraficoMotivo(dados) {
+    const c = {}; dados.forEach((r) => { if (r.su === 0 && r.mo !== undefined) c[r.mo] = (c[r.mo] || 0) + 1; });
+    const pares = Object.entries(c).map(([k, v]) => [+k, v]).sort((a, b) => b[1] - a[1]).slice(0, 15);
+    desenhar("g-motivo", {
+      type: "bar",
+      data: { labels: pares.map((p) => MOT[p[0]] || "—"), datasets: [{ label: "OS não concluídas", data: pares.map((p) => p[1]), backgroundColor: CORES.laranja }] },
+      options: opcoes({ indexAxis: "y", onClick: cliqueChart("mo", pares.map((p) => p[0])), plugins: { legend: { display: false } } }),
+    });
+  }
+
+  // ----------- Interno × Externo (rosca) -----------
+  function renderGraficoTipoAtend(dados) {
+    const interno = dados.filter((r) => r.ta === 0).length;
+    const externo = dados.filter((r) => r.ta === 1).length;
+    desenhar("g-tipoatend", {
+      type: "doughnut",
+      data: { labels: ["Interno", "Externo"], datasets: [{ data: [interno, externo], backgroundColor: [CORES.os, CORES.laranja], borderWidth: 2, borderColor: "#fff" }] },
+      options: opcoes({ cutout: "62%", onClick: cliqueChart("ta", [0, 1]) }),
+    });
+  }
+
   function agregarContagem(dados, campo, topN) {
     const c = {}; dados.forEach((r) => { c[r[campo]] = (c[r[campo]] || 0) + 1; });
     let pares = Object.entries(c).sort((a, b) => b[1] - a[1]);
@@ -217,10 +274,20 @@
     filtros.e.clear(); filtros.t.clear();  // evita conflito empresa/técnico ao trocar de grupo
     sincronizarSelects(); renderTudo();
   }));
+  // Toggle "Só rejeitadas"
+  document.getElementById("btn-rej").addEventListener("click", () => {
+    const btn = document.getElementById("btn-rej");
+    const ativo = filtros.rj.has(1);
+    filtros.rj.clear();
+    if (!ativo) filtros.rj.add(1);
+    btn.classList.toggle("on", !ativo);
+    renderTudo();
+  });
   document.getElementById("btn-limpar").addEventListener("click", () => {
     Object.values(filtros).forEach((s) => s.clear());
     grupo = "todos";
     document.querySelectorAll("#f-grupo button").forEach((x) => x.classList.toggle("active", x.dataset.g === "todos"));
+    document.getElementById("btn-rej").classList.remove("on");
     sincronizarSelects(); renderTudo();
   });
   document.getElementById("busca-tec").addEventListener("input", () => renderTabelaTecnicos(filtrados()));

@@ -18,6 +18,7 @@ Uso:
 import argparse
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -99,18 +100,52 @@ def coletar_produtividade(full=False):
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
-        "SELECT dia, empresa, tecnico, tecnico_id, finalidade, sucesso, os FROM os WHERE dia != ''"
+        "SELECT dia, empresa, tecnico, tecnico_id, finalidade, sucesso, rejeitada, tipo_atendimento "
+        "FROM os WHERE dia != ''"
     ).fetchall()
-    # Só os campos usados pelo cross-filter (d, e, t, ti). finalidade/sucesso/os
-    # não são plotados em nenhum gráfico/tabela — omitir reduz muito o payload.
-    registros = [{
-        "d": r["dia"], "e": r["empresa"] or "—", "t": r["tecnico"] or "—",
-        "ti": r["tecnico_id"],
-    } for r in rows]
+
+    # Campos do cross-filter (d,e,t,ti) + análises novas em formato COMPACTO:
+    #  f  = índice na lista `fin` (finalidade / tipo de OS)
+    #  su = 1 sucesso ("Sim") / 0 não concluída
+    #  mo = índice na lista `mot` (motivo da não-conclusão) — só quando su=0
+    #  rj = 1 rejeitada / 0
+    #  ta = 1 externo / 0 interno
+    fin_list, fin_idx = [], {}
+    mot_list, mot_idx = [], {}
+
+    def idx_of(val, idx, lst):
+        if val not in idx:
+            idx[val] = len(lst)
+            lst.append(val)
+        return idx[val]
+
+    def sucesso_motivo(s):
+        s = (s or "").strip()
+        if s.lower().startswith("sim"):
+            return True, None
+        m = re.sub(r"^[Nn][ãa]o\s*-\s*(\d+\s*)?", "", s).strip()
+        return False, (m or "Não informado")
+
+    registros = []
+    for r in rows:
+        su, mot = sucesso_motivo(r["sucesso"])
+        rec = {
+            "d": r["dia"], "e": r["empresa"] or "—", "t": r["tecnico"] or "—",
+            "ti": r["tecnico_id"],
+            "f": idx_of(r["finalidade"] or "—", fin_idx, fin_list),
+            "su": 1 if su else 0,
+            "rj": 1 if (r["rejeitada"] or "").strip().lower() == "sim" else 0,
+            "ta": 1 if (r["tipo_atendimento"] or "").strip().lower() == "externo" else 0,
+        }
+        if not su:
+            rec["mo"] = idx_of(mot, mot_idx, mot_list)
+        registros.append(rec)
+
     meta = {m["chave"]: m["valor"] for m in conn.execute("SELECT chave, valor FROM meta")}
     conn.close()
     payload = {
         "registros": registros, "total": len(registros),
+        "fin": fin_list, "mot": mot_list,
         "ultima_atualizacao": meta.get("ultima_atualizacao"),
         "intervalo": meta.get("intervalo"),
     }
