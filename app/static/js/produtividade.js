@@ -7,8 +7,11 @@
   let REGISTROS = [];
   const filtros = { e: new Set(), t: new Set(), mes: new Set(), semana: new Set(), d: new Set() };
   let grupo = "todos"; // todos | infra | operacional
-  // "INFRA" como palavra isolada (INFRA UNET/WAVE/SCHISTEL); NÃO conta INFRASEG (operacional).
-  const ehInfra = (r) => /\binfra\b/i.test(r.e);
+  // Infra = "INFRA" como palavra isolada (INFRA UNET/WAVE/SCHISTEL) + exceções por
+  // nome (ex.: FANDARUFF). NÃO conta INFRASEG (operacional). Adicione novas equipes
+  // infra sem "INFRA" no nome ao regex EXTRA_INFRA abaixo.
+  const EXTRA_INFRA = /fandaruff/i;
+  const ehInfra = (r) => /\binfra\b/i.test(r.e) || EXTRA_INFRA.test(r.e);
   const NOMES_DIM = { e: "Empresa", t: "Técnico", mes: "Mês", semana: "Semana", d: "Dia" };
   let ordenacaoTec = { col: "os", dir: -1 };
   let charts = {};
