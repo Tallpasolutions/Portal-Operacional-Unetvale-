@@ -9,6 +9,17 @@ BR_TZ = timezone(timedelta(hours=-3))
 HORARIOS = [8, 10, 12, 14, 16, 18]  # grade fixa de atualização (horário de Brasília)
 
 MODULOS = ("produtividade", "iqi", "iqm", "massivas")
+NOMES = {"produtividade": "Produtividade", "iqi": "IQI", "iqm": "IQM", "massivas": "Massivas"}
+
+
+def _idade_texto(minutos):
+    if minutos is None:
+        return "—"
+    if minutos < 60:
+        return f"há {minutos} min"
+    if minutos < 60 * 36:
+        return f"há {minutos // 60} h"
+    return f"há {minutos // (60 * 24)} d"
 
 
 def get_modulo(modulo):
@@ -82,3 +93,39 @@ def status_geral():
         "proxima": prox.strftime("%H:%M"),
         "horarios": HORARIOS,
     }
+
+
+def resumo_modulos():
+    """Status atual de cada módulo (para a tela de monitoramento): última
+    atualização, idade e se está desatualizado (sem dado novo há > 3h)."""
+    todos = get_todos()
+    agora = datetime.now(timezone.utc)
+    out = []
+    for m in MODULOS:
+        row = todos.get(m)
+        dt = _parse_dt(row.get("atualizado_em")) if row else None
+        idade = int((agora - dt).total_seconds() // 60) if dt else None
+        status = (row or {}).get("status") or "sem_dados"
+        desatualizado = idade is not None and idade > 180  # esperado a cada 2h (08–18h)
+        out.append({
+            "modulo": m, "nome": NOMES.get(m, m),
+            "atualizado": dt.astimezone(BR_TZ).strftime("%d/%m/%Y %H:%M") if dt else "—",
+            "idade": _idade_texto(idade), "status": status, "desatualizado": desatualizado,
+        })
+    return out
+
+
+def get_log(limite=150):
+    """Histórico de execuções do coletor (tabela coletor_log)."""
+    try:
+        rows = supa.select("coletor_log", {
+            "select": "executado_em,modulo,status,mensagem",
+            "order": "executado_em.desc", "limit": str(limite),
+        })
+    except Exception:
+        return []
+    for r in rows:
+        dt = _parse_dt(r.get("executado_em"))
+        r["quando"] = dt.astimezone(BR_TZ).strftime("%d/%m %H:%M") if dt else "—"
+        r["nome"] = NOMES.get(r.get("modulo"), r.get("modulo") or "geral")
+    return rows

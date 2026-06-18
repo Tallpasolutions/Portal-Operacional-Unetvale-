@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Monitoramento · Unetvale{% endblock %}
+{% block page_title %}Monitoramento da coleta{% endblock %}
+{% block content %}
+<p class="subnote">Atualização automática às {{ status_upd.horarios|join('h, ') }}h. A coleta depende da máquina
+  do coletor estar ligada e com acesso ao WVSA (VPN ou rede Unetvale) no horário. Rodadas offline são ignoradas (skip).</p>
+
+<!-- Status atual por módulo -->
+<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(230px,1fr));margin-bottom:18px;">
+  {% for r in resumo %}
+  <div class="card">
+    <div class="card-b">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <span style="font-weight:700;">{{ r.nome }}</span>
+        {% if r.status == 'sem_dados' %}<span class="badge badge-cinza">Sem dados</span>
+        {% elif r.status == 'erro' %}<span class="badge badge-vermelho">Erro</span>
+        {% elif r.desatualizado %}<span class="badge badge-ambar">Desatualizado</span>
+        {% else %}<span class="badge badge-verde">Atualizado</span>{% endif %}
+      </div>
+      <div style="font-size:22px;font-weight:800;color:var(--ink-d);margin-top:8px;">{{ r.idade }}</div>
+      <div style="font-size:12.5px;color:var(--muted);">última: {{ r.atualizado }}</div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Histórico de execuções -->
+<div class="card">
+  <div class="card-h">Histórico de execuções ({{ logs|length }})</div>
+  <div class="card-b tabela-wrap">
+    {% if logs %}
+    <table class="tbl">
+      <thead><tr><th>Quando</th><th>Módulo</th><th>Status</th><th>Mensagem</th></tr></thead>
+      <tbody>
+        {% for l in logs %}
+        <tr>
+          <td style="white-space:nowrap;">{{ l.quando }}</td>
+          <td>{{ l.nome }}</td>
+          <td>
+            {% if l.status == 'ok' %}<span class="badge badge-verde">ok</span>
+            {% elif l.status == 'erro' %}<span class="badge badge-vermelho">erro</span>
+            {% else %}<span class="badge badge-ambar">{{ l.status }}</span>{% endif %}
+          </td>
+          <td style="color:var(--muted);">{{ l.mensagem or '' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <div class="vazio">Sem registros ainda. O histórico começa a ser preenchido na próxima coleta
+        (após criar a tabela <code>coletor_log</code> no Supabase — migration 0002).</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

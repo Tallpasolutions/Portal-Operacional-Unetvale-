@@ -149,6 +149,11 @@ table.tbl tr.total td{ font-weight:800; background:var(--fundo); }
   .upd{ display:none; }
 }
 .subnote{ font-size:12.5px; color:var(--muted); margin:-6px 0 16px; }
+.badge{ display:inline-block; padding:3px 9px; border-radius:20px; font-size:11.5px; font-weight:700; }
+.badge-verde{ background:#e3f6ee; color:#0a7a52; }
+.badge-vermelho{ background:#fdecee; color:#b21f37; }
+.badge-ambar{ background:#fdeede; color:#b65a16; }
+.badge-cinza{ background:var(--fundo); color:var(--muted); }
 .secao{ font-size:14px; font-weight:800; color:var(--ink-d); margin:24px 0 12px; padding-bottom:8px;
   border-bottom:2px solid var(--brand-l); letter-spacing:.2px; }
 .btn.sec.on{ background:var(--brand); color:#fff; border-color:var(--brand); }

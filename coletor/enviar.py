@@ -72,6 +72,23 @@ def marcar_erro(modulo, erro):
         log(f"  !! não consegui registrar erro de {modulo}: {e}")
 
 
+def log_evento(modulo, status, mensagem):
+    """Registra a execução no histórico (tabela coletor_log). Best-effort:
+    nunca interrompe a coleta se a tabela não existir ou a rede falhar."""
+    try:
+        url = os.environ["SUPABASE_URL"].rstrip("/")
+        key = os.environ["SUPABASE_SERVICE_KEY"]
+        requests.post(
+            f"{url}/rest/v1/coletor_log",
+            headers={"apikey": key, "Authorization": f"Bearer {key}",
+                     "Content-Type": "application/json", "Prefer": "return=minimal"},
+            json={"modulo": modulo, "status": status, "mensagem": (mensagem or "")[:500]},
+            timeout=15,
+        )
+    except Exception:
+        pass
+
+
 # --------------------------------------------------------------------------
 # Garante config.json do extrator a partir das variáveis de ambiente
 # --------------------------------------------------------------------------
@@ -205,6 +222,7 @@ def main():
     # SEM marcar erro e SEM sobrescrever os últimos dados bons.
     if not wvsa_alcancavel():
         log("WVSA inalcançável (sem VPN nem rede Unetvale). Rodada ignorada — dados anteriores preservados.")
+        log_evento("geral", "skip", "WVSA inalcançável (sem VPN/rede Unetvale) — rodada ignorada")
         sys.exit(0)
 
     alvos = [args.so] if args.so else list(MODULOS)
@@ -215,13 +233,17 @@ def main():
                 coletar_produtividade(full=args.full)
             else:
                 MODULOS[modulo]()
+            log_evento(modulo, "ok", "Atualizado com sucesso")
         except Exception as e:  # noqa
             falhas += 1
             log(f"FALHA em {modulo}: {e}")
             marcar_erro("iqi" if modulo == "iqi" else modulo, e)
             if modulo == "iqi":
                 marcar_erro("iqm", e)
+            log_evento(modulo, "erro", str(e))
     log(f"Concluído. {len(alvos) - falhas}/{len(alvos)} módulos OK.")
+    log_evento("geral", "ok" if not falhas else "erro",
+               f"{len(alvos) - falhas}/{len(alvos)} módulos OK")
     sys.exit(1 if falhas else 0)
 
 

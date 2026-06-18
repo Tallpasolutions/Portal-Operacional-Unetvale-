@@ -92,6 +92,13 @@ def configuracoes():
     return render_template("configuracoes.html", ativo="configuracoes", usuario=usuario_atual())
 
 
+@bp.route("/monitoramento")
+@admin_obrigatorio
+def monitoramento():
+    return render_template("monitoramento.html", ativo="monitoramento",
+                           resumo=dados.resumo_modulos(), logs=dados.get_log(150))
+
+
 def _meta(row):
     if not row:
         return {"atualizado_em": None, "status": "sem_dados"}
