@@ -51,6 +51,10 @@
         </button>
         <div class="page-title">{% block page_title %}{% endblock %}</div>
         <div class="topbar-right">
+          <button class="btn-atualizar" id="btn-atualizar" title="Atualizar dados agora">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            <span class="txt">Atualizar</span>
+          </button>
           <div class="upd" title="Atualização automática às {{ status_upd.horarios|join(', ') }}h">
             {% if status_upd.status == 'sem_dados' %}
               <span class="dot dot-gray"></span><span>Sem dados ainda</span>

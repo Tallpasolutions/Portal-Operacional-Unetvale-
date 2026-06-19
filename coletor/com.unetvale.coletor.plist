@@ -1,37 +1,30 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Daemon do coletor (watcher). IMPORTANTE: rode de uma pasta FORA de
+     ~/Desktop, ~/Documents, ~/Downloads — essas pastas são protegidas por TCC
+     no macOS e o launchd NÃO consegue executar arquivos dentro delas (falha com
+     exit 78 / EX_CONFIG, sem log). Local recomendado: ~/unetvale-coletor.
+
+     Instalação:
+       cp -R coletor/ ~/unetvale-coletor   (ou copie os .py + .env + requirements.txt)
+       python3 -m venv ~/unetvale-coletor/.venv
+       ~/unetvale-coletor/.venv/bin/pip install -r ~/unetvale-coletor/requirements.txt
+       cp coletor/com.unetvale.coletor.plist ~/Library/LaunchAgents/   (ajuste os caminhos)
+       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.unetvale.coletor.plist
+
+     O watcher roda continuamente (KeepAlive): cobre 08/10/12/14/16/18h mesmo
+     após o Mac dormir e atende o botão "Atualizar" do app. -->
 <plist version="1.0">
 <dict>
-  <key>Label</key>
-  <string>com.unetvale.coletor</string>
-
-  <!-- Caminho ABSOLUTO do venv + script. Ajuste se mover a pasta. -->
+  <key>Label</key><string>com.unetvale.coletor</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/jhonicleyton/Desktop/Dashboard-Unetvale/dashboard-unetvale/coletor/.venv/bin/python</string>
-    <string>/Users/jhonicleyton/Desktop/Dashboard-Unetvale/dashboard-unetvale/coletor/enviar.py</string>
+    <string>/Users/jhonicleyton/unetvale-coletor/.venv/bin/python</string>
+    <string>/Users/jhonicleyton/unetvale-coletor/watcher.py</string>
   </array>
-
-  <key>WorkingDirectory</key>
-  <string>/Users/jhonicleyton/Desktop/Dashboard-Unetvale/dashboard-unetvale/coletor</string>
-
-  <!-- Horários: 08, 10, 12, 14, 16, 18 (se o Mac estava dormindo, roda ao acordar). -->
-  <key>StartCalendarInterval</key>
-  <array>
-    <dict><key>Hour</key><integer>8</integer><key>Minute</key><integer>0</integer></dict>
-    <dict><key>Hour</key><integer>10</integer><key>Minute</key><integer>0</integer></dict>
-    <dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>0</integer></dict>
-    <dict><key>Hour</key><integer>14</integer><key>Minute</key><integer>0</integer></dict>
-    <dict><key>Hour</key><integer>16</integer><key>Minute</key><integer>0</integer></dict>
-    <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>0</integer></dict>
-  </array>
-
-  <key>StandardOutPath</key>
-  <string>/Users/jhonicleyton/Desktop/Dashboard-Unetvale/dashboard-unetvale/coletor/coletor.log</string>
-  <key>StandardErrorPath</key>
-  <string>/Users/jhonicleyton/Desktop/Dashboard-Unetvale/dashboard-unetvale/coletor/coletor.log</string>
-
-  <key>RunAtLoad</key>
-  <false/>
+  <key>WorkingDirectory</key><string>/Users/jhonicleyton/unetvale-coletor</string>
+  <key>KeepAlive</key><true/>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>/Users/jhonicleyton/unetvale-coletor/coletor.log</string>
+  <key>StandardErrorPath</key><string>/Users/jhonicleyton/unetvale-coletor/coletor.log</string>
 </dict>
 </plist>

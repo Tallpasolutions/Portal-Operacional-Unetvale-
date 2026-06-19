@@ -52,6 +52,13 @@ body.collapsed .brand-text, body.collapsed .menu a span:not(.ic){ display:none; 
 .upd-sep{ color:var(--muted-l); }
 .dot{ width:9px; height:9px; border-radius:50%; display:inline-block; }
 .dot-green{ background:var(--success); } .dot-red{ background:var(--danger); } .dot-gray{ background:var(--muted-l); }
+.btn-atualizar{ display:inline-flex; align-items:center; gap:7px; background:var(--brand); color:#fff;
+  border:none; border-radius:8px; padding:8px 14px; font-size:13px; font-weight:600; cursor:pointer; }
+.btn-atualizar:hover{ background:var(--brand-d); }
+.btn-atualizar svg{ width:15px; height:15px; }
+.btn-atualizar.loading{ opacity:.75; cursor:default; }
+.btn-atualizar.loading svg{ animation:girar 1s linear infinite; }
+@keyframes girar{ to{ transform:rotate(360deg); } }
 .user{ display:flex; align-items:center; gap:10px; }
 .user-name{ font-weight:600; font-size:13px; color:var(--ink); }
 .icon-btn{ width:34px; height:34px; border-radius:9px; display:grid; place-items:center; background:var(--brand-l);

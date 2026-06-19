@@ -106,6 +106,48 @@ def _meta(row):
 
 
 # --------------------------------------------------------------------------
+# Atualização sob demanda: o botão grava um "pedido" no Supabase; o watcher do
+# coletor (dentro da VPN) detecta e roda. O app só lê/escreve o Supabase.
+# --------------------------------------------------------------------------
+def _ultima_data():
+    ult = None
+    for r in dados.get_todos().values():
+        dt = dados._parse_dt(r.get("atualizado_em"))
+        if dt and (ult is None or dt > ult):
+            ult = dt
+    return ult
+
+
+@bp.route("/api/atualizar", methods=["POST"])
+@login_obrigatorio
+def api_atualizar():
+    from datetime import datetime, timezone
+    agora = datetime.now(timezone.utc).isoformat()
+    try:
+        supa.upsert("controle", {"id": 1, "pedido_em": agora}, on_conflict="id")
+    except Exception as e:
+        return jsonify({"ok": False, "erro": str(e)}), 500
+    return jsonify({"ok": True})
+
+
+@bp.route("/api/atualizar/status")
+@login_obrigatorio
+def api_atualizar_status():
+    ped = None
+    try:
+        c = supa.select_one("controle", {"id": "eq.1", "select": "pedido_em"})
+        ped = dados._parse_dt((c or {}).get("pedido_em"))
+    except Exception:
+        pass
+    ult = _ultima_data()
+    rodando = bool(ped and (ult is None or ped > ult))
+    return jsonify({
+        "rodando": rodando,
+        "ultima": ult.astimezone(dados.BR_TZ).strftime("%d/%m/%Y %H:%M") if ult else "—",
+    })
+
+
+# --------------------------------------------------------------------------
 # Endpoint opcional de ingestão: o coletor pode usar isto em vez de gravar
 # direto no Supabase. Protegido por token compartilhado (INGEST_TOKEN).
 # --------------------------------------------------------------------------
