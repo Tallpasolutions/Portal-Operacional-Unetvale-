@@ -118,13 +118,28 @@ def _ultima_data():
     return ult
 
 
+def _ultimo_pedido():
+    """Timestamp do pedido manual mais recente (registrado em coletor_log)."""
+    try:
+        rows = supa.select("coletor_log", {
+            "status": "eq.pedido", "select": "executado_em",
+            "order": "executado_em.desc", "limit": "1",
+        })
+        return dados._parse_dt(rows[0]["executado_em"]) if rows else None
+    except Exception:
+        return None
+
+
 @bp.route("/api/atualizar", methods=["POST"])
 @login_obrigatorio
 def api_atualizar():
-    from datetime import datetime, timezone
-    agora = datetime.now(timezone.utc).isoformat()
+    # Registra o pedido na tabela existente coletor_log (status='pedido'); o
+    # watcher do coletor (dentro da VPN) detecta e roda. Sem tabela extra.
     try:
-        supa.upsert("controle", {"id": 1, "pedido_em": agora}, on_conflict="id")
+        supa.insert("coletor_log", {
+            "modulo": "geral", "status": "pedido",
+            "mensagem": "Atualização manual solicitada",
+        })
     except Exception as e:
         return jsonify({"ok": False, "erro": str(e)}), 500
     return jsonify({"ok": True})
@@ -133,12 +148,7 @@ def api_atualizar():
 @bp.route("/api/atualizar/status")
 @login_obrigatorio
 def api_atualizar_status():
-    ped = None
-    try:
-        c = supa.select_one("controle", {"id": "eq.1", "select": "pedido_em"})
-        ped = dados._parse_dt((c or {}).get("pedido_em"))
-    except Exception:
-        pass
+    ped = _ultimo_pedido()
     ult = _ultima_data()
     rodando = bool(ped and (ult is None or ped > ult))
     return jsonify({

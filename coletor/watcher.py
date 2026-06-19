@@ -73,9 +73,10 @@ def ultima_coleta():
 
 
 def pedido_manual():
+    # Pedido manual mais recente (botão "Atualizar") gravado em coletor_log.
     try:
-        rows = _get("controle?id=eq.1&select=pedido_em")
-        return _parse(rows[0]["pedido_em"]) if rows else None
+        rows = _get("coletor_log?status=eq.pedido&select=executado_em&order=executado_em.desc&limit=1")
+        return _parse(rows[0]["executado_em"]) if rows else None
     except Exception:
         return None
 
