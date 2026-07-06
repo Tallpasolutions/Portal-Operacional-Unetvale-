@@ -13,7 +13,8 @@
 
   const fmt = (v) => v.toFixed(2).replace(".", ",") + "%";
   const fmtMeta = (v) => (Number.isInteger(v) ? v.toString() : v.toFixed(1).replace(".", ",")) + "%";
-  const bateu = (reg) => reg[0] > MINOS && reg[2] < META;
+  // Dentro da meta: ao menos MINOS OSs (>=, 10 conta) e % abaixo da meta.
+  const bateu = (reg) => reg[0] >= MINOS && reg[2] < META;
   function streak(m, idx) { let s = 0; for (let i = idx; i >= 0; i--) { if (bateu(m[i])) s++; else break; } return s; }
 
   function ranking(idx) {
@@ -30,7 +31,7 @@
     document.querySelectorAll(".colInd").forEach((e) => (e.textContent = IND));
     document.getElementById("sub").textContent =
       `${IND} = OSs com atendimento/reincidência em até ${data.dias} dias após a ${data.evento} ÷ total de OSs. ` +
-      `Considera apenas técnicos com mais de ${data.minOS} OSs de ${data.evento} no mês.`;
+      `Considera apenas técnicos com ao menos ${data.minOS} OSs de ${data.evento} no mês.`;
     const inp = document.getElementById("metaInput");
     const atual = parseFloat(inp.value);
     META = (!isNaN(atual) && atual > 0) ? atual : data.meta;

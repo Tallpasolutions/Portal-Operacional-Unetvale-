@@ -97,7 +97,8 @@
         const cls = mesFechado(meses[k]) ? "" : " parcial-cell";
         if (reg[0] > 0) {
           // % colorido: verde dentro da meta, vermelho fora, cinza se poucas OSs
-          const pctCls = reg[0] > MINOS ? (reg[2] < META ? "meta-ok" : "meta-fora") : "meta-neutro";
+          // (>= : quem fez exatamente o mínimo de OSs conta no indicador)
+          const pctCls = reg[0] >= MINOS ? (reg[2] < META ? "meta-ok" : "meta-fora") : "meta-neutro";
           row += `<td class="num${cls}">${reg[0]}</td><td class="num${cls}">${reg[1]}</td><td class="num ${pctCls}">${fmtPct(reg[2])}</td>`;
         } else {
           row += `<td class="num vazio-cel">—</td>`.repeat(3); // sem OS no mês
