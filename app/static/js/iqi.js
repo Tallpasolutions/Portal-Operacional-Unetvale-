@@ -7,6 +7,7 @@
 
   let DATA = null, META = 17, MINOS = 10, IND = "IQI";
   let mesIdx = 0;
+  let ordem = "pct"; // pct = % crescente | stars = recorrência (menos ★ -> mais ★)
   let tableSort = { key: "iqi", dir: 1 };
   let selecionado = null; // técnico filtrado por clique
   let chart = null;
@@ -61,7 +62,10 @@
     document.getElementById("rec").textContent = base.length ? Math.max(...base.map((d) => d.stars)) : 0;
     renderChips();
     const dadosTabela = selecionado ? base.filter((d) => d.nome === selecionado) : base;
-    const chartData = [...base].sort((a, b) => a.iqi - b.iqi || a.nome.localeCompare(b.nome, "pt"));
+    const chartData = [...base].sort((a, b) =>
+      ordem === "stars"
+        ? (a.stars - b.stars || a.iqi - b.iqi || a.nome.localeCompare(b.nome, "pt"))
+        : (a.iqi - b.iqi || a.nome.localeCompare(b.nome, "pt")));
 
     const cores = chartData.map((d) => (selecionado && d.nome === selecionado) ? "#1f5fc0" : "#2c7be5");
 
@@ -187,6 +191,15 @@
     tog.querySelectorAll("button").forEach((x) => x.classList.toggle("active", x === b));
     document.getElementById("metaInput").value = "";
     aplicar(PACOTE[b.dataset.id]);
+  }));
+
+  // Ordenação do gráfico: % crescente ou recorrência (menos ★ -> mais ★)
+  document.querySelectorAll("#ordToggle button").forEach((b) => b.addEventListener("click", () => {
+    document.querySelectorAll("#ordToggle button").forEach((x) => x.classList.toggle("active", x === b));
+    ordem = b.dataset.o;
+    const t = document.getElementById("ordemTxt");
+    if (t) t.textContent = ordem === "stars" ? "por recorrência ★ (crescente)" : "(crescente)";
+    desenhar();
   }));
 
   document.getElementById("mes").addEventListener("change", (e) => { mesIdx = +e.target.value; selecionado = null; desenhar(); });

@@ -21,6 +21,12 @@
   <div class="toolbar">
     <label>Mês de referência <select id="mes"></select></label>
     <label>Meta (%) <input type="number" id="metaInput" step="0.5" min="0" style="width:90px;"></label>
+    <label>Ordenar por
+      <span class="toggle" id="ordToggle">
+        <button data-o="pct" class="active">% crescente</button>
+        <button data-o="stars">★ Recorrência</button>
+      </span>
+    </label>
     <div class="kpi" style="padding:8px 14px;"><span class="l">Equipes na meta</span> <b class="v" id="qtd" style="font-size:18px;">0</b></div>
     <div class="kpi" style="padding:8px 14px;"><span class="l">Maior recorrência</span> <b class="v" id="rec" style="font-size:18px;">0</b> <span class="estrela">★</span></div>
   </div>
@@ -28,7 +34,7 @@
 
   <div class="card" style="margin-bottom:16px;">
     <div class="card-h">
-      <span><span id="tituloGrafico">IQI</span> por técnico (crescente) — <span style="color:var(--danger);">linha = meta</span> · <span class="estrela">★</span> = meses consecutivos na meta</span>
+      <span><span id="tituloGrafico">IQI</span> por técnico <span id="ordemTxt">(crescente)</span> — <span style="color:var(--danger);">linha = meta</span> · <span class="estrela">★</span> = meses consecutivos na meta</span>
       <button class="btn-ghost" id="btn-export-iqi" title="Exportar imagem nítida do gráfico (para apresentação)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         Exportar imagem
