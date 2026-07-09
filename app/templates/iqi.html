@@ -28,24 +28,30 @@
         <button data-o="stars">★ Recorrência</button>
       </span>
     </label>
-    <div class="kpi" style="padding:8px 14px;"><span class="l">Equipes na meta</span> <b class="v" id="qtd" style="font-size:18px;">0</b></div>
+    <div class="kpi" style="padding:8px 14px;"><span class="l" id="qtd-label">Equipes na meta</span> <b class="v" id="qtd" style="font-size:18px;">0</b></div>
     <div class="kpi" style="padding:8px 14px;"><span class="l">Maior recorrência</span> <b class="v" id="rec" style="font-size:18px;">0</b> <span class="estrela">★</span></div>
   </div>
   <div class="chips" id="chips-iqi"></div>
 
   <div class="card" style="margin-bottom:16px;">
     <div class="card-h">
-      <span><span id="tituloGrafico">IQI</span> por técnico <span id="ordemTxt">(crescente)</span> — <span style="color:var(--danger);">linha = meta</span> · <span class="estrela">★</span> = meses consecutivos na meta</span>
-      <button class="btn-ghost" id="btn-export-iqi" title="Exportar imagem nítida do gráfico (para apresentação)">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        Exportar imagem
-      </button>
+      <span><span id="tituloGrafico">IQI</span> por técnico <span id="ordemTxt">(crescente)</span> — <span style="color:var(--danger);">linha = meta</span> · <span class="estrela">★</span> <span id="starTxt">= meses consecutivos na meta</span></span>
+      <span style="display:inline-flex;gap:8px;">
+        <button class="btn-ghost" id="btn-modo-iqi" title="Inverte a visão: técnicos ACIMA da meta (considera só o percentual, sem mínimo de OSs) e a reincidência de meses fora">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+          <span class="txt">Ver fora da meta</span>
+        </button>
+        <button class="btn-ghost" id="btn-export-iqi" title="Exportar imagem nítida do gráfico (para apresentação)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Exportar imagem
+        </button>
+      </span>
     </div>
     <div class="card-b"><div class="chart-box tall"><canvas id="g-iqi"></canvas></div></div>
   </div>
 
   <div class="card">
-    <div class="card-h">Técnicos dentro da meta</div>
+    <div class="card-h" id="tabTitulo">Técnicos dentro da meta</div>
     <div class="card-b tabela-wrap">
       <table class="tbl" id="tab-iqi">
         <thead><tr>

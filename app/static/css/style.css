@@ -87,6 +87,7 @@ body.collapsed .brand-text, body.collapsed .menu a span:not(.ic){ display:none; 
 .btn-ghost{ background:transparent; border:1px solid var(--borda-2); color:var(--muted); border-radius:8px;
   padding:5px 10px; font-size:12px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
 .btn-ghost:hover{ background:var(--fundo); color:var(--ink-d); border-color:var(--muted-l); }
+.btn-ghost.on{ background:var(--danger); color:#fff; border-color:var(--danger); }
 .btn-ghost svg{ width:14px; height:14px; }
 
 /* ===== Toolbar / filtros ===== */
