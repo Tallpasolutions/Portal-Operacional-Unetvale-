@@ -11,6 +11,7 @@
   <span class="view-switch" id="view-switch">
     <button data-view="grafico" class="active">Gráfico</button>
     <button data-view="tabela">Tabela mensal</button>
+    <button data-view="ofensores">Ofensores</button>
   </span>
   <label class="ind-label">Indicador <span class="toggle" id="indToggle"></span></label>
 </div>
@@ -82,6 +83,39 @@
     </div>
   </div>
 </div>
+<!-- ===== Visualização 3: técnicos ofensores (% acima da média do mês) ===== -->
+<div id="view-ofensores" hidden>
+  <p class="subnote">Ofensor = técnico com <b>% acima da média do mês</b> (entre os avaliados, com ao menos o mínimo de OSs).
+    Meses em auditoria aparecem como <b>(Parcial)</b>.</p>
+  <div class="toolbar">
+    <label>Mês <select id="of-mes"></select></label>
+    <div class="kpi" style="padding:8px 14px;"><span class="l">Média do mês</span> <b class="v" id="of-media" style="font-size:18px;">—</b></div>
+    <div class="kpi" style="padding:8px 14px;"><span class="l">Técnicos avaliados</span> <b class="v" id="of-aval" style="font-size:18px;">0</b></div>
+    <div class="kpi" style="padding:8px 14px;"><span class="l">Ofensores</span> <b class="v" id="of-qtd" style="font-size:18px;color:var(--danger);">0</b></div>
+  </div>
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-h">
+      <span>Ofensores — <span class="tm-ind-nome">IQI</span> % (pior primeiro)</span>
+      <span class="subnote tm-legenda">
+        <span><span class="leg-dot fora"></span> acima da meta</span>
+        <span><span class="leg-dot" style="background:var(--warning);"></span> acima da média, dentro da meta</span>
+      </span>
+    </div>
+    <div class="card-b"><div class="chart-box tall"><canvas id="g-ofensores"></canvas></div></div>
+  </div>
+  <div class="card">
+    <div class="card-h">Detalhe dos ofensores</div>
+    <div class="card-b tabela-wrap">
+      <table class="tbl" id="tab-ofensores">
+        <thead><tr>
+          <th>Técnico</th><th class="num">OSs</th><th class="num">OSs c/ chamado</th>
+          <th class="num"><span class="tm-ind-nome">IQI</span> %</th><th class="num">Acima da média (p.p.)</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
 {% endif %}
 {% endblock %}
 
@@ -89,4 +123,5 @@
 <script>window.__PACOTE__ = {{ pacote|tojson }};</script>
 <script src="{{ url_for('static', filename='js/iqi.js') }}"></script>
 <script src="{{ url_for('static', filename='js/iqi_tabela.js') }}"></script>
+<script src="{{ url_for('static', filename='js/iqi_ofensores.js') }}"></script>
 {% endblock %}

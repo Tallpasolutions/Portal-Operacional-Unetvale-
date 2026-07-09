@@ -121,13 +121,16 @@
     renderFiltros(); renderTabela();
   });
 
-  // Alterna a visualização
-  let montada = false;
+  // Alterna entre as visualizações (grafico | tabela | ofensores). Avisa as
+  // demais via evento "iqiview" para renderizarem ao serem exibidas.
   sw.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
     sw.querySelectorAll("button").forEach((x) => x.classList.toggle("active", x === b));
-    const tabela = b.dataset.view === "tabela";
-    document.getElementById("view-grafico").hidden = tabela;
-    document.getElementById("view-tabela").hidden = !tabela;
-    if (tabela) { renderFiltros(); renderTabela(); montada = true; }
+    const v = b.dataset.view;
+    ["grafico", "tabela", "ofensores"].forEach((nome) => {
+      const el = document.getElementById("view-" + nome);
+      if (el) el.hidden = nome !== v;
+    });
+    if (v === "tabela") { renderFiltros(); renderTabela(); }
+    document.dispatchEvent(new CustomEvent("iqiview", { detail: v }));
   }));
 })();

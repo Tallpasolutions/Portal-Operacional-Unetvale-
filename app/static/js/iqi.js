@@ -38,18 +38,18 @@
     META = (!isNaN(atual) && atual > 0) ? atual : data.meta;
     inp.value = META;
     const sel = document.getElementById("mes");
-    // Só meses HOMOLOGADOS entram no gráfico (fechados após 30 dias de auditoria).
-    // Meses parciais ficam apenas na Tabela mensal, com a tag "(Parcial)".
+    // Todos os meses entram no seletor (acompanham o andamento do mês corrente);
+    // os ainda em auditoria levam a tag "(Parcial)". Padrão = último homologado.
     const mesFechado = (m) => {
       const [mm, yyyy] = m.split("/").map(Number);
       const lim = new Date(yyyy, mm, 0);   // último dia do mês
       lim.setDate(lim.getDate() + 30);     // + janela de homologação
       return new Date() > lim;
     };
-    let opcoes = data.meses.map((m, i) => [m, i]).filter(([m]) => mesFechado(m));
-    if (!opcoes.length) opcoes = data.meses.map((m, i) => [m, i]); // fallback: nenhum fechado ainda
-    sel.innerHTML = opcoes.map(([m, i]) => `<option value="${i}">${m}</option>`).join("");
-    const def = opcoes[opcoes.length - 1][1]; // último mês fechado
+    sel.innerHTML = data.meses.map((m, i) =>
+      `<option value="${i}">${m}${mesFechado(m) ? "" : " (Parcial)"}</option>`).join("");
+    let def = data.meses.length - 1;
+    for (let i = data.meses.length - 1; i >= 0; i--) if (mesFechado(data.meses[i])) { def = i; break; }
     sel.value = def; mesIdx = def;
     selecionado = null;
     desenhar();
