@@ -33,10 +33,58 @@
     </div>
   </div>
 </div>
+
+<h3 class="secao">Tempo de atendimento por técnico</h3>
+<p class="subnote" id="tmp-aviso">
+  <b>TMAE</b> acionamento da equipe · <b>TMD</b> deslocamento · <b>TME</b> execução ·
+  <b>TMM</b> massiva completa (meta <b>7h</b>). O técnico é quem <b>atendeu</b> a massiva.
+  Ranking balizado pelo <b>TME</b>.
+</p>
+
+<div class="kpis" id="t-kpis"></div>
+
+<div class="card" style="margin-bottom:16px;">
+  <div class="card-h">
+    <span>Ranking por técnico — <span id="t-base-txt">mediana</span></span>
+    <span style="display:inline-flex;gap:8px;align-items:center;">
+      <span class="toggle" id="t-base">
+        <button data-b="mediana" class="active" title="Resistente a massivas deixadas em aberto">Mediana</button>
+        <button data-b="media" title="Sensível a valores extremos">Média</button>
+      </span>
+      <button class="btn-ghost" id="t-export" title="Exportar imagem do ranking (para apresentação)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Exportar imagem
+      </button>
+    </span>
+  </div>
+  <div class="card-b"><div class="chart-box tall"><canvas id="g-tecnicos"></canvas></div></div>
+</div>
+
+<div class="card">
+  <div class="card-h">Detalhe por técnico
+    <input type="text" id="t-busca" placeholder="Buscar técnico…" style="font-weight:400;">
+  </div>
+  <div class="card-b tabela-wrap">
+    <table class="tbl" id="tab-tecnicos-massiva">
+      <thead><tr>
+        <th data-col="tecnico">Técnico</th>
+        <th class="num" data-col="n">Massivas</th>
+        <th class="num" data-col="tmae">TMAE</th>
+        <th class="num" data-col="tmd">TMD</th>
+        <th class="num" data-col="tme">TME</th>
+        <th class="num" data-col="tmm">TMM</th>
+        <th class="num" data-col="meta">Na meta</th>
+        <th class="num" data-col="erro">% erro proc.</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
 {% endif %}
 {% endblock %}
 
 {% block scripts %}
 <script>window.__PAYLOAD__ = {{ payload|tojson }};</script>
 <script src="{{ url_for('static', filename='js/massivas.js') }}"></script>
+<script src="{{ url_for('static', filename='js/massivas_tecnicos.js') }}"></script>
 {% endblock %}

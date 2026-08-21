@@ -120,8 +120,20 @@ def buscar_massivas(session, csrf, action, inicio, fim):
         dt = None
         if dm:
             dt = date(int(dm.group(3)), int(dm.group(2)), int(dm.group(1)))
+        # Colunas extras usadas pela visão por técnico (tempos TMAE/TMD/TME/TMM):
+        #   3 Técnico · 5 Motivo · 7 Acionamento · 8 Início exec · 9 Fim exec
+        #   10 Finalização · 11 Erro de processo identificado?
+        def _txt(i):
+            return tds[i].get_text(" ", strip=True) if len(tds) > i else ""
         registros.append({"massiva": massiva, "troca": troca,
-                          "cidade": cidade, "data": dt})
+                          "cidade": cidade, "data": dt,
+                          "tecnico": re.sub(r"\s+", " ", _txt(3)).strip() or None,
+                          "motivo": _txt(5) or None,
+                          "t_inicio": _txt(6), "t_acionamento": _txt(7),
+                          "t_exec_ini": _txt(8), "t_exec_fim": _txt(9),
+                          "t_finalizacao": _txt(10),
+                          "erro_processo": _txt(11).lower().startswith("s")
+                          if _txt(11) else None})
     # de-dup por massiva (mantém primeira ocorrência)
     vistos, unicos = set(), []
     for reg in registros:
@@ -245,6 +257,27 @@ def main():
         "diario": diario,
         "cidades": cidades,
         "totais_mes": totais_mes,
+        # eventos: uma linha por massiva, com técnico e os marcos de tempo.
+        # Alimenta a visão "Por técnico" (TMAE/TMD/TME/TMM) — o front agrega.
+        "eventos": [
+            {
+                "id": r["massiva"],
+                "data": r["data"].isoformat() if r["data"] else None,
+                "mes": MESES_PT[r["data"].month - 1] if r["data"] else None,
+                "cidade": r["cidade"],
+                "tp": r["troca"],
+                "tecnico": r.get("tecnico"),
+                "motivo": r.get("motivo"),
+                "erro": r.get("erro_processo"),
+                "ini": r.get("t_inicio"),
+                "acio": r.get("t_acionamento"),
+                "exec_ini": r.get("t_exec_ini"),
+                "exec_fim": r.get("t_exec_fim"),
+                "final": r.get("t_finalizacao"),
+                "os": os_por_massiva.get(r["massiva"], 0),
+            }
+            for r in registros
+        ],
         "validacao": {
             "divergencias_diario": [],
             "divergencias_cidades": [],
