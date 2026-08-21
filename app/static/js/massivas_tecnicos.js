@@ -19,7 +19,13 @@
   const AMOSTRA_MINIMA = 5;         // abaixo disso, não disputa o topo
   let base = "mediana";             // mediana | media
   let ordem = "tme";
+  let tecnicoSel = "";              // "" = todos
   let chart = null;
+
+  // Nomes que aparecem na coluna Técnico do WVSA mas NÃO são técnicos de campo
+  // (confirmado com a operação). Ficam de fora dos indicadores e do ranking.
+  const NAO_TECNICOS = [/hygor\s+dos\s+santos/i];
+  const ehTecnicoValido = (nome) => !!nome && !NAO_TECNICOS.some((re) => re.test(nome));
 
   if (!EVENTOS.length) {
     box.innerHTML = "";
@@ -79,7 +85,12 @@
 
   function calcular() {
     const set = mesesSelecionados();
-    const eventos = EVENTOS.filter((e) => !e.mes || set.has(e.mes));
+    const eventos = EVENTOS
+      .filter((e) => !e.mes || set.has(e.mes))
+      // remove quem não é técnico de campo (ex.: cadastros administrativos)
+      .filter((e) => !e.tecnico || ehTecnicoValido(e.tecnico))
+      // filtro de técnico da barra superior
+      .filter((e) => !tecnicoSel || e.tecnico === tecnicoSel);
 
     const grupos = new Map();
     for (const e of eventos) {
@@ -216,6 +227,32 @@
     a.download = `massivas_tempo_por_tecnico_${base}.png`;
     a.click();
   }
+
+  // ---------- filtro de técnico (barra superior) ----------
+  function popularSelectTecnicos() {
+    const sel = document.getElementById("t-filtro");
+    if (!sel) return;
+    const nomes = [...new Set(
+      EVENTOS.map((e) => e.tecnico).filter((n) => ehTecnicoValido(n))
+    )].sort((a, b) => a.localeCompare(b, "pt"));
+    sel.innerHTML =
+      '<option value="">Todos os técnicos</option>' +
+      nomes.map((n) => `<option value="${n}">${n}</option>`).join("");
+    sel.addEventListener("change", (e) => {
+      tecnicoSel = e.target.value;
+      renderTudo();
+    });
+  }
+  popularSelectTecnicos();
+
+  // "Limpar filtros" da tela também zera o técnico
+  const btnLimpar = document.getElementById("m-limpar");
+  if (btnLimpar) btnLimpar.addEventListener("click", () => {
+    tecnicoSel = "";
+    const sel = document.getElementById("t-filtro");
+    if (sel) sel.value = "";
+    setTimeout(renderTudo, 0);
+  });
 
   // ---------- eventos de UI ----------
   document.querySelectorAll("#t-base button").forEach((b) => b.addEventListener("click", () => {

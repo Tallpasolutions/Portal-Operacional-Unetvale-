@@ -8,11 +8,19 @@
 <div class="toolbar">
   <label>De <select id="m-ini"></select></label>
   <label>Até <select id="m-fim"></select></label>
+  <label>Técnico <select id="t-filtro"><option value="">Todos os técnicos</option></select></label>
   <label>Mês (visão diária) <select id="m-dia"></select></label>
   <label>Métrica (visão diária) <select id="m-metrica"></select></label>
   <button class="btn sec" id="m-limpar">Limpar filtros</button>
 </div>
 <div class="chips" id="chips-massivas"></div>
+
+<!-- Tempos de atendimento (TMAE/TMD/TME/TMM) — indicadores principais -->
+<p class="subnote" id="tmp-aviso">
+  <b>TMAE</b> acionamento da equipe · <b>TMD</b> deslocamento · <b>TME</b> execução ·
+  <b>TMM</b> massiva completa (meta <b>7h</b>). O técnico é quem <b>atendeu</b> a massiva.
+</p>
+<div class="kpis" id="t-kpis"></div>
 
 <div class="kpis" id="m-kpis"></div>
 
@@ -35,13 +43,7 @@
 </div>
 
 <h3 class="secao">Tempo de atendimento por técnico</h3>
-<p class="subnote" id="tmp-aviso">
-  <b>TMAE</b> acionamento da equipe · <b>TMD</b> deslocamento · <b>TME</b> execução ·
-  <b>TMM</b> massiva completa (meta <b>7h</b>). O técnico é quem <b>atendeu</b> a massiva.
-  Ranking balizado pelo <b>TME</b>.
-</p>
-
-<div class="kpis" id="t-kpis"></div>
+<p class="subnote">Ranking balizado pelo <b>TME</b> (tempo de execução).</p>
 
 <div class="card" style="margin-bottom:16px;">
   <div class="card-h">
