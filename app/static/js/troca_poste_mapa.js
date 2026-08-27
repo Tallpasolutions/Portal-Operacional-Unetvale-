@@ -16,8 +16,15 @@
   const ROTULO = (window.__TP__ || {}).rotulos_risco || {};
 
   let mapa = null;
-  let camada = null;
+  let camada = null;          // desligamentos
+  let camadaRede = null;      // cabos + postes
   let ultimasLinhas = [];
+  let redeCarregada = null;   // chave das cidades já baixadas
+  let carregando = false;
+
+  // Postes só acima deste zoom: são milhares e, de longe, viram uma mancha que
+  // esconde os cabos — que é o que importa ver.
+  const ZOOM_POSTES = 15;
 
   function criar() {
     if (mapa) return;
@@ -26,7 +33,9 @@
       maxZoom: 19,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     }).addTo(mapa);
-    camada = L.layerGroup().addTo(mapa);
+    camadaRede = L.layerGroup().addTo(mapa);   // embaixo
+    camada = L.layerGroup().addTo(mapa);       // desligamentos por cima
+    mapa.on("zoomend", aplicarZoomPostes);
     // Litoral norte de SC: enquadramento inicial até haver ponto para ajustar.
     mapa.setView([-27.1, -48.75], 10);
   }
@@ -86,11 +95,101 @@
       legenda + (semCoord ? `<span class="upd-sep">·</span><span>${semCoord} sem posição</span>` : "");
   }
 
+  // ---- malha óptica -----------------------------------------------------
+  let grupoPostes = null;
+
+  function aplicarZoomPostes() {
+    if (!grupoPostes || !mapa) return;
+    const deveMostrar = mapa.getZoom() >= ZOOM_POSTES;
+    if (deveMostrar && !camadaRede.hasLayer(grupoPostes)) camadaRede.addLayer(grupoPostes);
+    if (!deveMostrar && camadaRede.hasLayer(grupoPostes)) camadaRede.removeLayer(grupoPostes);
+    atualizarLegendaRede();
+  }
+
+  let infoRede = null;
+
+  function desenharRede(rede) {
+    infoRede = rede;
+    camadaRede.clearLayers();
+    grupoPostes = L.layerGroup();
+
+    for (const c of rede.cabos) {
+      L.polyline(c.coords, {
+        color: c.externo ? "#2c7be5" : "#9da9bb",
+        weight: 2,
+        opacity: 0.75,
+      }).bindPopup(
+        `<div style="font-size:13px"><b>${c.sigla || "cabo"}</b><br>` +
+        `<span style="color:#5e6e82">${c.tipo || "—"}${c.fibras ? " · " + c.fibras + " fibras" : ""}</span></div>`
+      ).addTo(camadaRede);
+    }
+
+    for (const p of rede.postes) {
+      L.circleMarker([p.lat, p.lon], {
+        radius: 2.5, color: "#1f5fc0", weight: 1, fillColor: "#1f5fc0", fillOpacity: 0.8,
+      }).bindPopup(`<div style="font-size:13px"><b>${p.sigla || "poste"}</b><br><span style="color:#5e6e82">poste alugado</span></div>`)
+        .addTo(grupoPostes);
+    }
+
+    // Cabos ficam sob os desligamentos: o ponto vermelho não pode sumir.
+    camadaRede.eachLayer((l) => l.bringToBack && l.bringToBack());
+    aplicarZoomPostes();
+  }
+
+  async function carregarRede(linhas) {
+    const cidades = [...new Set((linhas || []).map((l) => l.cidade))].sort();
+    const chave = cidades.join("|");
+    if (!cidades.length || chave === redeCarregada || carregando) { aplicarZoomPostes(); return; }
+    carregando = true;
+    atualizarLegendaRede("carregando");
+    try {
+      const r = await fetch(`/troca-poste/rede.json?cidades=${encodeURIComponent(cidades.join(","))}`);
+      if (!r.ok) throw new Error(r.status);
+      desenharRede(await r.json());
+      redeCarregada = chave;
+    } catch (e) {
+      // Falhar calado aqui seria pior que não desenhar: o mapa pareceria dizer
+      // "não há rede nesta região".
+      infoRede = null;
+      atualizarLegendaRede("erro");
+      return;
+    } finally {
+      carregando = false;
+    }
+    atualizarLegendaRede();
+  }
+
+  function atualizarLegendaRede(situacao) {
+    const el = document.getElementById("tp-mapa-rede");
+    if (!el) return;
+    if (situacao === "carregando") { el.textContent = "carregando malha…"; return; }
+    if (situacao === "erro") {
+      el.innerHTML = `<span style="color:#e63757">malha não carregou — o mapa mostra só os desligamentos</span>`;
+      return;
+    }
+    if (!infoRede) { el.textContent = ""; return; }
+    const postesVisiveis = mapa && mapa.getZoom() >= ZOOM_POSTES;
+    el.innerHTML =
+      `<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:14px;height:3px;background:#2c7be5"></span>cabo externo</span>` +
+      `<span class="upd-sep">·</span>` +
+      `<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:14px;height:3px;background:#9da9bb"></span>interno</span>` +
+      `<span class="upd-sep">·</span><span>${infoRede.cabos.length} cabos</span>` +
+      (infoRede.cabos_sem_geometria
+        ? `<span class="upd-sep">·</span><span title="O Geogrid não forneceu coordenada para estes cabos — eles existem, apenas não podem ser desenhados">${infoRede.cabos_sem_geometria} sem geometria</span>`
+        : "") +
+      `<span class="upd-sep">·</span>` +
+      (infoRede.postes_omitidos
+        // "0 postes" seria mentira: eles existem, só não foram buscados.
+        ? `<span title="Os postes só são carregados com até ${infoRede.max_cidades_com_postes} cidades no filtro — são milhares e só aparecem no zoom ${ZOOM_POSTES}+">postes não carregados (filtre por cidade)</span>`
+        : `<span>${infoRede.postes.length} postes alugados${postesVisiveis ? "" : ` (zoom ${ZOOM_POSTES}+ para ver)`}</span>`);
+  }
+
   window.__tpMapa = {
     atualizar: desenhar,
     aoMostrar(linhas) {
       criar();
       desenhar(linhas || ultimasLinhas);
+      carregarRede(linhas || ultimasLinhas);
       // O container media 0 enquanto a aba estava oculta: sem isto o Leaflet
       // desenha os tiles no tamanho errado.
       setTimeout(() => mapa.invalidateSize(), 60);

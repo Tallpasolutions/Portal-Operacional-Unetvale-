@@ -101,6 +101,25 @@ def troca_poste():
     return render_template("troca-poste.html", ativo="troca-poste", pacote=pacote)
 
 
+@bp.route("/troca-poste/rede.json")
+@login_obrigatorio
+def troca_poste_rede():
+    """Malha óptica das cidades pedidas — carregada sob demanda pelo mapa.
+
+    Fica fora do pacote da página de propósito: a malha inteira passa de 1 MB, e
+    quem abre a tela para ver a lista de desligamentos não precisa baixar cabo
+    nenhum. O mapa pede só as cidades do recorte quando a aba é aberta.
+    """
+    bruto = (request.args.get("cidades") or "").strip()
+    cidades = [c for c in (x.strip() for x in bruto.split(",")) if c] or None
+    resp = jsonify(tp.rede(cidades))
+    # A malha vem do espelho do Geogrid, sincronizado semanalmente: relê-la a
+    # cada troca de aba é desperdício. `private` porque a resposta depende da
+    # sessão (a rota exige login).
+    resp.headers["Cache-Control"] = "private, max-age=3600"
+    return resp
+
+
 @bp.route("/usuarios")
 @admin_obrigatorio
 def usuarios():

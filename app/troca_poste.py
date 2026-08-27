@@ -99,6 +99,55 @@ def _ponto(ewkb_hex):
         return None
 
 
+# O PostgREST tem teto próprio de linhas por resposta (1000 no padrão do
+# Supabase) e o ignora silenciosamente se `limit` pedir mais. Para a malha isso
+# é grave: um mapa com metade dos cabos faz alguém concluir "não tem fibra
+# aqui". Buscamos por páginas até a resposta vir menor que a página.
+PAGINA = 1000
+
+
+def _select_paginado(tabela, params, teto):
+    linhas = []
+    while len(linhas) < teto:
+        p = dict(params)
+        p["limit"] = str(min(PAGINA, teto - len(linhas)))
+        p["offset"] = str(len(linhas))
+        lote = supa.select(tabela, p, schema=SCHEMA)
+        linhas.extend(lote)
+        if len(lote) < int(p["limit"]):
+            break
+    return linhas
+
+
+def _linha_geom(ewkb_hex, maximo=400):
+    """Extrai [(lat, lon), ...] de um LINESTRING em EWKB hexadecimal.
+
+    Mesma razão do `_ponto`: o PostgREST devolve `geography` como EWKB hex, e
+    decodificar aqui evita criar view só para expor a geometria.
+
+    Formato: ordem de byte, tipo (com bit de SRID), SRID, nº de pontos, e então
+    os pares de doubles. `maximo` é uma trava de sanidade — cabo com mais
+    pontos que isso é dado corrompido, não cabo.
+    """
+    if not ewkb_hex:
+        return None
+    try:
+        b = bytes.fromhex(ewkb_hex)
+        ordem = "<" if b[0] == 1 else ">"
+        tipo, = struct.unpack_from(ordem + "I", b, 1)
+        deslocamento = 5 + (4 if tipo & 0x20000000 else 0)
+        if (tipo & 0xFF) != 2:
+            return None
+        n, = struct.unpack_from(ordem + "I", b, deslocamento)
+        if not 1 < n <= maximo:
+            return None
+        deslocamento += 4
+        coords = struct.unpack_from(ordem + f"{n * 2}d", b, deslocamento)
+        return [(round(coords[i + 1], 6), round(coords[i], 6)) for i in range(0, len(coords), 2)]
+    except Exception:
+        return None
+
+
 def _hhmm(valor):
     return valor[:5] if valor else None
 
@@ -234,6 +283,99 @@ def visao(de=None, ate=None, cidade=None, bairro=None, risco=None, incluir_passa
         "bairros": bairros,
         "cidade_valida": cidade_valida,
         "rotulos_risco": ROTULO_RISCO,
+    }
+
+
+# Acima de tantas cidades os postes não vêm: são ~7,3 mil no total e
+# respondem pela maior parte do payload, e só ficam visíveis no zoom 15+ —
+# onde já se está olhando uma cidade só. Puxar todos para uma visão de 11
+# cidades custa segundos numa função serverless sem nada em troca.
+MAX_CIDADES_COM_POSTES = 3
+
+
+def rede(cidades=None, limite_cabos=5000, limite_postes=9000):
+    """Malha óptica das cidades pedidas: cabos (LineString) e postes alugados.
+
+    Carregada sob demanda pelo mapa, e só para as cidades do recorte — a malha
+    inteira são ~665 kB, e não faz sentido baixar Navegantes para olhar um
+    desligamento em Tijucas.
+
+    Só postes com `status='alugado'`: são os que a Unetvale de fato usa, e
+    portanto os que importam quando a Celesc vai trocar um poste.
+
+    Devolve também quantos cabos ficaram DE FORA por não terem geometria no
+    Geogrid. Isso vai para a legenda: um mapa que omite parte da malha em
+    silêncio faz alguém concluir "não temos fibra aqui" — que é justamente o
+    erro caro deste domínio.
+    """
+    filtro_cidade = {}
+    if cidades:
+        try:
+            linhas = supa.select("cidades", {"select": "id,nome"}, schema=SCHEMA)
+        except Exception as e:
+            _falhou("rede/cidades", e)
+            return {"cabos": [], "postes": [], "cabos_sem_geometria": 0,
+                    "postes_omitidos": False, "max_cidades_com_postes": MAX_CIDADES_COM_POSTES}
+        ids = [c["id"] for c in linhas if c["nome"] in cidades]
+        if not ids:
+            return {"cabos": [], "postes": [], "cabos_sem_geometria": 0,
+                    "postes_omitidos": False, "max_cidades_com_postes": MAX_CIDADES_COM_POSTES}
+        filtro_cidade = {"cidade_id": f"in.({','.join(ids)})"}
+
+    cabos = []
+    cabos_sem_geometria = 0
+    try:
+        params = {
+            "select": "sigla,tipo_nome,fibras,eh_cabo_externo,geom",
+            "order": "id_geogrid.asc",  # ordem estável: sem ela o offset repete/pula linhas
+        }
+        params.update(filtro_cidade)
+        for r in _select_paginado("rede_cabos", params, limite_cabos):
+            coords = _linha_geom(r.get("geom"))
+            if not coords:
+                cabos_sem_geometria += 1
+                continue
+            cabos.append({
+                "sigla": r.get("sigla"),
+                "tipo": r.get("tipo_nome"),
+                "fibras": r.get("fibras"),
+                "externo": r.get("eh_cabo_externo"),
+                "coords": coords,
+            })
+    except Exception as e:
+        _falhou("rede/cabos", e)
+
+    postes = []
+    postes_omitidos = not cidades or len(cidades) > MAX_CIDADES_COM_POSTES
+    try:
+        if postes_omitidos:
+            raise StopIteration
+        params = {
+            "select": "sigla,status,geom",
+            "item": "eq.poste",
+            "status": "eq.alugado",
+            "geom": "not.is.null",
+            "order": "id_geogrid.asc",
+        }
+        params.update(filtro_cidade)
+        for r in _select_paginado("rede_itens", params, limite_postes):
+            ponto = _ponto(r.get("geom"))
+            if not ponto:
+                continue
+            postes.append({"sigla": r.get("sigla"), "lat": ponto[0], "lon": ponto[1]})
+    except StopIteration:
+        pass
+    except Exception as e:
+        _falhou("rede/postes", e)
+
+    return {
+        "cabos": cabos,
+        "postes": postes,
+        "cabos_sem_geometria": cabos_sem_geometria,
+        # A tela precisa saber a diferença entre "não há poste alugado aqui" e
+        # "não busquei os postes" — senão o mapa mente por omissão.
+        "postes_omitidos": postes_omitidos,
+        "max_cidades_com_postes": MAX_CIDADES_COM_POSTES,
     }
 
 
