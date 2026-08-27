@@ -52,6 +52,32 @@
   function renderFiltros() {
     document.querySelectorAll(".tm-ind-nome").forEach((e) => (e.textContent = dados().label || indAtual));
 
+    // Supervisor seleciona as equipes dele de uma vez. Fica ao lado dos chips
+    // de empresa em vez de substituí-los: depois de escolher o supervisor dá
+    // para tirar uma equipe específica do recorte, o que um filtro exclusivo
+    // não permitiria.
+    const supBox = document.getElementById("tm-supervisores");
+    const SUP = window.__iqiSupervisor ? window.__iqiSupervisor.lista : [];
+    if (supBox) {
+      supBox.innerHTML = SUP.length
+        ? SUP.map((s) =>
+            `<button class="fchip" data-sup="${s.id}" title="${s.equipes.join(", ")}">${s.nome}</button>`).join("")
+        : '<span style="font-size:12.5px;color:var(--muted)">nenhum cadastrado — veja Configurações</span>';
+      supBox.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+        const s = SUP.find((x) => x.id === b.dataset.sup);
+        const jaEra = b.classList.contains("on");
+        empresasSel.clear();
+        if (!jaEra && s) for (const eq of s.equipes) empresasSel.add(eq);
+        renderFiltros(); renderTabela();
+        // `renderFiltros` reconstruiu os chips: remarca pelo dataset, não pela
+        // referência antiga do elemento, que já saiu do DOM.
+        if (!jaEra) {
+          const novo = supBox.querySelector(`button[data-sup="${b.dataset.sup}"]`);
+          if (novo) novo.classList.add("on");
+        }
+      }));
+    }
+
     const empBox = document.getElementById("tm-empresas");
     empBox.innerHTML = empresasDisponiveis().map((e) =>
       `<button class="fchip ${empresasSel.has(e) ? "on" : ""}" data-emp="${e}">${e}</button>`).join("");
@@ -118,6 +144,7 @@
     if (!btn || btn.dataset.id === indAtual) return;
     indAtual = btn.dataset.id;
     empresasSel.clear(); mesesSel.clear();
+    document.querySelectorAll("#tm-supervisores .fchip").forEach((x) => x.classList.remove("on"));
     renderFiltros(); renderTabela();
   });
 
