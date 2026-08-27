@@ -6,9 +6,11 @@ o cross-filter e os gráficos rodam no cliente (sem round-trip por clique).
 import os
 import re
 
-from flask import Blueprint, render_template, jsonify, request, abort
+from flask import (
+    Blueprint, abort, flash, jsonify, redirect, render_template, request, url_for
+)
 
-from . import supa, dados, troca_poste as tp
+from . import supa, dados, supervisores, troca_poste as tp
 from .auth import login_obrigatorio, admin_obrigatorio, usuario_atual
 
 bp = Blueprint("dash", __name__)
@@ -28,7 +30,6 @@ def injeta_status():
 @login_obrigatorio
 def home():
     # Sem tela inicial: cai direto na Produtividade.
-    from flask import redirect, url_for
     return redirect(url_for("dash.produtividade"))
 
 
@@ -105,6 +106,8 @@ def troca_poste():
     hoje..+7 dias, porque a pergunta do módulo é sobre o que ainda VAI
     acontecer; o filtro permite abrir a janela.
     """
+    if not usuario_atual()["ve_troca_poste"]:
+        abort(403)
     de, ate = tp.periodo_padrao()
     pacote = {
         "linhas": tp.listar(),
@@ -149,9 +152,86 @@ def usuarios():
 
 
 @bp.route("/configuracoes")
-@admin_obrigatorio
+@login_obrigatorio
 def configuracoes():
-    return render_template("configuracoes.html", ativo="configuracoes", usuario=usuario_atual())
+    """Conta do próprio usuário e, para o admin, a gestão de supervisores.
+
+    Deixou de ser exclusiva do admin: trocar a própria senha é algo que todo
+    usuário precisa fazer, e antes só o admin conseguia.
+    """
+    u = usuario_atual()
+    contexto = {"ativo": "configuracoes", "usuario": u}
+    if u["is_admin"]:
+        contexto["supervisores"] = supervisores.listar()
+        contexto["equipes"] = supervisores.equipes_disponiveis()
+        try:
+            contexto["usuarios"] = supa.select(
+                "usuarios", {"select": "id,nome,email", "order": "nome.asc"})
+        except Exception:
+            contexto["usuarios"] = []
+    return render_template("configuracoes.html", **contexto)
+
+
+@bp.route("/supervisores/marcar", methods=["POST"])
+@admin_obrigatorio
+def supervisor_marcar():
+    """Promove um usuário existente a supervisor.
+
+    Reaproveita a conta que já existe em vez de criar outra: senha, login e
+    recuperação continuam num lugar só. Criar o usuário segue sendo feito na
+    tela Usuários, pelo admin.
+    """
+    uid = (request.form.get("usuario_id") or "").strip()
+    if not uid:
+        flash("Escolha um usuário.", "erro")
+        return redirect(url_for("dash.configuracoes"))
+    try:
+        if supervisores.eh_supervisor(uid):
+            flash("Esse usuário já é supervisor.", "erro")
+        else:
+            supervisores.marcar(uid)
+            flash("Supervisor cadastrado.", "ok")
+    except Exception as e:
+        flash(f"Erro ao cadastrar supervisor: {e}", "erro")
+    return redirect(url_for("dash.configuracoes"))
+
+
+@bp.route("/supervisores/remover", methods=["POST"])
+@admin_obrigatorio
+def supervisor_remover():
+    """Tira o papel de supervisor. A CONTA permanece — só o papel sai.
+
+    Os vínculos com equipes caem junto (on delete cascade na migration 0003).
+    """
+    uid = (request.form.get("usuario_id") or "").strip()
+    try:
+        supervisores.desmarcar(uid)
+        flash("Supervisor removido. A conta de acesso continua ativa.", "ok")
+    except Exception as e:
+        flash(f"Erro ao remover: {e}", "erro")
+    return redirect(url_for("dash.configuracoes"))
+
+
+@bp.route("/supervisores/equipe", methods=["POST"])
+@admin_obrigatorio
+def supervisor_equipe():
+    """Liga ou desliga uma equipe de um supervisor."""
+    uid = (request.form.get("usuario_id") or "").strip()
+    equipe = (request.form.get("equipe") or "").strip()
+    acao = request.form.get("acao") or "vincular"
+    if not uid or not equipe:
+        flash("Informe o supervisor e a equipe.", "erro")
+        return redirect(url_for("dash.configuracoes"))
+    try:
+        if acao == "desvincular":
+            supervisores.desvincular(uid, equipe)
+            flash(f"Equipe {equipe} desvinculada.", "ok")
+        else:
+            supervisores.vincular(uid, equipe)
+            flash(f"Equipe {equipe} vinculada.", "ok")
+    except Exception as e:
+        flash(f"Erro ao alterar o vínculo: {e}", "erro")
+    return redirect(url_for("dash.configuracoes"))
 
 
 @bp.route("/monitoramento")

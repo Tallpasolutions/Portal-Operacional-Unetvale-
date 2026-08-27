@@ -89,6 +89,26 @@ def update(tabela, match, mudancas):
     return r.json()
 
 
+def delete(tabela, match):
+    """DELETE /rest/v1/<tabela>?<match>.
+
+    `match` é um dict {coluna: valor} convertido em filtro de igualdade — a
+    mesma forma do `update`. Sem filtro o PostgREST recusaria apagar a tabela
+    inteira, mas não confiamos nisso: um match vazio levanta erro aqui.
+    """
+    if not match:
+        raise ValueError("delete sem filtro não é permitido")
+    url, _ = _cfg()
+    params = {k: f"eq.{v}" for k, v in match.items()}
+    r = requests.delete(
+        f"{url}/rest/v1/{tabela}",
+        headers=_headers(),
+        params=params,
+        timeout=TIMEOUT,
+    )
+    r.raise_for_status()
+
+
 def upsert(tabela, registro, on_conflict):
     """POST com Prefer: resolution=merge-duplicates (upsert por `on_conflict`)."""
     url, _ = _cfg()
