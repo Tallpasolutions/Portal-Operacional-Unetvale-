@@ -18,24 +18,33 @@ def _cfg():
     return url, key
 
 
-def _headers(extra=None):
+def _headers(extra=None, schema=None):
+    """Cabeçalhos padrão. `schema` seleciona um schema fora do `public`.
+
+    O PostgREST endereça schema por cabeçalho, não por caminho: `Accept-Profile`
+    na leitura e `Content-Profile` na escrita. Sem isso, uma tabela de outro
+    schema responde 404 mesmo estando exposta na Data API.
+    """
     _, key = _cfg()
     h = {
         "apikey": key,
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
     }
+    if schema:
+        h["Accept-Profile"] = schema
+        h["Content-Profile"] = schema
     if extra:
         h.update(extra)
     return h
 
 
-def select(tabela, params=None):
+def select(tabela, params=None, schema=None):
     """GET /rest/v1/<tabela> -> lista de dicts."""
     url, _ = _cfg()
     r = requests.get(
         f"{url}/rest/v1/{tabela}",
-        headers=_headers(),
+        headers=_headers(schema=schema),
         params=params or {},
         timeout=TIMEOUT,
     )
@@ -43,8 +52,8 @@ def select(tabela, params=None):
     return r.json()
 
 
-def select_one(tabela, params=None):
-    rows = select(tabela, params)
+def select_one(tabela, params=None, schema=None):
+    rows = select(tabela, params, schema=schema)
     return rows[0] if rows else None
 
 

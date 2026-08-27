@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block title %}Troca de Poste · Unetvale{% endblock %}
+{% block page_title %}Troca de Poste{% endblock %}
+{% block content %}
+{% if not pacote.linhas %}
+  <div class="vazio">
+    Sem desligamentos programados no momento. A Celesc publica os avisos com poucos dias de
+    antecedência — a próxima coleta preencherá este painel.
+  </div>
+{% else %}
+
+<div class="view-bar">
+  <div class="view-switch" id="tp-abas">
+    <button data-aba="desligamentos" class="active">Desligamentos</button>
+    <button data-aba="revisao">Revisão <span id="tp-badge-revisao"></span></button>
+    <button data-aba="ordens">Ordens de Serviço</button>
+    <button data-aba="mapa">Mapa</button>
+    <button data-aba="coletas">Coletas</button>
+  </div>
+</div>
+
+<!-- ===================== Desligamentos ===================== -->
+<section data-painel="desligamentos">
+  <div class="toolbar">
+    <label>Período
+      <span class="toggle" id="tp-presets">
+        <button data-dias="0">Hoje</button>
+        <button data-dias="1">Amanhã</button>
+        <button data-dias="7" class="active">7 dias</button>
+        <button data-dias="30">30 dias</button>
+      </span>
+    </label>
+    <label>De <input type="date" id="tp-de"></label>
+    <label>Até <input type="date" id="tp-ate"></label>
+    <label>Cidade <select id="tp-cidade"></select></label>
+    <label id="tp-bairro-wrap" style="display:none">Bairro <select id="tp-bairro"></select></label>
+    <label>Risco <select id="tp-risco"></select></label>
+    <button class="btn sec" id="tp-limpar">Limpar filtros</button>
+  </div>
+
+  <p class="subnote" id="tp-subnote"></p>
+  <div class="chips" id="tp-chips"></div>
+
+  <div class="kpis" id="tp-kpis"></div>
+
+  <div class="grid charts-2" style="margin-bottom:16px;">
+    <div class="card">
+      <div class="card-h">Desligamentos por dia</div>
+      <div class="card-b"><div class="chart-box"><canvas id="g-tp-dia"></canvas></div></div>
+    </div>
+    <div class="card">
+      <div class="card-h">Ranking de cidades (total · parcela crítica)</div>
+      <div class="card-b"><div class="chart-box"><canvas id="g-tp-cidades"></canvas></div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-h">
+      <span>Desligamentos — <span id="tp-contagem"></span></span>
+      <button class="btn-ghost" id="tp-exportar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Exportar CSV
+      </button>
+    </div>
+    <div class="card-b tabela-wrap">
+      <table class="tbl" id="tp-tabela">
+        <thead><tr>
+          <th data-col="classificacao">Risco</th>
+          <th data-col="cidade">Cidade / Bairro</th>
+          <th data-col="logradouro">Endereço</th>
+          <th data-col="data">Data</th>
+          <th class="num" data-col="dist_cabo">Cabo</th>
+          <th class="num" data-col="qtd_postes">Postes</th>
+          <th class="num" data-col="geo_score">Geo</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== Revisão ===================== -->
+<section data-painel="revisao" hidden>
+  <p class="subnote">
+    Desligamentos cuja posição não atingiu o score mínimo de confiança. Sem posição confiável o
+    sistema <b>não classifica</b> — decidir sobre rede em cima de palpite é como o script antigo
+    gerava falso positivo. Confirmar aqui vira verdade permanente e o endereço não volta para a fila.
+  </p>
+  <div class="kpis" id="tp-rev-kpis"></div>
+  <div class="card">
+    <div class="card-h">Fila de revisão</div>
+    <div class="card-b tabela-wrap">
+      <table class="tbl" id="tp-rev-tabela">
+        <thead><tr>
+          <th class="num">Score</th><th>Cidade / Bairro</th><th>Endereço</th>
+          <th>Data</th><th>Método</th><th class="num">Fontes</th><th class="num">Dispersão</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== Ordens de Serviço ===================== -->
+<section data-painel="ordens" hidden>
+  <div class="alert alert-ok" id="tp-os-modo">
+    <b>Modo seguro.</b> Nenhuma OS foi enviada ao WVSA. O envio real só é liberado depois de
+    conferir 20 rascunhos campo a campo, e só sai por clique humano — nenhum job cria OS.
+  </div>
+  <div class="kpis" id="tp-os-kpis"></div>
+  <div class="card">
+    <div class="card-h">Ordens de serviço</div>
+    <div class="card-b tabela-wrap">
+      <table class="tbl" id="tp-os-tabela">
+        <thead><tr>
+          <th>Status</th><th>Criada em</th><th>Executor</th><th>Período</th>
+          <th>Agendamento</th><th>Nº no WVSA</th><th>Solicitação</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== Mapa ===================== -->
+<section data-painel="mapa" hidden>
+  <p class="subnote" id="tp-mapa-nota">
+    Desligamentos posicionados. Cor = risco. Só aparecem os que têm posição confiável ou
+    provisória; os indeterminados sem coordenada ficam de fora até serem revisados.
+  </p>
+  <div class="card">
+    <div class="card-h">
+      <span>Mapa dos desligamentos</span>
+      <span class="upd" id="tp-mapa-legenda"></span>
+    </div>
+    <div class="card-b">
+      <div id="tp-mapa" style="height:560px;border-radius:8px;overflow:hidden;"></div>
+      <p class="upd" id="tp-mapa-rede" style="margin-top:10px;flex-wrap:wrap"></p>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== Coletas ===================== -->
+<section data-painel="coletas" hidden>
+  <p class="subnote">
+    Coleta na Celesc das 11 cidades monitoradas. Desligamento que sai da lista da Celesc é marcado
+    como desaparecido e some das telas, mas <b>não é apagado</b> — fica no banco para auditoria.
+  </p>
+  <div class="card">
+    <div class="card-h">Histórico de coletas</div>
+    <div class="card-b tabela-wrap">
+      <table class="tbl" id="tp-coletas-tabela">
+        <thead><tr>
+          <th>Início</th><th>Fim</th><th>Status</th><th class="num">Cidades</th>
+          <th class="num">Novos</th><th class="num">Alterados</th><th class="num">Desapareceram</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet.css') }}">
+<script src="{{ url_for('static', filename='vendor/leaflet.js') }}"></script>
+<script>window.__TP__ = {{ pacote|tojson }};</script>
+<script src="{{ url_for('static', filename='js/troca_poste_mapa.js') }}"></script>
+<script src="{{ url_for('static', filename='js/troca_poste.js') }}"></script>
+{% endblock %}

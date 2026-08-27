@@ -28,6 +28,9 @@
         <a href="{{ url_for('dash.massivas') }}" class="{{ 'on' if ativo=='massivas' }}">
           <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
           <span>Massivas</span></a>
+        <a href="{{ url_for('dash.troca_poste') }}" class="{{ 'on' if ativo=='troca-poste' }}">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          <span>Troca de Poste</span></a>
         {% if usuario.is_admin %}
         <div class="menu-sep"></div>
         <a href="{{ url_for('dash.usuarios') }}" class="{{ 'on' if ativo=='usuarios' }}">

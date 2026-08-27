@@ -8,7 +8,7 @@ import re
 
 from flask import Blueprint, render_template, jsonify, request, abort
 
-from . import supa, dados
+from . import supa, dados, troca_poste as tp
 from .auth import login_obrigatorio, admin_obrigatorio, usuario_atual
 
 bp = Blueprint("dash", __name__)
@@ -74,6 +74,50 @@ def massivas():
     payload = (row or {}).get("payload") or {"meses": [], "metricas": [], "diario": [], "cidades": [], "totais_mes": []}
     return render_template("massivas.html", ativo="massivas", payload=payload,
                            meta=_meta(row))
+
+
+@bp.route("/troca-poste")
+@login_obrigatorio
+def troca_poste():
+    """Desligamentos da Celesc cruzados com a rede óptica.
+
+    Segue o padrão das outras telas: injeta o pacote e o cliente cuida de
+    filtro, gráficos e abas — sem round-trip por clique. O período padrão é
+    hoje..+7 dias, porque a pergunta do módulo é sobre o que ainda VAI
+    acontecer; o filtro permite abrir a janela.
+    """
+    de, ate = tp.periodo_padrao()
+    pacote = {
+        "linhas": tp.listar(),
+        "revisao": tp.fila_revisao(),
+        "coletas": tp.coletas(),
+        "ordens": tp.ordens(),
+        "rotulos_risco": tp.ROTULO_RISCO,
+        "ordem_risco": tp.ORDEM_RISCO,
+        "ultima_coleta": tp.ultima_coleta(),
+        "hoje": tp.hoje().isoformat(),
+        "padrao": {"de": de, "ate": ate},
+    }
+    return render_template("troca-poste.html", ativo="troca-poste", pacote=pacote)
+
+
+@bp.route("/troca-poste/rede.json")
+@login_obrigatorio
+def troca_poste_rede():
+    """Malha óptica das cidades pedidas — carregada sob demanda pelo mapa.
+
+    Fica fora do pacote da página de propósito: a malha inteira passa de 1 MB, e
+    quem abre a tela para ver a lista de desligamentos não precisa baixar cabo
+    nenhum. O mapa pede só as cidades do recorte quando a aba é aberta.
+    """
+    bruto = (request.args.get("cidades") or "").strip()
+    cidades = [c for c in (x.strip() for x in bruto.split(",")) if c] or None
+    resp = jsonify(tp.rede(cidades))
+    # A malha vem do espelho do Geogrid, sincronizado semanalmente: relê-la a
+    # cada troca de aba é desperdício. `private` porque a resposta depende da
+    # sessão (a rota exige login).
+    resp.headers["Cache-Control"] = "private, max-age=3600"
+    return resp
 
 
 @bp.route("/usuarios")
