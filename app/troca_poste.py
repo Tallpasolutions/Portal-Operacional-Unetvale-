@@ -421,6 +421,95 @@ def fila_revisao(limite=200):
     return out
 
 
+def criar_rascunho(desligamento_id, usuario_id, solicitacao, executor,
+                   periodo=None, tipo_tecnico=None, agendamento=None):
+    """Grava o rascunho da OS — **sem enviar nada**.
+
+    Cria o agrupamento (mesmo para um desligamento só, para o modelo ser
+    único) e a OS em `status='rascunho'`, `origem='sistema'`. A constraint
+    `os_envio_exige_clique_humano` impede que esse registro chegue a 'criada'
+    sem passar pelo clique de envio.
+
+    A `chave_idempotencia` nasce aqui, ANTES de existir qualquer POST: é ela
+    que impede OS duplicada se o envio for repetido.
+    """
+    d = supa.select_one("desligamentos", {
+        "select": "id,cidade_id,bairro,data_evento,cidades(ibge_codigo)",
+        "id": f"eq.{desligamento_id}",
+    }, schema=SCHEMA)
+    if not d:
+        raise ValueError("desligamento não encontrado")
+
+    data_evento = d.get("data_evento")
+    ag = supa.insert("agrupamentos", {
+        "cidade_id": d["cidade_id"],
+        "data_evento": data_evento,
+        "criterio": "manual",
+        "rotulo": f"{d.get('bairro') or 'sem bairro'} — {data_evento}",
+        "criado_por": usuario_id,
+    }, schema=SCHEMA)
+    agrupamento_id = ag["id"]
+
+    supa.insert("agrupamento_itens", {
+        "agrupamento_id": agrupamento_id, "desligamento_id": desligamento_id,
+    }, schema=SCHEMA)
+
+    ordem = supa.insert("ordens_servico", {
+        "agrupamento_id": agrupamento_id,
+        "chave_idempotencia": f"os:{agrupamento_id}:{data_evento}",
+        "finalidade": "POST",
+        "cid_codigo": (d.get("cidades") or {}).get("ibge_codigo"),
+        "bairro_id": "",
+        "tipo_tecnico": tipo_tecnico or None,
+        "agendamento": agendamento or None,
+        "categoria_interna": "N",
+        "agendar_os": "N",
+        "data_inicio": data_evento,
+        "data_fim": data_evento,
+        "periodo": periodo or None,
+        "executor": executor,
+        "solicitacao": solicitacao,
+        "status": "rascunho",
+        "origem": "sistema",
+        # O dry-run foi desligado a pedido: o envio é real.
+        "dry_run": False,
+        "criado_por": usuario_id,
+    }, schema=SCHEMA)
+    return ordem
+
+
+def marcar_para_envio(ordem_id, usuario_id):
+    """Passa a ordem para 'pronta' com o clique humano registrado.
+
+    É este registro — `origem='clique_usuario'` mais `enviado_por` — que
+    autoriza o envio. O processo dentro da VPN só pega ordem nesse estado, e o
+    Postgres recusaria 'criada' sem ele.
+
+    Só promove rascunho ou ordem que falhou: reenviar algo já 'criada' ou
+    'enviando' duplicaria OS no WVSA.
+    """
+    atual = supa.select_one("ordens_servico", {
+        "select": "id,status", "id": f"eq.{ordem_id}",
+    }, schema=SCHEMA)
+    if not atual:
+        raise ValueError("ordem não encontrada")
+    if atual["status"] not in ("rascunho", "erro"):
+        raise ValueError(f"ordem está em '{atual['status']}' — não pode ser reenviada")
+
+    supa.update("ordens_servico", {"id": ordem_id}, {
+        "status": "pronta", "origem": "clique_usuario",
+        "enviado_por": usuario_id, "erro": None,
+    }, schema=SCHEMA)
+
+
+def ordem(ordem_id):
+    """Estado de uma ordem — a tela faz poll aqui depois de mandar enviar."""
+    return supa.select_one("ordens_servico", {
+        "select": "id,status,wvsa_os_numero,erro,tentativas,enviado_em,solicitacao",
+        "id": f"eq.{ordem_id}",
+    }, schema=SCHEMA)
+
+
 def coletas(limite=30):
     """Histórico das coletas na Celesc."""
     try:

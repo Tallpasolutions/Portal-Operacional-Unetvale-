@@ -258,6 +258,103 @@
       `<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted)">Fila vazia — nada aguardando revisão.</td></tr>`;
   }
 
+  // ---- candidatos a OS ---------------------------------------------------
+  // Confirmação obrigatória antes de enviar: o clique cria OS real e desloca
+  // equipe. O texto do confirm diz o endereço, para não haver "cliquei errado".
+  async function abrirEEnviar(l, botao) {
+    const script = l.script_os || "";
+    if (!confirm(
+      `Criar OS no WVSA para:\n\n${l.cidade} — ${l.bairro || ""}\n` +
+      `${[l.tipo_via, l.logradouro].filter(Boolean).join(" ")}\n${l.data_br}\n\n` +
+      `Isso cria a OS de verdade e desloca equipe.`)) return;
+
+    const marcar = (txt, on) => { botao.textContent = txt; botao.disabled = on; };
+    marcar("Criando…", true);
+    try {
+      const r1 = await fetch("/troca-poste/os", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ desligamento_id: l.id, solicitacao: script, executor: "infra" }),
+      });
+      const rascunho = await r1.json();
+      if (!r1.ok) throw new Error(rascunho.erro || `HTTP ${r1.status}`);
+
+      marcar("Enviando…", true);
+      const r2 = await fetch(`/troca-poste/os/${rascunho.ordem_id}/enviar`, { method: "POST" });
+      const env = await r2.json();
+      if (!r2.ok) throw new Error(env.erro || `HTTP ${r2.status}`);
+
+      await acompanhar(rascunho.ordem_id, botao);
+    } catch (e) {
+      marcar("Erro — tentar de novo", false);
+      alert(`Não foi possível enviar: ${e.message}`);
+    }
+  }
+
+  /** Poll do resultado. O envio roda dentro da VPN, então leva alguns segundos. */
+  async function acompanhar(ordemId, botao) {
+    const limite = Date.now() + 90000;
+    while (Date.now() < limite) {
+      await new Promise((r) => setTimeout(r, 1500));
+      let o;
+      try {
+        o = await (await fetch(`/troca-poste/os/${ordemId}`)).json();
+      } catch { continue; }
+
+      if (o.status === "criada") {
+        botao.textContent = o.wvsa_os_numero ? `OS ${o.wvsa_os_numero}` : "OS criada";
+        botao.disabled = true;
+        botao.classList.add("on");
+        return;
+      }
+      if (o.status === "erro") {
+        botao.textContent = "Erro — tentar de novo";
+        botao.disabled = false;
+        alert(`O WVSA recusou: ${o.erro || "sem detalhe"}`);
+        return;
+      }
+    }
+    // Estourou o tempo: a ordem pode estar só esperando o coletor subir. Dizer
+    // isso é diferente de dizer que falhou.
+    botao.textContent = "Aguardando o coletor";
+    botao.disabled = false;
+    alert("A ordem está na fila, mas o processo de envio não respondeu em 90s. " +
+          "Verifique se o coletor está rodando na rede Unetvale — a OS não foi perdida.");
+  }
+
+  function renderCandidatos(linhas) {
+    const cand = linhas.filter((l) => l.classificacao === "critico");
+    $("#tp-cand-contagem").textContent = `${fmt(cand.length)} no recorte`;
+    const corpo = $("#tp-candidatos").querySelector("tbody");
+    corpo.innerHTML = cand.map((l, i) => `
+      <tr data-i="${i}">
+        <td><span class="badge ${BADGE[l.classificacao]}">${l.risco_rotulo}</span></td>
+        <td><b>${l.cidade}</b><div style="font-size:12px;color:var(--muted)">${l.bairro || "—"}</div></td>
+        <td>${[l.tipo_via, l.logradouro].filter(Boolean).join(" ") || l.endereco}</td>
+        <td style="white-space:nowrap">${l.data_br}<div style="font-size:12px;color:var(--muted)">${l.hora_inicio || ""}–${l.hora_fim || ""}</div></td>
+        <td><button class="btn-ghost" data-script="${i}">Ver script</button></td>
+        <td><button class="btn" data-enviar="${i}">Enviar ao WVSA</button></td>
+      </tr>
+      <tr data-script-de="${i}" hidden>
+        <td colspan="6" style="background:var(--fundo);">
+          <pre style="margin:0;white-space:pre-wrap;font-size:12.5px;line-height:1.5;">${(l.script_os || "").replace(/</g, "&lt;")}</pre>
+        </td>
+      </tr>`).join("") ||
+      `<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--muted)">Nenhum crítico no recorte atual.</td></tr>`;
+
+    corpo.onclick = (e) => {
+      const verScript = e.target.closest("button[data-script]");
+      if (verScript) {
+        const i = verScript.dataset.script;
+        const lin = corpo.querySelector(`tr[data-script-de="${i}"]`);
+        lin.hidden = !lin.hidden;
+        verScript.textContent = lin.hidden ? "Ver script" : "Ocultar";
+        return;
+      }
+      const enviar = e.target.closest("button[data-enviar]");
+      if (enviar) abrirEEnviar(cand[Number(enviar.dataset.enviar)], enviar);
+    };
+  }
+
   function renderOrdens() {
     const os = TP.ordens || [];
     const conta = (s) => os.filter((o) => o.status === s).length;
@@ -302,6 +399,7 @@
     renderKpis(linhas);
     renderGraficos(linhas);
     renderTabela(linhas);
+    renderCandidatos(linhas);
     $("#tp-de").value = estado.de;
     $("#tp-ate").value = estado.ate;
     if (window.__tpMapa) window.__tpMapa.atualizar(linhas);

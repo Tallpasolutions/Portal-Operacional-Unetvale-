@@ -57,12 +57,12 @@ def select_one(tabela, params=None, schema=None):
     return rows[0] if rows else None
 
 
-def insert(tabela, registro):
+def insert(tabela, registro, schema=None):
     """POST /rest/v1/<tabela> -> registro criado."""
     url, _ = _cfg()
     r = requests.post(
         f"{url}/rest/v1/{tabela}",
-        headers=_headers({"Prefer": "return=representation"}),
+        headers=_headers({"Prefer": "return=representation"}, schema=schema),
         json=registro,
         timeout=TIMEOUT,
     )
@@ -71,7 +71,7 @@ def insert(tabela, registro):
     return data[0] if isinstance(data, list) and data else data
 
 
-def update(tabela, match, mudancas):
+def update(tabela, match, mudancas, schema=None):
     """PATCH /rest/v1/<tabela>?<match> -> registros atualizados.
 
     `match` é um dict {coluna: valor} convertido em filtro de igualdade.
@@ -80,7 +80,7 @@ def update(tabela, match, mudancas):
     params = {k: f"eq.{v}" for k, v in match.items()}
     r = requests.patch(
         f"{url}/rest/v1/{tabela}",
-        headers=_headers({"Prefer": "return=representation"}),
+        headers=_headers({"Prefer": "return=representation"}, schema=schema),
         params=params,
         json=mudancas,
         timeout=TIMEOUT,

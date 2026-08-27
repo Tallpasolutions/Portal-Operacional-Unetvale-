@@ -7,10 +7,11 @@ import os
 import re
 
 from flask import (
-    Blueprint, abort, flash, jsonify, redirect, render_template, request, url_for
+    Blueprint, abort, flash, jsonify, redirect, render_template, request,
+    session, url_for
 )
 
-from . import supa, dados, supervisores, troca_poste as tp
+from . import supa, dados, solicitacao, supervisores, troca_poste as tp
 from .auth import login_obrigatorio, admin_obrigatorio, usuario_atual
 
 bp = Blueprint("dash", __name__)
@@ -38,8 +39,18 @@ def home():
 def produtividade():
     row = dados.get_modulo("produtividade")
     payload = (row or {}).get("payload") or {"registros": [], "total": 0}
+    u = usuario_atual()
+    # Supervisor só enxerga as próprias equipes: o recorte é aplicado no
+    # servidor, não escondendo no cliente — dado que não deve ser visto não
+    # chega ao browser.
+    if u["is_supervisor"] and not u["is_admin"]:
+        minhas = set(supervisores.equipes_de(u["id"]))
+        p2 = dict(payload)
+        p2["registros"] = [r for r in payload.get("registros", []) if r.get("e") in minhas]
+        p2["total"] = len(p2["registros"])
+        payload = p2
     return render_template("produtividade.html", ativo="produtividade", payload=payload,
-                           meta=_meta(row))
+                           meta=_meta(row), supervisores=_supervisores_para_filtro(u))
 
 
 # Equipes de infraestrutura NÃO participam do IQI/IQM (só time operacional).
@@ -84,7 +95,8 @@ def iqi():
     if iqm_row and iqm_row.get("payload"):
         pacote["IQM"] = _so_operacional(iqm_row["payload"])
     return render_template("iqi.html", ativo="iqi", pacote=pacote,
-                           meta=_meta(iqi_row or iqm_row))
+                           meta=_meta(iqi_row or iqm_row),
+                           supervisores=_supervisores_para_filtro(usuario_atual()))
 
 
 @bp.route("/massivas")
@@ -110,7 +122,11 @@ def troca_poste():
         abort(403)
     de, ate = tp.periodo_padrao()
     pacote = {
-        "linhas": tp.listar(),
+        "linhas": [
+            # O script da OS vai pronto para a tela: o operador lê ANTES de
+            # clicar, não depois de a OS existir.
+            {**l, "script_os": solicitacao.montar(l)} for l in tp.listar()
+        ],
         "revisao": tp.fila_revisao(),
         "ordens": tp.ordens(),
         "rotulos_risco": tp.ROTULO_RISCO,
@@ -120,6 +136,70 @@ def troca_poste():
         "padrao": {"de": de, "ate": ate},
     }
     return render_template("troca-poste.html", ativo="troca-poste", pacote=pacote)
+
+
+@bp.route("/troca-poste/os", methods=["POST"])
+@login_obrigatorio
+def troca_poste_criar_os():
+    """Cria o RASCUNHO da OS a partir de um desligamento. Não envia nada."""
+    if not usuario_atual()["ve_troca_poste"]:
+        abort(403)
+    corpo = request.get_json(silent=True) or {}
+    deslig_id = (corpo.get("desligamento_id") or "").strip()
+    executor = (corpo.get("executor") or "infra").strip()
+    if not deslig_id:
+        return jsonify({"erro": "desligamento_id ausente"}), 400
+
+    linha = next((l for l in tp.listar(incluir_passados=True) if l["id"] == deslig_id), None)
+    if not linha:
+        return jsonify({"erro": "desligamento não encontrado"}), 404
+
+    try:
+        ordem = tp.criar_rascunho(
+            desligamento_id=deslig_id,
+            usuario_id=session.get("uid"),
+            solicitacao=corpo.get("solicitacao") or solicitacao.montar(linha),
+            executor=executor,
+            periodo=corpo.get("periodo"),
+            tipo_tecnico=corpo.get("tipo_tecnico"),
+            agendamento=corpo.get("agendamento"),
+        )
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+    return jsonify({"ordem_id": ordem["id"], "status": ordem["status"],
+                    "chave": ordem["chave_idempotencia"]})
+
+
+@bp.route("/troca-poste/os/<ordem_id>/enviar", methods=["POST"])
+@login_obrigatorio
+def troca_poste_enviar_os(ordem_id):
+    """Autoriza o envio: marca o clique humano e devolve na hora.
+
+    O POST no WVSA NÃO acontece aqui — a Vercel não alcança a rede interna
+    onde o WVSA responde. Quem envia é o processo `enviar_os.py`, rodando
+    dentro da VPN, que observa esta fila. A tela acompanha por poll.
+    """
+    if not usuario_atual()["ve_troca_poste"]:
+        abort(403)
+    try:
+        tp.marcar_para_envio(ordem_id, session.get("uid"))
+    except ValueError as e:
+        return jsonify({"erro": str(e)}), 409
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+    return jsonify({"ok": True, "status": "pronta"})
+
+
+@bp.route("/troca-poste/os/<ordem_id>")
+@login_obrigatorio
+def troca_poste_status_os(ordem_id):
+    """Estado da ordem — a tela faz poll aqui enquanto o envio acontece."""
+    if not usuario_atual()["ve_troca_poste"]:
+        abort(403)
+    o = tp.ordem(ordem_id)
+    if not o:
+        return jsonify({"erro": "ordem não encontrada"}), 404
+    return jsonify(o)
 
 
 @bp.route("/troca-poste/rede.json")
@@ -243,6 +323,18 @@ def monitoramento():
     return render_template("monitoramento.html", ativo="monitoramento",
                            resumo=dados.resumo_modulos(), logs=dados.get_log(150),
                            coletas=tp.coletas(30))
+
+
+def _supervisores_para_filtro(u):
+    """Lista para o filtro por supervisor.
+
+    Só o admin escolhe entre supervisores; para o próprio supervisor o recorte
+    já veio aplicado do servidor, então oferecer o filtro seria redundante.
+    """
+    if not u["is_admin"]:
+        return []
+    return [{"id": s["usuario_id"], "nome": s["nome"], "equipes": s["equipes"]}
+            for s in supervisores.listar() if s["equipes"]]
 
 
 def _meta(row):

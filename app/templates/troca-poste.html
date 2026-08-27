@@ -109,11 +109,34 @@
 
 <!-- ===================== Ordens de Serviço ===================== -->
 <section data-painel="ordens" hidden>
-  <div class="alert alert-ok" id="tp-os-modo">
-    <b>Modo seguro.</b> Nenhuma OS foi enviada ao WVSA. O envio real só é liberado depois de
-    conferir 20 rascunhos campo a campo, e só sai por clique humano — nenhum job cria OS.
+  <div class="alert alert-erro">
+    <b>Envio real ligado.</b> Clicar em <b>Enviar ao WVSA</b> cria a OS de verdade e desloca
+    equipe. Cada OS tem seu próprio botão — nenhum job envia sozinho, e a mesma ordem não é
+    enviada duas vezes.
   </div>
+  <p class="subnote">
+    O envio acontece por um processo dentro da rede Unetvale: o WVSA não é alcançável pela
+    internet. Do clique ao número da OS leva alguns segundos. Se o coletor estiver fora do ar, a
+    ordem fica em <b>pronta</b> aguardando — nunca é dada como enviada sem ter sido.
+  </p>
   <div class="kpis" id="tp-os-kpis"></div>
+
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-h">
+      <span>Candidatos a OS — <span id="tp-cand-contagem"></span></span>
+      <span class="upd">críticos do recorte atual</span>
+    </div>
+    <div class="card-b tabela-wrap">
+      <table class="tbl" id="tp-candidatos">
+        <thead><tr>
+          <th>Risco</th><th>Cidade / Bairro</th><th>Endereço</th><th>Data</th>
+          <th>Script da OS</th><th>Ação</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
   <div class="card">
     <div class="card-h">Ordens de serviço</div>
     <div class="card-b tabela-wrap">

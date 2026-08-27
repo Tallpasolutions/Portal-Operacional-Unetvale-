@@ -126,7 +126,7 @@
   sw.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
     sw.querySelectorAll("button").forEach((x) => x.classList.toggle("active", x === b));
     const v = b.dataset.view;
-    ["grafico", "tabela", "ofensores"].forEach((nome) => {
+    ["grafico", "tabela", "ofensores", "empresas"].forEach((nome) => {
       const el = document.getElementById("view-" + nome);
       if (el) el.hidden = nome !== v;
     });

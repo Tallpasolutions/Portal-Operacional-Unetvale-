@@ -91,7 +91,10 @@
   function alternar(dim, valor) { const s = filtros[dim]; if (s.has(valor)) s.delete(valor); else s.add(valor); sincronizarSelects(); renderTudo(); }
   function definir(dim, valor) { filtros[dim].clear(); if (valor) filtros[dim].add(valor); renderTudo(); }
   function sincronizarSelects() {
-    const map = { e: "f-empresa", mes: "f-mes" };
+    const map = { mes: "f-mes" };
+    // `f-empresa` fica sempre em branco: ele é um "adicionar equipe", e o que
+    // está selecionado aparece nos chips.
+    document.getElementById("f-empresa").value = "";
     for (const [dim, id] of Object.entries(map)) {
       document.getElementById(id).value = filtros[dim].size === 1 ? [...filtros[dim]][0] : "";
     }
@@ -273,7 +276,26 @@
     };
   }
 
-  document.getElementById("f-empresa").addEventListener("change", (e) => definir("e", e.target.value));
+  // O select de equipe ADICIONA ao recorte em vez de substituir: cada escolha
+  // vira um chip, e remover é clicar no × do chip. Assim dá para comparar duas
+  // ou três equipes sem inventar um controle novo — usa os chips que já existem.
+  document.getElementById("f-empresa").addEventListener("change", (e) => {
+    const v = e.target.value;
+    if (v) filtros.e.add(v);
+    else filtros.e.clear();
+    e.target.value = "";
+    sincronizarSelects(); renderTudo();
+  });
+
+  // Escolher um supervisor seleciona as equipes dele de uma vez.
+  const selSup = document.getElementById("f-supervisor");
+  if (selSup) selSup.addEventListener("change", (e) => {
+    const sup = (window.__SUPERVISORES__ || []).find((s) => s.id === e.target.value);
+    filtros.e.clear();
+    filtros.t.clear();   // técnico de outra equipe deixaria o recorte vazio
+    if (sup) for (const eq of sup.equipes) filtros.e.add(eq);
+    sincronizarSelects(); renderTudo();
+  });
   document.getElementById("f-tecnico").addEventListener("change", (e) => definir("t", e.target.value));
   document.getElementById("f-mes").addEventListener("change", (e) => definir("mes", e.target.value));
   document.getElementById("f-semana").addEventListener("change", (e) => definir("semana", e.target.value));
@@ -302,6 +324,8 @@
     Object.values(filtros).forEach((s) => s.clear());
     semRetiradas = false;
     document.getElementById("btn-sem-retirada").classList.remove("on");
+    const sup = document.getElementById("f-supervisor");
+    if (sup) sup.value = "";
     grupo = "todos";
     document.querySelectorAll("#f-grupo button").forEach((x) => x.classList.toggle("active", x.dataset.g === "todos"));
     document.getElementById("btn-rej").classList.remove("on");
