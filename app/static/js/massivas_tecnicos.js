@@ -20,6 +20,12 @@
   let base = "mediana";             // mediana | media
   let ordem = "tme";
   let tecnicoSel = "";              // "" = todos
+  let soInfra = false;
+
+  // Equipe de infraestrutura: o rótulo do WVSA vem como "EMPRESA - Nome" e as
+  // de infra têm INFRA no nome da empresa. Mesmo critério que routes.py usa
+  // para EXCLUIR infra do IQI/IQM — as duas telas concordam sobre quem é infra.
+  const ehInfra = (rotulo) => /\binfra\b|fandaruff/i.test(rotulo || "");
   let chart = null;
 
   // Nomes que aparecem na coluna Técnico do WVSA mas NÃO são técnicos de campo
@@ -90,7 +96,8 @@
       // remove quem não é técnico de campo (ex.: cadastros administrativos)
       .filter((e) => !e.tecnico || ehTecnicoValido(e.tecnico))
       // filtro de técnico da barra superior
-      .filter((e) => !tecnicoSel || e.tecnico === tecnicoSel);
+      .filter((e) => !tecnicoSel || e.tecnico === tecnicoSel)
+      .filter((e) => !soInfra || ehInfra(e.tecnico));
 
     const grupos = new Map();
     for (const e of eventos) {
@@ -136,15 +143,28 @@
     const t = eventos.map(tempos);
     const comTmm = t.map((x) => x.tmm).filter((x) => x !== null);
     const dentro = comTmm.filter((x) => x <= META_MIN).length;
+    const tmm = agregar(t.map((x) => x.tmm));
+
+    // O TMM é o único com meta (7h), então é o único que ganha cor: o card
+    // inteiro fica azul-claro dentro da meta e vermelho-claro acima dela.
+    // `null` (sem massiva fechada no recorte) fica neutro — não é "no prazo".
+    const estiloTmm =
+      tmm === null ? ""
+      : tmm <= META_MIN
+        ? ' style="background:#e7f3fd;border-color:#bcdffb"'
+        : ' style="background:#fdecee;border-color:#f5c2cc"';
+
     const geral = [
-      ["TMAE (acionamento)", fmt(agregar(t.map((x) => x.tmae)))],
-      ["TMD (deslocamento)", fmt(agregar(t.map((x) => x.tmd)))],
-      ["TME (execução)", fmt(agregar(t.map((x) => x.tme)))],
-      ["TMM (massiva)", fmt(agregar(t.map((x) => x.tmm)))],
-      ["Dentro da meta de 7h", comTmm.length ? `${Math.round((dentro / comTmm.length) * 100)}%` : "—"],
-      ["Técnicos", linhas.filter((l) => !l.semTecnico).length],
+      ["TMAE (acionamento)", fmt(agregar(t.map((x) => x.tmae))), ""],
+      ["TMD (deslocamento)", fmt(agregar(t.map((x) => x.tmd))), ""],
+      ["TME (execução)", fmt(agregar(t.map((x) => x.tme))), ""],
+      ["TMM (massiva)", fmt(tmm), estiloTmm],
+      ["Dentro da meta de 7h", comTmm.length ? `${Math.round((dentro / comTmm.length) * 100)}%` : "—", ""],
+      ["Técnicos", linhas.filter((l) => !l.semTecnico).length, ""],
     ];
-    box.innerHTML = geral.map(([l, v]) => `<div class="kpi"><div class="v">${v}</div><div class="l">${l}</div></div>`).join("");
+    box.innerHTML = geral
+      .map(([l, v, estilo]) => `<div class="kpi"${estilo}><div class="v">${v}</div><div class="l">${l}</div></div>`)
+      .join("");
   }
 
   function renderGrafico(linhas) {
@@ -245,13 +265,30 @@
   }
   popularSelectTecnicos();
 
-  // "Limpar filtros" da tela também zera o técnico
+  // "Limpar filtros" da tela também zera o técnico e o recorte de infra
   const btnLimpar = document.getElementById("m-limpar");
   if (btnLimpar) btnLimpar.addEventListener("click", () => {
     tecnicoSel = "";
+    soInfra = false;
     const sel = document.getElementById("t-filtro");
     if (sel) sel.value = "";
+    const bi = document.getElementById("t-infra");
+    if (bi) bi.classList.remove("on");
     setTimeout(renderTudo, 0);
+  });
+
+  const btnInfra = document.getElementById("t-infra");
+  if (btnInfra) btnInfra.addEventListener("click", () => {
+    soInfra = !soInfra;
+    btnInfra.classList.toggle("on", soInfra);
+    // Técnico específico + só-infra se contradizem: o recorte por equipe
+    // manda, e o select volta para "todos".
+    if (soInfra) {
+      tecnicoSel = "";
+      const sel = document.getElementById("t-filtro");
+      if (sel) sel.value = "";
+    }
+    renderTudo();
   });
 
   // ---------- eventos de UI ----------

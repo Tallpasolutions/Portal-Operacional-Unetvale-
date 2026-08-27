@@ -30,7 +30,18 @@
   const fmt = (n) => (n == null ? "—" : Number(n).toLocaleString("pt-BR"));
   const dataBR = (iso) => (iso ? iso.split("-").reverse().join("/") : "—");
 
-  const estado = { de: TP.padrao.de, ate: TP.padrao.ate, cidade: "", bairro: "", risco: "", ordem: null, desc: false };
+  const estado = { de: TP.padrao.de, ate: TP.padrao.ate, cidade: "", bairro: "",
+                   risco: "", turno: "", ordem: null, desc: false };
+
+  // Turno pelo início do desligamento: até 12:00 é manhã, depois é tarde.
+  // Sem hora de início não dá para afirmar o turno — a linha fica de fora de
+  // ambos os filtros em vez de ser chutada para um deles.
+  function noTurno(l) {
+    if (!estado.turno) return true;
+    if (!l.hora_inicio) return false;
+    const manha = l.hora_inicio < "12:00";
+    return estado.turno === "manha" ? manha : !manha;
+  }
 
   const somaDias = (iso, dias) => {
     const d = new Date(iso + "T12:00:00");
@@ -44,6 +55,7 @@
     const o = opcoes || {};
     return LINHAS.filter((l) =>
       noPeriodo(l) &&
+      (o.semTurno || noTurno(l)) &&
       (o.semCidade || !estado.cidade || l.cidade === estado.cidade) &&
       (o.semBairro || !estado.bairro || l.bairro === estado.bairro) &&
       (o.semRisco || !estado.risco || l.classificacao === estado.risco));
@@ -138,6 +150,7 @@
     const prox = futuros.length ? dataBR(futuros[0]).slice(0, 5) : null;
     $("#tp-subnote").innerHTML =
       `${fmt(linhas.length)} desligamentos • ${cidades} cidades • ${dataBR(estado.de)} a ${dataBR(estado.ate)}` +
+      (estado.turno ? ` • ${estado.turno === "manha" ? "manhã" : "tarde"}` : "") +
       (prox ? ` • próximo em ${prox}` : "") +
       (TP.ultima_coleta ? ` • coletado em <b>${TP.ultima_coleta}</b>` : "");
   }
@@ -264,22 +277,6 @@
       `<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted)">Nenhuma OS criada ainda.</td></tr>`;
   }
 
-  function renderColetas() {
-    const cs = TP.coletas || [];
-    $("#tp-coletas-tabela").querySelector("tbody").innerHTML = cs.map((c) => `
-      <tr>
-        <td style="white-space:nowrap">${c.inicio_br}</td>
-        <td style="white-space:nowrap">${c.fim_br}</td>
-        <td><span class="badge ${c.status === "ok" ? "badge-verde" : c.status === "parcial" ? "badge-ambar" : "badge-vermelho"}">${c.status}</span>
-          ${c.erro ? `<div style="font-size:12px;color:var(--danger)">${c.erro}</div>` : ""}</td>
-        <td class="num">${c.cidades_ok ?? "—"}/${c.cidades_alvo ?? "—"}</td>
-        <td class="num">${fmt(c.novos)}</td>
-        <td class="num">${fmt(c.alterados)}</td>
-        <td class="num">${fmt(c.desapareceram)}</td>
-      </tr>`).join("") ||
-      `<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted)">Nenhuma coleta registrada.</td></tr>`;
-  }
-
   // ---- CSV ---------------------------------------------------------------
   function exportarCsv(linhas) {
     const cab = ["Risco", "Cidade", "Bairro", "Endereço", "Data", "Início", "Fim", "Dist. cabo (m)", "Postes", "Score geo"];
@@ -326,9 +323,18 @@
   $("#tp-cidade").addEventListener("change", (e) => { estado.cidade = e.target.value; estado.bairro = ""; render(); });
   $("#tp-bairro").addEventListener("change", (e) => { estado.bairro = e.target.value; render(); });
   $("#tp-risco").addEventListener("change", (e) => { estado.risco = e.target.value; render(); });
+  $("#tp-turno").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-turno]");
+    if (!b) return;
+    estado.turno = b.dataset.turno;
+    [...$("#tp-turno").children].forEach((x) => x.classList.toggle("active", x === b));
+    render();
+  });
   $("#tp-limpar").addEventListener("click", () => {
-    Object.assign(estado, { de: TP.padrao.de, ate: TP.padrao.ate, cidade: "", bairro: "", risco: "", ordem: null, desc: false });
+    Object.assign(estado, { de: TP.padrao.de, ate: TP.padrao.ate, cidade: "", bairro: "",
+                            risco: "", turno: "", ordem: null, desc: false });
     [...$("#tp-presets").children].forEach((x) => x.classList.toggle("active", x.dataset.dias === "7"));
+    [...$("#tp-turno").children].forEach((x) => x.classList.toggle("active", x.dataset.turno === ""));
     render();
   });
   $("#tp-exportar").addEventListener("click", () => exportarCsv(aplicar()));
@@ -362,6 +368,5 @@
   // ---- início ------------------------------------------------------------
   renderRevisao();
   renderOrdens();
-  renderColetas();
   render();
 })();

@@ -24,6 +24,46 @@
   {% endfor %}
 </div>
 
+<!-- Coletas do módulo Troca de Poste (fonte Celesc, pipeline próprio) -->
+<h3 class="secao">Coletas da Celesc — Troca de Poste</h3>
+<p class="subnote">Varredura das 11 cidades monitoradas. Desligamento que sai da lista da Celesc é marcado
+  como desaparecido e some das telas, mas <b>não é apagado</b> — fica no banco para auditoria.</p>
+<div class="card" style="margin-bottom:18px;">
+  <div class="card-h">Histórico de coletas ({{ coletas|length }})</div>
+  <div class="card-b tabela-wrap">
+    {% if coletas %}
+    <table class="tbl">
+      <thead><tr>
+        <th>Início</th><th>Fim</th><th>Status</th><th class="num">Cidades</th>
+        <th class="num">Novos</th><th class="num">Alterados</th><th class="num">Desapareceram</th>
+      </tr></thead>
+      <tbody>
+        {% for c in coletas %}
+        <tr>
+          <td style="white-space:nowrap;">{{ c.inicio_br }}</td>
+          <td style="white-space:nowrap;">{{ c.fim_br }}</td>
+          <td>
+            {% if c.status == 'ok' %}<span class="badge badge-verde">ok</span>
+            {% elif c.status == 'parcial' %}<span class="badge badge-ambar">parcial</span>
+            {% else %}<span class="badge badge-vermelho">{{ c.status }}</span>{% endif %}
+            {% if c.erro %}<div style="font-size:12px;color:var(--danger);">{{ c.erro }}</div>{% endif %}
+          </td>
+          <td class="num">{{ c.cidades_ok }}/{{ c.cidades_alvo }}</td>
+          <td class="num">{{ c.novos }}</td>
+          <td class="num">{{ c.alterados }}</td>
+          <td class="num">{{ c.desapareceram }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="vazio">Nenhuma coleta da Celesc registrada ainda.</div>
+    {% endif %}
+  </div>
+</div>
+
+<h3 class="secao">Coletas do WVSA</h3>
+
 <!-- Histórico de execuções -->
 <div class="card">
   <div class="card-h">Histórico de execuções ({{ logs|length }})</div>

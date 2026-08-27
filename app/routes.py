@@ -44,12 +44,31 @@ def produtividade():
 # Equipes de infraestrutura NÃO participam do IQI/IQM (só time operacional).
 _INFRA = re.compile(r"\binfra\b|fandaruff", re.I)
 
+# Empresas que aparecem separadas no WVSA mas são a mesma na operação. O
+# rótulo do técnico vem como "EMPRESA - Nome"; aqui só a parte da empresa é
+# reescrita, o nome é preservado.
+_APELIDOS_EMPRESA = {
+    "WAVE SUPERVISOR": "WAVE",
+}
+
+
+def _agrupar_empresa(rotulo):
+    i = rotulo.find(" - ")
+    if i < 0:
+        return rotulo
+    empresa, nome = rotulo[:i].strip(), rotulo[i + 3:]
+    return f"{_APELIDOS_EMPRESA.get(empresa.upper(), empresa)} - {nome}"
+
 
 def _so_operacional(payload):
     if not payload or "tecnicos" not in payload:
         return payload
     p = dict(payload)
-    p["tecnicos"] = [t for t in payload["tecnicos"] if not _INFRA.search(t.get("nome", ""))]
+    p["tecnicos"] = [
+        {**t, "nome": _agrupar_empresa(t.get("nome", ""))}
+        for t in payload["tecnicos"]
+        if not _INFRA.search(t.get("nome", ""))
+    ]
     return p
 
 
@@ -90,7 +109,6 @@ def troca_poste():
     pacote = {
         "linhas": tp.listar(),
         "revisao": tp.fila_revisao(),
-        "coletas": tp.coletas(),
         "ordens": tp.ordens(),
         "rotulos_risco": tp.ROTULO_RISCO,
         "ordem_risco": tp.ORDEM_RISCO,
@@ -139,8 +157,12 @@ def configuracoes():
 @bp.route("/monitoramento")
 @admin_obrigatorio
 def monitoramento():
+    # As coletas da Celesc (módulo Troca de Poste) ficam aqui junto das do
+    # WVSA: é a mesma pergunta — "a ingestão está rodando?" — e ter duas telas
+    # separadas para ela só fazia procurar em dois lugares.
     return render_template("monitoramento.html", ativo="monitoramento",
-                           resumo=dados.resumo_modulos(), logs=dados.get_log(150))
+                           resumo=dados.resumo_modulos(), logs=dados.get_log(150),
+                           coletas=tp.coletas(30))
 
 
 def _meta(row):

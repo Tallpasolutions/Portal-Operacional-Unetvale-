@@ -8,6 +8,10 @@
   let FIN = [], MOT = []; // dicionários: finalidade e motivo (índices nos registros)
   const filtros = { e: new Set(), t: new Set(), mes: new Set(), semana: new Set(), d: new Set(),
     fin: new Set(), mo: new Set(), ta: new Set(), rj: new Set() };
+  // Recorte à parte dos filtros normais: em vez de escolher finalidades, REMOVE
+  // um conjunto delas. Fica separado porque se combina com qualquer outro
+  // filtro sem competir pelo mesmo Set.
+  let semRetiradas = false;
   let grupo = "todos"; // todos | infra | operacional
   // Infra = "INFRA" como palavra isolada (INFRA UNET/WAVE/SCHISTEL) + exceções por
   // nome (ex.: FANDARUFF). NÃO conta INFRASEG (operacional). Adicione novas equipes
@@ -78,6 +82,7 @@
       (filtros.semana.size === 0 || filtros.semana.has(r.semana)) &&
       (filtros.d.size === 0 || filtros.d.has(r.d)) &&
       (filtros.fin.size === 0 || filtros.fin.has(r.f)) &&
+      (!semRetiradas || !ehRetirada(r.f)) &&
       (filtros.mo.size === 0 || filtros.mo.has(r.mo)) &&
       (filtros.ta.size === 0 || filtros.ta.has(r.ta)) &&
       (filtros.rj.size === 0 || filtros.rj.has(r.rj));
@@ -107,6 +112,11 @@
     preencher("f-tecnico", permitidos, filtros.e.size ? "Todos os técnicos da equipe" : "Todos os técnicos", (v) => v);
     document.getElementById("f-tecnico").value = atual;
   }
+  // "Retirada", "Retirada Condomínio" e "Retirada de Cabos" — casadas pelo
+  // nome, e não por índice fixo, porque a ordem do dicionário `fin` muda a
+  // cada coleta.
+  const ehRetirada = (i) => /retirad/i.test(FIN[i] || "");
+
   const DIMS_NUM = new Set(["fin", "mo", "ta", "rj"]);
   function rotuloDim(dim, v) {
     if (dim === "mes") return rotuloMes(v);
@@ -283,8 +293,15 @@
     btn.classList.toggle("on", !ativo);
     renderTudo();
   });
+  document.getElementById("btn-sem-retirada").addEventListener("click", () => {
+    semRetiradas = !semRetiradas;
+    document.getElementById("btn-sem-retirada").classList.toggle("on", semRetiradas);
+    renderTudo();
+  });
   document.getElementById("btn-limpar").addEventListener("click", () => {
     Object.values(filtros).forEach((s) => s.clear());
+    semRetiradas = false;
+    document.getElementById("btn-sem-retirada").classList.remove("on");
     grupo = "todos";
     document.querySelectorAll("#f-grupo button").forEach((x) => x.classList.toggle("active", x.dataset.g === "todos"));
     document.getElementById("btn-rej").classList.remove("on");
