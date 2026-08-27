@@ -153,18 +153,21 @@
 
 <!-- ===================== Mapa ===================== -->
 <section data-painel="mapa" hidden>
-  <p class="subnote" id="tp-mapa-nota">
-    Desligamentos posicionados. Cor = risco. Só aparecem os que têm posição confiável ou
-    provisória; os indeterminados sem coordenada ficam de fora até serem revisados.
-  </p>
   <div class="card">
     <div class="card-h">
-      <span>Mapa dos desligamentos</span>
+      <span title="Cor = risco. Só aparecem os desligamentos com posição confiável ou provisória; os indeterminados sem coordenada ficam de fora até serem revisados.">
+        Mapa dos desligamentos
+      </span>
       <span class="upd" id="tp-mapa-legenda"></span>
     </div>
-    <div class="card-b">
-      <div id="tp-mapa" style="height:560px;border-radius:8px;overflow:hidden;"></div>
-      <p class="upd" id="tp-mapa-rede" style="margin-top:10px;flex-wrap:wrap"></p>
+    <!-- Sem padding: o mapa encosta na borda do card e ganha os 32px que o
+         padding consumiria. A legenda abaixo tem o seu próprio. -->
+    <div class="card-b" style="padding:0;">
+      <!-- A altura vem do JS, a partir do espaço que sobra na viewport (ver
+           ajustarAltura em troca_poste_mapa.js). O valor aqui é só o fallback
+           para o instante antes do primeiro cálculo. -->
+      <div id="tp-mapa" style="height:560px;overflow:hidden;border-radius:0 0 10px 10px;"></div>
+      <p class="upd" id="tp-mapa-rede" style="margin:0;padding:8px 18px;flex-wrap:wrap;border-top:1px solid var(--borda);"></p>
     </div>
   </div>
 </section>
