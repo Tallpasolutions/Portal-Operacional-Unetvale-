@@ -145,13 +145,15 @@
     const dentro = comTmm.filter((x) => x <= META_MIN).length;
     const tmm = agregar(t.map((x) => x.tmm));
 
-    // O TMM é o único com meta (7h), então é o único que ganha cor: o card
-    // inteiro fica azul-claro dentro da meta e vermelho-claro acima dela.
+    // O TMM é o único com meta (7h), então é o único que ganha cor: verde-claro
+    // dentro da meta, vermelho-claro acima dela. As cores são as mesmas do
+    // badge-verde e do alert-erro do style.css, para não nascer uma terceira
+    // paleta só aqui.
     // `null` (sem massiva fechada no recorte) fica neutro — não é "no prazo".
     const estiloTmm =
       tmm === null ? ""
       : tmm <= META_MIN
-        ? ' style="background:#e7f3fd;border-color:#bcdffb"'
+        ? ' style="background:#e3f6ee;border-color:#b9e6d3"'
         : ' style="background:#fdecee;border-color:#f5c2cc"';
 
     const geral = [
