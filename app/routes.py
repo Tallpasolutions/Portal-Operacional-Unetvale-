@@ -8,7 +8,7 @@ import re
 
 from flask import Blueprint, render_template, jsonify, request, abort
 
-from . import supa, dados
+from . import supa, dados, troca_poste as tp
 from .auth import login_obrigatorio, admin_obrigatorio, usuario_atual
 
 bp = Blueprint("dash", __name__)
@@ -74,6 +74,31 @@ def massivas():
     payload = (row or {}).get("payload") or {"meses": [], "metricas": [], "diario": [], "cidades": [], "totais_mes": []}
     return render_template("massivas.html", ativo="massivas", payload=payload,
                            meta=_meta(row))
+
+
+@bp.route("/troca-poste")
+@login_obrigatorio
+def troca_poste():
+    """Desligamentos da Celesc cruzados com a rede óptica.
+
+    Segue o padrão das outras telas: injeta o pacote e o cliente cuida de
+    filtro, gráficos e abas — sem round-trip por clique. O período padrão é
+    hoje..+7 dias, porque a pergunta do módulo é sobre o que ainda VAI
+    acontecer; o filtro permite abrir a janela.
+    """
+    de, ate = tp.periodo_padrao()
+    pacote = {
+        "linhas": tp.listar(),
+        "revisao": tp.fila_revisao(),
+        "coletas": tp.coletas(),
+        "ordens": tp.ordens(),
+        "rotulos_risco": tp.ROTULO_RISCO,
+        "ordem_risco": tp.ORDEM_RISCO,
+        "ultima_coleta": tp.ultima_coleta(),
+        "hoje": tp.hoje().isoformat(),
+        "padrao": {"de": de, "ate": ate},
+    }
+    return render_template("troca-poste.html", ativo="troca-poste", pacote=pacote)
 
 
 @bp.route("/usuarios")
