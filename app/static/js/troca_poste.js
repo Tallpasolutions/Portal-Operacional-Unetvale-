@@ -9,6 +9,7 @@
   const ROTULO = TP.rotulos_risco || {};
   const ORDEM = TP.ordem_risco || [];
   const HOJE = TP.hoje;
+  const ENVIO_LIGADO = TP.envio_os_habilitado === true;
 
   // Cores por risco: seguem o CUSTO DO ERRO, não estética. Crítico é fibra a
   // menos de 25 m — errar para menos ali é cabo rompido e cliente fora do ar.
@@ -30,7 +31,18 @@
   const fmt = (n) => (n == null ? "—" : Number(n).toLocaleString("pt-BR"));
   const dataBR = (iso) => (iso ? iso.split("-").reverse().join("/") : "—");
 
-  const estado = { de: TP.padrao.de, ate: TP.padrao.ate, cidade: "", bairro: "", risco: "", ordem: null, desc: false };
+  const estado = { de: TP.padrao.de, ate: TP.padrao.ate, cidade: "", bairro: "",
+                   risco: "", turno: "", ordem: null, desc: false };
+
+  // Turno pelo início do desligamento: até 12:00 é manhã, depois é tarde.
+  // Sem hora de início não dá para afirmar o turno — a linha fica de fora de
+  // ambos os filtros em vez de ser chutada para um deles.
+  function noTurno(l) {
+    if (!estado.turno) return true;
+    if (!l.hora_inicio) return false;
+    const manha = l.hora_inicio < "12:00";
+    return estado.turno === "manha" ? manha : !manha;
+  }
 
   const somaDias = (iso, dias) => {
     const d = new Date(iso + "T12:00:00");
@@ -44,6 +56,7 @@
     const o = opcoes || {};
     return LINHAS.filter((l) =>
       noPeriodo(l) &&
+      (o.semTurno || noTurno(l)) &&
       (o.semCidade || !estado.cidade || l.cidade === estado.cidade) &&
       (o.semBairro || !estado.bairro || l.bairro === estado.bairro) &&
       (o.semRisco || !estado.risco || l.classificacao === estado.risco));
@@ -138,6 +151,7 @@
     const prox = futuros.length ? dataBR(futuros[0]).slice(0, 5) : null;
     $("#tp-subnote").innerHTML =
       `${fmt(linhas.length)} desligamentos • ${cidades} cidades • ${dataBR(estado.de)} a ${dataBR(estado.ate)}` +
+      (estado.turno ? ` • ${estado.turno === "manha" ? "manhã" : "tarde"}` : "") +
       (prox ? ` • próximo em ${prox}` : "") +
       (TP.ultima_coleta ? ` • coletado em <b>${TP.ultima_coleta}</b>` : "");
   }
@@ -245,7 +259,131 @@
       `<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted)">Fila vazia — nada aguardando revisão.</td></tr>`;
   }
 
+  // ---- candidatos a OS ---------------------------------------------------
+  // Confirmação obrigatória antes de enviar: o clique cria OS real e desloca
+  // equipe. O texto do confirm diz o endereço, para não haver "cliquei errado".
+  async function abrirEEnviar(l, botao) {
+    const script = l.script_os || "";
+    if (!confirm(
+      `Criar OS no WVSA para:\n\n${l.cidade} — ${l.bairro || ""}\n` +
+      `${[l.tipo_via, l.logradouro].filter(Boolean).join(" ")}\n${l.data_br}\n\n` +
+      `Isso cria a OS de verdade e desloca equipe.`)) return;
+
+    const marcar = (txt, on) => { botao.textContent = txt; botao.disabled = on; };
+    marcar("Criando…", true);
+    try {
+      const r1 = await fetch("/troca-poste/os", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ desligamento_id: l.id, solicitacao: script, executor: "infra" }),
+      });
+      const rascunho = await r1.json();
+      if (!r1.ok) throw new Error(rascunho.erro || `HTTP ${r1.status}`);
+
+      marcar("Enviando…", true);
+      const r2 = await fetch(`/troca-poste/os/${rascunho.ordem_id}/enviar`, { method: "POST" });
+      const env = await r2.json();
+      if (!r2.ok) throw new Error(env.erro || `HTTP ${r2.status}`);
+
+      await acompanhar(rascunho.ordem_id, botao);
+    } catch (e) {
+      marcar("Erro — tentar de novo", false);
+      alert(`Não foi possível enviar: ${e.message}`);
+    }
+  }
+
+  /** Poll do resultado. O envio roda dentro da VPN, então leva alguns segundos. */
+  async function acompanhar(ordemId, botao) {
+    const limite = Date.now() + 90000;
+    while (Date.now() < limite) {
+      await new Promise((r) => setTimeout(r, 1500));
+      let o;
+      try {
+        o = await (await fetch(`/troca-poste/os/${ordemId}`)).json();
+      } catch { continue; }
+
+      if (o.status === "criada") {
+        botao.textContent = o.wvsa_os_numero ? `OS ${o.wvsa_os_numero}` : "OS criada";
+        botao.disabled = true;
+        botao.classList.add("on");
+        return;
+      }
+      if (o.status === "erro") {
+        botao.textContent = "Erro — tentar de novo";
+        botao.disabled = false;
+        alert(`O WVSA recusou: ${o.erro || "sem detalhe"}`);
+        return;
+      }
+    }
+    // Estourou o tempo: a ordem pode estar só esperando o coletor subir. Dizer
+    // isso é diferente de dizer que falhou.
+    botao.textContent = "Aguardando o coletor";
+    botao.disabled = false;
+    alert("A ordem está na fila, mas o processo de envio não respondeu em 90s. " +
+          "Verifique se o coletor está rodando na rede Unetvale — a OS não foi perdida.");
+  }
+
+  function renderCandidatos(linhas) {
+    const cand = linhas.filter((l) => l.classificacao === "critico");
+    $("#tp-cand-contagem").textContent = `${fmt(cand.length)} no recorte`;
+    const corpo = $("#tp-candidatos").querySelector("tbody");
+    corpo.innerHTML = cand.map((l, i) => `
+      <tr data-i="${i}">
+        <td><span class="badge ${BADGE[l.classificacao]}">${l.risco_rotulo}</span></td>
+        <td><b>${l.cidade}</b><div style="font-size:12px;color:var(--muted)">${l.bairro || "—"}</div></td>
+        <td>${[l.tipo_via, l.logradouro].filter(Boolean).join(" ") || l.endereco}</td>
+        <td style="white-space:nowrap">${l.data_br}<div style="font-size:12px;color:var(--muted)">${l.hora_inicio || ""}–${l.hora_fim || ""}</div></td>
+        <td><button class="btn-ghost" data-script="${i}">Ver script</button></td>
+        <td>${ENVIO_LIGADO
+          ? `<button class="btn" data-enviar="${i}">Enviar ao WVSA</button>`
+          : `<button class="btn sec" disabled title="O envio ao WVSA está desligado no ambiente (OS_ENVIO_HABILITADO). O fluxo ainda não foi validado ponta a ponta.">Envio desligado</button>`}</td>
+      </tr>
+      <tr data-script-de="${i}" hidden>
+        <td colspan="6" style="background:var(--fundo);">
+          <pre style="margin:0;white-space:pre-wrap;font-size:12.5px;line-height:1.5;">${(l.script_os || "").replace(/</g, "&lt;")}</pre>
+        </td>
+      </tr>`).join("") ||
+      `<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--muted)">Nenhum crítico no recorte atual.</td></tr>`;
+
+    corpo.onclick = (e) => {
+      const verScript = e.target.closest("button[data-script]");
+      if (verScript) {
+        const i = verScript.dataset.script;
+        const lin = corpo.querySelector(`tr[data-script-de="${i}"]`);
+        lin.hidden = !lin.hidden;
+        verScript.textContent = lin.hidden ? "Ver script" : "Ocultar";
+        return;
+      }
+      const enviar = e.target.closest("button[data-enviar]");
+      // Sem ENVIO_LIGADO o botão nem é renderizado com `data-enviar`, então
+      // este caminho não existe. A recusa de verdade está no servidor.
+      if (enviar) abrirEEnviar(cand[Number(enviar.dataset.enviar)], enviar);
+    };
+  }
+
   function renderOrdens() {
+    const aviso = $("#tp-os-aviso");
+    if (aviso) {
+      aviso.className = ENVIO_LIGADO ? "alert alert-erro" : "alert alert-ok";
+      aviso.innerHTML = ENVIO_LIGADO
+        ? "<b>Envio real ligado.</b> Clicar em <b>Enviar ao WVSA</b> cria a OS de verdade e " +
+          "desloca equipe. Cada OS tem seu próprio botão — nenhum job envia sozinho, e a mesma " +
+          "ordem não é enviada duas vezes."
+        : "<b>Envio ao WVSA desligado.</b> Esta tela mostra os candidatos e o script exato que " +
+          "seria enviado, mas nenhuma OS é criada. O fluxo existe e está pronto; falta validá-lo " +
+          "ponta a ponta contra o WVSA antes de liberar.";
+    }
+    // A nota explicativa acompanha o estado: descrever o envio como se ele
+    // acontecesse, com o botão desligado, é pior do que não explicar nada.
+    const nota = $("#tp-os-nota");
+    if (nota) {
+      nota.innerHTML = ENVIO_LIGADO
+        ? "O envio acontece por um processo dentro da rede Unetvale: o WVSA não é alcançável " +
+          "pela internet. Do clique ao número da OS leva alguns segundos. Se esse processo " +
+          "estiver fora do ar, a ordem fica em <b>pronta</b> aguardando — nunca é dada como " +
+          "enviada sem ter sido."
+        : "Quando for liberado, o envio passará por um processo dentro da rede Unetvale — o WVSA " +
+          "não é alcançável pela internet, então a Vercel não consegue criar a OS diretamente.";
+    }
     const os = TP.ordens || [];
     const conta = (s) => os.filter((o) => o.status === s).length;
     $("#tp-os-kpis").innerHTML = [
@@ -262,22 +400,6 @@
         <td style="max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(o.solicitacao || "").slice(0, 120)}</td>
       </tr>`).join("") ||
       `<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted)">Nenhuma OS criada ainda.</td></tr>`;
-  }
-
-  function renderColetas() {
-    const cs = TP.coletas || [];
-    $("#tp-coletas-tabela").querySelector("tbody").innerHTML = cs.map((c) => `
-      <tr>
-        <td style="white-space:nowrap">${c.inicio_br}</td>
-        <td style="white-space:nowrap">${c.fim_br}</td>
-        <td><span class="badge ${c.status === "ok" ? "badge-verde" : c.status === "parcial" ? "badge-ambar" : "badge-vermelho"}">${c.status}</span>
-          ${c.erro ? `<div style="font-size:12px;color:var(--danger)">${c.erro}</div>` : ""}</td>
-        <td class="num">${c.cidades_ok ?? "—"}/${c.cidades_alvo ?? "—"}</td>
-        <td class="num">${fmt(c.novos)}</td>
-        <td class="num">${fmt(c.alterados)}</td>
-        <td class="num">${fmt(c.desapareceram)}</td>
-      </tr>`).join("") ||
-      `<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted)">Nenhuma coleta registrada.</td></tr>`;
   }
 
   // ---- CSV ---------------------------------------------------------------
@@ -305,6 +427,7 @@
     renderKpis(linhas);
     renderGraficos(linhas);
     renderTabela(linhas);
+    renderCandidatos(linhas);
     $("#tp-de").value = estado.de;
     $("#tp-ate").value = estado.ate;
     if (window.__tpMapa) window.__tpMapa.atualizar(linhas);
@@ -326,9 +449,18 @@
   $("#tp-cidade").addEventListener("change", (e) => { estado.cidade = e.target.value; estado.bairro = ""; render(); });
   $("#tp-bairro").addEventListener("change", (e) => { estado.bairro = e.target.value; render(); });
   $("#tp-risco").addEventListener("change", (e) => { estado.risco = e.target.value; render(); });
+  $("#tp-turno").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-turno]");
+    if (!b) return;
+    estado.turno = b.dataset.turno;
+    [...$("#tp-turno").children].forEach((x) => x.classList.toggle("active", x === b));
+    render();
+  });
   $("#tp-limpar").addEventListener("click", () => {
-    Object.assign(estado, { de: TP.padrao.de, ate: TP.padrao.ate, cidade: "", bairro: "", risco: "", ordem: null, desc: false });
+    Object.assign(estado, { de: TP.padrao.de, ate: TP.padrao.ate, cidade: "", bairro: "",
+                            risco: "", turno: "", ordem: null, desc: false });
     [...$("#tp-presets").children].forEach((x) => x.classList.toggle("active", x.dataset.dias === "7"));
+    [...$("#tp-turno").children].forEach((x) => x.classList.toggle("active", x.dataset.turno === ""));
     render();
   });
   $("#tp-exportar").addEventListener("click", () => exportarCsv(aplicar()));
@@ -362,6 +494,5 @@
   // ---- início ------------------------------------------------------------
   renderRevisao();
   renderOrdens();
-  renderColetas();
   render();
 })();

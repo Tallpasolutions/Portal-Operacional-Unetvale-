@@ -9,7 +9,7 @@ import functools
 import os
 
 from flask import (
-    Blueprint, redirect, render_template, request, session, url_for, flash, abort
+    Blueprint, g, redirect, render_template, request, session, url_for, flash, abort
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -22,13 +22,35 @@ def _admin_email():
     return (os.environ.get("ADMIN_EMAIL", "") or "").strip().lower()
 
 
+def _eh_supervisor_cache(uid):
+    """`eh_supervisor` uma vez por requisição.
+
+    `usuario_atual()` é chamada pelo context processor e por várias rotas; sem
+    cache seriam várias idas ao PostgREST na mesma requisição, e numa função
+    serverless isso aparece no tempo de resposta. `g` vive só o request, então
+    a informação nunca fica velha entre páginas.
+    """
+    if not uid:
+        return False
+    if not hasattr(g, "_eh_supervisor"):
+        from . import supervisores
+        g._eh_supervisor = supervisores.eh_supervisor(uid)
+    return g._eh_supervisor
+
+
 def usuario_atual():
     email = session.get("email")
+    uid = session.get("uid")
+    eh_sup = _eh_supervisor_cache(uid)
     return {
         "id": session.get("uid"),
         "nome": session.get("nome"),
         "email": email,
         "is_admin": bool(email) and email == _admin_email(),
+        "is_supervisor": eh_sup,
+        # Supervisor não enxerga Troca de Poste: o módulo é de infraestrutura
+        # e não tem recorte por equipe operacional.
+        "ve_troca_poste": not eh_sup or (bool(email) and email == _admin_email()),
     }
 
 
@@ -111,7 +133,7 @@ def criar_usuario():
 
 
 @bp.route("/senha", methods=["GET", "POST"])
-@admin_obrigatorio
+@login_obrigatorio
 def trocar_senha():
     if request.method == "POST":
         atual = request.form.get("atual") or ""

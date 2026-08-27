@@ -15,11 +15,18 @@
       <button data-g="operacional">Operacional</button>
     </span>
   </label>
-  <label>Empresa <select id="f-empresa"></select></label>
+  <label title="Escolher um supervisor seleciona as equipes dele">Supervisor
+    <select id="f-supervisor">
+      <option value="">Todos</option>
+      {% for s in supervisores %}<option value="{{ s.id }}">{{ s.nome }}</option>{% endfor %}
+    </select>
+  </label>
+  <label title="Escolha várias — cada uma vira um chip abaixo">Equipe <select id="f-empresa"></select></label>
   <label>Técnico <select id="f-tecnico"></select></label>
   <label>Mês <select id="f-mes"></select></label>
   <label>Semana <select id="f-semana"></select></label>
   <button class="btn sec" id="btn-rej">Só rejeitadas</button>
+  <button class="btn sec" id="btn-sem-retirada" title="Exclui as finalidades de retirada da contagem">Remover retiradas</button>
   <button class="btn sec" id="btn-limpar">Limpar filtros</button>
 </div>
 <div class="chips" id="chips"></div>
@@ -83,5 +90,6 @@
 
 {% block scripts %}
 <script>window.__PAYLOAD__ = {{ payload|tojson }};</script>
+<script>window.__SUPERVISORES__ = {{ supervisores|tojson }};</script>
 <script src="{{ url_for('static', filename='js/produtividade.js') }}"></script>
 {% endblock %}

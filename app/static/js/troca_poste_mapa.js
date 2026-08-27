@@ -26,6 +26,37 @@
   // esconde os cabos — que é o que importa ver.
   const ZOOM_POSTES = 15;
 
+  /**
+   * Faz o mapa ocupar o que sobra da viewport.
+   *
+   * Calculado a partir da posição real do container, e não com um
+   * `calc(100vh - Xpx)`: acima dele há topbar, abas, subtítulo e cabeçalho do
+   * card, e qualquer um deles pode quebrar em duas linhas dependendo da
+   * largura. Somar isso à mão daria um número que só vale numa tela.
+   */
+  function ajustarAltura() {
+    const el = document.getElementById("tp-mapa");
+    if (!el || el.offsetParent === null) return;   // aba oculta: não há o que medir
+    const topo = el.getBoundingClientRect().top;
+
+    // Primeiro palpite: o que sobra abaixo do topo do mapa.
+    let altura = window.innerHeight - topo - 40;
+    el.style.height = `${Math.max(360, Math.round(altura))}px`;
+
+    // Depois corrige pelo que de fato sobrou. Abaixo do mapa ainda existem a
+    // legenda da rede (que muda de altura conforme quebra de linha), o padding
+    // do card e o do .content. Medir o excesso real evita somar esses valores à
+    // mão — soma que erraria a cada mudança de layout ou de largura de tela.
+    const excesso = document.documentElement.scrollHeight - window.innerHeight;
+    if (excesso > 0) {
+      altura -= excesso;
+      el.style.height = `${Math.max(360, Math.round(altura))}px`;
+    }
+    if (mapa) mapa.invalidateSize();
+  }
+
+  window.addEventListener("resize", ajustarAltura);
+
   function criar() {
     if (mapa) return;
     mapa = L.map("tp-mapa", { scrollWheelZoom: true });
@@ -83,6 +114,7 @@
     if (comCoord.length) {
       mapa.fitBounds(L.latLngBounds(comCoord.map((l) => [l.lat, l.lon])).pad(0.15));
     }
+    ajustarAltura();
 
     // Sem coordenada não é "sem risco": é endereço que a geocodificação não
     // resolveu. Dizer quantos ficaram de fora evita ler o mapa como completo.
@@ -187,12 +219,14 @@
   window.__tpMapa = {
     atualizar: desenhar,
     aoMostrar(linhas) {
+      ajustarAltura();
       criar();
       desenhar(linhas || ultimasLinhas);
       carregarRede(linhas || ultimasLinhas);
       // O container media 0 enquanto a aba estava oculta: sem isto o Leaflet
-      // desenha os tiles no tamanho errado.
-      setTimeout(() => mapa.invalidateSize(), 60);
+      // desenha os tiles no tamanho errado. O ajuste de altura roda de novo
+      // aqui porque a legenda da rede só ganha altura depois de preenchida.
+      setTimeout(() => { ajustarAltura(); mapa.invalidateSize(); }, 60);
     },
   };
 })();

@@ -12,6 +12,7 @@
     <button data-view="grafico" class="active">Gráfico</button>
     <button data-view="tabela">Tabela mensal</button>
     <button data-view="ofensores">Ofensores</button>
+    <button data-view="empresas">Por empresa</button>
   </span>
   <label class="ind-label">Indicador <span class="toggle" id="indToggle"></span></label>
 </div>
@@ -90,6 +91,53 @@
   </div>
 </div>
 <!-- ===== Visualização 3: técnicos ofensores (% acima da média do mês) ===== -->
+<div id="view-empresas" hidden>
+  <p class="subnote">
+    IQI consolidado de cada empresa: <b>reincidências ÷ total de OSs da empresa</b>, e não a média
+    dos percentuais dos técnicos. A diferença importa — média de percentual daria o mesmo peso a
+    quem fez 11 OSs e a quem fez 60.
+  </p>
+
+  <div class="view-bar">
+    <span class="ind-label">Mês <select id="emp-mes"></select></span>
+    <span class="ind-label">Indicador
+      <span class="view-switch" id="emp-ind"></span>
+    </span>
+  </div>
+
+  <div class="filtros-multi">
+    <div class="fm-bloco">
+      <span class="fm-label">Empresa</span>
+      <div class="fchips" id="emp-chips"></div>
+    </div>
+    <div class="fm-bloco">
+      <span class="fm-label">Supervisor</span>
+      <div class="fchips" id="emp-supervisores"></div>
+    </div>
+  </div>
+
+  <div class="kpis" id="emp-kpis"></div>
+
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-h"><span id="emp-titulo-grafico">IQI por empresa</span></div>
+    <div class="card-b"><div class="chart-box"><canvas id="g-empresas"></canvas></div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-h">Consolidado por empresa</div>
+    <div class="card-b tabela-wrap">
+      <table class="tbl" id="tab-empresas">
+        <thead><tr>
+          <th>Empresa</th><th class="num">Técnicos</th><th class="num">OSs</th>
+          <th class="num">OSs c/ chamado</th><th class="num colInd">IQI %</th><th>Status</th>
+        </tr></thead>
+        <tbody></tbody>
+        <tfoot></tfoot>
+      </table>
+    </div>
+  </div>
+</div>
+
 <div id="view-ofensores" hidden>
   <p class="subnote">Ofensor = técnico com <b>% acima da média do mês</b> (entre os avaliados, com ao menos o mínimo de OSs).
     Meses em auditoria aparecem como <b>(Parcial)</b>.</p>
@@ -130,4 +178,6 @@
 <script src="{{ url_for('static', filename='js/iqi.js') }}"></script>
 <script src="{{ url_for('static', filename='js/iqi_tabela.js') }}"></script>
 <script src="{{ url_for('static', filename='js/iqi_ofensores.js') }}"></script>
+<script>window.__SUPERVISORES__ = {{ supervisores|tojson }};</script>
+<script src="{{ url_for('static', filename='js/iqi_empresas.js') }}"></script>
 {% endblock %}

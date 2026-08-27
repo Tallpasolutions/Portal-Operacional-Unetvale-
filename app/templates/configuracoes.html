@@ -22,4 +22,112 @@
     </div>
   </div>
 </div>
+
+{% if usuario.is_admin %}
+<h3 class="secao">Supervisores</h3>
+<p class="subnote">
+  O supervisor enxerga apenas os números das equipes vinculadas a ele, e não tem acesso ao módulo
+  Troca de Poste. Cadastrar aqui não cria conta de acesso — promove um usuário que já existe, para
+  que login e senha continuem num lugar só. Contas novas são criadas na tela <b>Usuários</b>.
+</p>
+
+<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(330px,1fr));margin-bottom:18px;">
+  <div class="card">
+    <div class="card-h">Cadastrar supervisor</div>
+    <div class="card-b">
+      {% if usuarios %}
+      <form method="post" action="{{ url_for('dash.supervisor_marcar') }}">
+        <div class="field">
+          <label>Usuário</label>
+          <select name="usuario_id" required style="width:100%;">
+            <option value="">Selecione…</option>
+            {% for u in usuarios %}
+              {% if u.id not in supervisores|map(attribute='usuario_id')|list %}
+              <option value="{{ u.id }}">{{ u.nome or u.email }} — {{ u.email }}</option>
+              {% endif %}
+            {% endfor %}
+          </select>
+        </div>
+        <button class="btn" type="submit">Cadastrar como supervisor</button>
+      </form>
+      {% else %}
+      <div class="vazio">Nenhum usuário disponível. Crie a conta em <b>Usuários</b> primeiro.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-h">Vincular equipe</div>
+    <div class="card-b">
+      {% if supervisores and equipes %}
+      <form method="post" action="{{ url_for('dash.supervisor_equipe') }}">
+        <div class="field">
+          <label>Supervisor</label>
+          <select name="usuario_id" required style="width:100%;">
+            {% for s in supervisores %}<option value="{{ s.usuario_id }}">{{ s.nome }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label>Equipe / empresa</label>
+          <select name="equipe" required style="width:100%;">
+            {% for e in equipes %}<option value="{{ e }}">{{ e }}</option>{% endfor %}
+          </select>
+        </div>
+        <input type="hidden" name="acao" value="vincular">
+        <button class="btn" type="submit">Vincular</button>
+      </form>
+      {% else %}
+      <div class="vazio">
+        {% if not supervisores %}Cadastre um supervisor primeiro.
+        {% else %}Nenhuma equipe encontrada no último snapshot de produtividade.{% endif %}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-h">Supervisores cadastrados ({{ supervisores|length }})</div>
+  <div class="card-b tabela-wrap">
+    {% if supervisores %}
+    <table class="tbl">
+      <thead><tr><th>Supervisor</th><th>E-mail</th><th>Equipes</th><th>Ações</th></tr></thead>
+      <tbody>
+        {% for s in supervisores %}
+        <tr>
+          <td><b>{{ s.nome }}</b></td>
+          <td>{{ s.email }}</td>
+          <td>
+            {% if s.equipes %}
+              {% for e in s.equipes %}
+              <form method="post" action="{{ url_for('dash.supervisor_equipe') }}" style="display:inline;">
+                <input type="hidden" name="usuario_id" value="{{ s.usuario_id }}">
+                <input type="hidden" name="equipe" value="{{ e }}">
+                <input type="hidden" name="acao" value="desvincular">
+                <span class="chip">{{ e }}
+                  <button type="submit" title="Desvincular {{ e }}">×</button>
+                </span>
+              </form>
+              {% endfor %}
+            {% else %}
+              <span class="badge badge-ambar">sem equipe vinculada</span>
+            {% endif %}
+          </td>
+          <td>
+            <form method="post" action="{{ url_for('dash.supervisor_remover') }}"
+                  onsubmit="return confirm('Remover o papel de supervisor de {{ s.nome }}? A conta de acesso continua ativa.');">
+              <input type="hidden" name="usuario_id" value="{{ s.usuario_id }}">
+              <button class="btn-ghost" type="submit">Remover papel</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="vazio">Nenhum supervisor cadastrado ainda.</div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
 {% endblock %}

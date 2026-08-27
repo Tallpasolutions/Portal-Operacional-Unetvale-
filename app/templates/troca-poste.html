@@ -15,7 +15,6 @@
     <button data-aba="revisao">Revisão <span id="tp-badge-revisao"></span></button>
     <button data-aba="ordens">Ordens de Serviço</button>
     <button data-aba="mapa">Mapa</button>
-    <button data-aba="coletas">Coletas</button>
   </div>
 </div>
 
@@ -34,6 +33,13 @@
     <label>Até <input type="date" id="tp-ate"></label>
     <label>Cidade <select id="tp-cidade"></select></label>
     <label id="tp-bairro-wrap" style="display:none">Bairro <select id="tp-bairro"></select></label>
+    <label>Turno
+      <span class="toggle" id="tp-turno">
+        <button data-turno="" class="active">Todos</button>
+        <button data-turno="manha">Manhã</button>
+        <button data-turno="tarde">Tarde</button>
+      </span>
+    </label>
     <label>Risco <select id="tp-risco"></select></label>
     <button class="btn sec" id="tp-limpar">Limpar filtros</button>
   </div>
@@ -103,11 +109,26 @@
 
 <!-- ===================== Ordens de Serviço ===================== -->
 <section data-painel="ordens" hidden>
-  <div class="alert alert-ok" id="tp-os-modo">
-    <b>Modo seguro.</b> Nenhuma OS foi enviada ao WVSA. O envio real só é liberado depois de
-    conferir 20 rascunhos campo a campo, e só sai por clique humano — nenhum job cria OS.
-  </div>
+  <div class="alert" id="tp-os-aviso"></div>
+  <p class="subnote" id="tp-os-nota"></p>
   <div class="kpis" id="tp-os-kpis"></div>
+
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-h">
+      <span>Candidatos a OS — <span id="tp-cand-contagem"></span></span>
+      <span class="upd">críticos do recorte atual</span>
+    </div>
+    <div class="card-b tabela-wrap">
+      <table class="tbl" id="tp-candidatos">
+        <thead><tr>
+          <th>Risco</th><th>Cidade / Bairro</th><th>Endereço</th><th>Data</th>
+          <th>Script da OS</th><th>Ação</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
   <div class="card">
     <div class="card-h">Ordens de serviço</div>
     <div class="card-b tabela-wrap">
@@ -124,38 +145,21 @@
 
 <!-- ===================== Mapa ===================== -->
 <section data-painel="mapa" hidden>
-  <p class="subnote" id="tp-mapa-nota">
-    Desligamentos posicionados. Cor = risco. Só aparecem os que têm posição confiável ou
-    provisória; os indeterminados sem coordenada ficam de fora até serem revisados.
-  </p>
   <div class="card">
     <div class="card-h">
-      <span>Mapa dos desligamentos</span>
+      <span title="Cor = risco. Só aparecem os desligamentos com posição confiável ou provisória; os indeterminados sem coordenada ficam de fora até serem revisados.">
+        Mapa dos desligamentos
+      </span>
       <span class="upd" id="tp-mapa-legenda"></span>
     </div>
-    <div class="card-b">
-      <div id="tp-mapa" style="height:560px;border-radius:8px;overflow:hidden;"></div>
-      <p class="upd" id="tp-mapa-rede" style="margin-top:10px;flex-wrap:wrap"></p>
-    </div>
-  </div>
-</section>
-
-<!-- ===================== Coletas ===================== -->
-<section data-painel="coletas" hidden>
-  <p class="subnote">
-    Coleta na Celesc das 11 cidades monitoradas. Desligamento que sai da lista da Celesc é marcado
-    como desaparecido e some das telas, mas <b>não é apagado</b> — fica no banco para auditoria.
-  </p>
-  <div class="card">
-    <div class="card-h">Histórico de coletas</div>
-    <div class="card-b tabela-wrap">
-      <table class="tbl" id="tp-coletas-tabela">
-        <thead><tr>
-          <th>Início</th><th>Fim</th><th>Status</th><th class="num">Cidades</th>
-          <th class="num">Novos</th><th class="num">Alterados</th><th class="num">Desapareceram</th>
-        </tr></thead>
-        <tbody></tbody>
-      </table>
+    <!-- Sem padding: o mapa encosta na borda do card e ganha os 32px que o
+         padding consumiria. A legenda abaixo tem o seu próprio. -->
+    <div class="card-b" style="padding:0;">
+      <!-- A altura vem do JS, a partir do espaço que sobra na viewport (ver
+           ajustarAltura em troca_poste_mapa.js). O valor aqui é só o fallback
+           para o instante antes do primeiro cálculo. -->
+      <div id="tp-mapa" style="height:560px;overflow:hidden;border-radius:0 0 10px 10px;"></div>
+      <p class="upd" id="tp-mapa-rede" style="margin:0;padding:8px 18px;flex-wrap:wrap;border-top:1px solid var(--borda);"></p>
     </div>
   </div>
 </section>
