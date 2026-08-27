@@ -109,16 +109,8 @@
 
 <!-- ===================== Ordens de Serviço ===================== -->
 <section data-painel="ordens" hidden>
-  <div class="alert alert-erro">
-    <b>Envio real ligado.</b> Clicar em <b>Enviar ao WVSA</b> cria a OS de verdade e desloca
-    equipe. Cada OS tem seu próprio botão — nenhum job envia sozinho, e a mesma ordem não é
-    enviada duas vezes.
-  </div>
-  <p class="subnote">
-    O envio acontece por um processo dentro da rede Unetvale: o WVSA não é alcançável pela
-    internet. Do clique ao número da OS leva alguns segundos. Se o coletor estiver fora do ar, a
-    ordem fica em <b>pronta</b> aguardando — nunca é dada como enviada sem ter sido.
-  </p>
+  <div class="alert" id="tp-os-aviso"></div>
+  <p class="subnote" id="tp-os-nota"></p>
   <div class="kpis" id="tp-os-kpis"></div>
 
   <div class="card" style="margin-bottom:16px;">

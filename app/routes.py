@@ -134,6 +134,7 @@ def troca_poste():
         "ultima_coleta": tp.ultima_coleta(),
         "hoje": tp.hoje().isoformat(),
         "padrao": {"de": de, "ate": ate},
+        "envio_os_habilitado": _envio_os_habilitado(),
     }
     return render_template("troca-poste.html", ativo="troca-poste", pacote=pacote)
 
@@ -170,6 +171,20 @@ def troca_poste_criar_os():
                     "chave": ordem["chave_idempotencia"]})
 
 
+def _envio_os_habilitado():
+    """O envio de OS ao WVSA está liberado?
+
+    Desligado por padrão. O fluxo existe e a tela mostra tudo, mas o envio em
+    si não foi testado de ponta a ponta contra o WVSA — e um clique cria OS
+    real e desloca equipe. Ligar é decisão explícita, feita no ambiente
+    (`OS_ENVIO_HABILITADO=true`), não uma mudança de código.
+
+    A recusa fica AQUI, no servidor, e não só no botão: desabilitar no cliente
+    impede o clique acidental, não uma requisição forjada.
+    """
+    return os.environ.get("OS_ENVIO_HABILITADO", "").strip().lower() == "true"
+
+
 @bp.route("/troca-poste/os/<ordem_id>/enviar", methods=["POST"])
 @login_obrigatorio
 def troca_poste_enviar_os(ordem_id):
@@ -181,6 +196,12 @@ def troca_poste_enviar_os(ordem_id):
     """
     if not usuario_atual()["ve_troca_poste"]:
         abort(403)
+    if not _envio_os_habilitado():
+        return jsonify({
+            "erro": "O envio de OS ao WVSA está desligado.",
+            "detalhe": "O fluxo ainda não foi validado ponta a ponta. "
+                       "Para liberar, defina OS_ENVIO_HABILITADO=true no ambiente.",
+        }), 503
     try:
         tp.marcar_para_envio(ordem_id, session.get("uid"))
     except ValueError as e:

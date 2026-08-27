@@ -9,6 +9,7 @@
   const ROTULO = TP.rotulos_risco || {};
   const ORDEM = TP.ordem_risco || [];
   const HOJE = TP.hoje;
+  const ENVIO_LIGADO = TP.envio_os_habilitado === true;
 
   // Cores por risco: seguem o CUSTO DO ERRO, não estética. Crítico é fibra a
   // menos de 25 m — errar para menos ali é cabo rompido e cliente fora do ar.
@@ -332,7 +333,9 @@
         <td>${[l.tipo_via, l.logradouro].filter(Boolean).join(" ") || l.endereco}</td>
         <td style="white-space:nowrap">${l.data_br}<div style="font-size:12px;color:var(--muted)">${l.hora_inicio || ""}–${l.hora_fim || ""}</div></td>
         <td><button class="btn-ghost" data-script="${i}">Ver script</button></td>
-        <td><button class="btn" data-enviar="${i}">Enviar ao WVSA</button></td>
+        <td>${ENVIO_LIGADO
+          ? `<button class="btn" data-enviar="${i}">Enviar ao WVSA</button>`
+          : `<button class="btn sec" disabled title="O envio ao WVSA está desligado no ambiente (OS_ENVIO_HABILITADO). O fluxo ainda não foi validado ponta a ponta.">Envio desligado</button>`}</td>
       </tr>
       <tr data-script-de="${i}" hidden>
         <td colspan="6" style="background:var(--fundo);">
@@ -351,11 +354,36 @@
         return;
       }
       const enviar = e.target.closest("button[data-enviar]");
+      // Sem ENVIO_LIGADO o botão nem é renderizado com `data-enviar`, então
+      // este caminho não existe. A recusa de verdade está no servidor.
       if (enviar) abrirEEnviar(cand[Number(enviar.dataset.enviar)], enviar);
     };
   }
 
   function renderOrdens() {
+    const aviso = $("#tp-os-aviso");
+    if (aviso) {
+      aviso.className = ENVIO_LIGADO ? "alert alert-erro" : "alert alert-ok";
+      aviso.innerHTML = ENVIO_LIGADO
+        ? "<b>Envio real ligado.</b> Clicar em <b>Enviar ao WVSA</b> cria a OS de verdade e " +
+          "desloca equipe. Cada OS tem seu próprio botão — nenhum job envia sozinho, e a mesma " +
+          "ordem não é enviada duas vezes."
+        : "<b>Envio ao WVSA desligado.</b> Esta tela mostra os candidatos e o script exato que " +
+          "seria enviado, mas nenhuma OS é criada. O fluxo existe e está pronto; falta validá-lo " +
+          "ponta a ponta contra o WVSA antes de liberar.";
+    }
+    // A nota explicativa acompanha o estado: descrever o envio como se ele
+    // acontecesse, com o botão desligado, é pior do que não explicar nada.
+    const nota = $("#tp-os-nota");
+    if (nota) {
+      nota.innerHTML = ENVIO_LIGADO
+        ? "O envio acontece por um processo dentro da rede Unetvale: o WVSA não é alcançável " +
+          "pela internet. Do clique ao número da OS leva alguns segundos. Se esse processo " +
+          "estiver fora do ar, a ordem fica em <b>pronta</b> aguardando — nunca é dada como " +
+          "enviada sem ter sido."
+        : "Quando for liberado, o envio passará por um processo dentro da rede Unetvale — o WVSA " +
+          "não é alcançável pela internet, então a Vercel não consegue criar a OS diretamente.";
+    }
     const os = TP.ordens || [];
     const conta = (s) => os.filter((o) => o.status === s).length;
     $("#tp-os-kpis").innerHTML = [
