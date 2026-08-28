@@ -181,7 +181,13 @@
 {% endblock %}
 
 {% block scripts %}
-<script>window.__SUPERVISORES__ = {{ supervisores|tojson }};</script>
+<script>
+  window.__SUPERVISORES__ = {{ supervisores|tojson }};
+  // Vem do servidor, e não copiado aqui: a chave que o vínculo guardou foi
+  // calculada em Python com este mapa. Uma segunda cópia no JS divergiria na
+  // primeira empresa nova e o filtro perderia técnicos sem erro na tela.
+  window.__APELIDOS_EMPRESA__ = {{ apelidos_empresa|tojson }};
+</script>
 <script src="{{ url_for('static', filename='js/iqi_supervisor.js') }}"></script>
 <script>window.__PACOTE__ = {{ pacote|tojson }};</script>
 <script src="{{ url_for('static', filename='js/iqi.js') }}"></script>

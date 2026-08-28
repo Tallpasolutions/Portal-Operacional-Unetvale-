@@ -57,7 +57,7 @@
   </div>
 
   <div class="card">
-    <div class="card-h">Vincular equipe</div>
+    <div class="card-h">Vincular equipes inteiras</div>
     <div class="card-b">
       {% if supervisores and equipes %}
       <form method="post" action="{{ url_for('dash.supervisor_equipe') }}">
@@ -68,13 +68,15 @@
           </select>
         </div>
         <div class="field">
-          <label>Equipe / empresa</label>
-          <select name="equipe" required style="width:100%;">
-            {% for e in equipes %}<option value="{{ e }}">{{ e }}</option>{% endfor %}
-          </select>
+          <label>Equipes / empresas <span class="subnote">(pode marcar várias)</span></label>
+          <div class="lista-marcar">
+            {% for e in equipes %}
+            <label class="linha-marcar"><input type="checkbox" name="equipe" value="{{ e }}"> {{ e }}</label>
+            {% endfor %}
+          </div>
         </div>
         <input type="hidden" name="acao" value="vincular">
-        <button class="btn" type="submit">Vincular</button>
+        <button class="btn" type="submit">Vincular equipes</button>
       </form>
       {% else %}
       <div class="vazio">
@@ -86,12 +88,62 @@
   </div>
 </div>
 
+<div class="card" style="margin-bottom:18px;">
+  <div class="card-h">Vincular técnicos, nome a nome</div>
+  <div class="card-b">
+    <p class="subnote" style="margin-top:0;">
+      Para quando a empresa não é a unidade de supervisão — a <b>UNETVALE</b> tem 26 técnicos
+      repartidos entre supervisores, e a <b>INFRA WAVE</b> hoje responde a dois. O supervisor
+      enxerga a <b>soma</b> do que foi vinculado: as equipes inteiras <b>mais</b> os técnicos avulsos.
+    </p>
+    {% if supervisores and tecnicos_por_empresa %}
+    <form method="post" action="{{ url_for('dash.supervisor_tecnico') }}">
+      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr));">
+        <div class="field">
+          <label>Supervisor</label>
+          <select name="usuario_id" required style="width:100%;">
+            {% for s in supervisores %}<option value="{{ s.usuario_id }}">{{ s.nome }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label>Buscar técnico</label>
+          <input type="search" id="busca-tecnico" placeholder="nome ou empresa…" style="width:100%;"
+                 autocomplete="off">
+        </div>
+      </div>
+      <div class="field">
+        <label>Técnicos <span class="subnote">(pode marcar vários)</span></label>
+        <div class="lista-marcar" id="lista-tecnicos" style="max-height:330px;">
+          {% for empresa, tecnicos in tecnicos_por_empresa.items() %}
+          <div class="grupo-marcar" data-empresa="{{ empresa }}">
+            <div class="grupo-titulo">{{ empresa }} <span>({{ tecnicos|length }})</span></div>
+            {% for t in tecnicos %}
+            <label class="linha-marcar" data-busca="{{ (empresa ~ ' ' ~ t.nome)|lower }}">
+              <input type="checkbox" name="tecnico" value="{{ t.rotulo }}"> {{ t.nome }}
+            </label>
+            {% endfor %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      <input type="hidden" name="acao" value="vincular">
+      <button class="btn" type="submit">Vincular técnicos</button>
+    </form>
+    {% else %}
+    <div class="vazio">
+      {% if not supervisores %}Cadastre um supervisor primeiro.
+      {% else %}Nenhum técnico encontrado nos snapshots de produtividade e IQI/IQM.{% endif %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+
 <div class="card">
   <div class="card-h">Supervisores cadastrados ({{ supervisores|length }})</div>
   <div class="card-b tabela-wrap">
     {% if supervisores %}
     <table class="tbl">
-      <thead><tr><th>Supervisor</th><th>E-mail</th><th>Equipes</th><th>Ações</th></tr></thead>
+      <thead><tr><th>Supervisor</th><th>E-mail</th><th>Equipes inteiras</th><th>Técnicos avulsos</th><th>Ações</th></tr></thead>
       <tbody>
         {% for s in supervisores %}
         <tr>
@@ -110,10 +162,29 @@
               </form>
               {% endfor %}
             {% else %}
-              <span class="badge badge-ambar">sem equipe vinculada</span>
+              <span class="subnote">—</span>
             {% endif %}
           </td>
           <td>
+            {% if s.tecnicos %}
+              {% for t in s.tecnicos %}
+              <form method="post" action="{{ url_for('dash.supervisor_tecnico') }}" style="display:inline;">
+                <input type="hidden" name="usuario_id" value="{{ s.usuario_id }}">
+                <input type="hidden" name="tecnico" value="{{ t.chave }}">
+                <input type="hidden" name="acao" value="desvincular">
+                <span class="chip">{{ t.rotulo }}
+                  <button type="submit" title="Desvincular {{ t.rotulo }}">×</button>
+                </span>
+              </form>
+              {% endfor %}
+            {% else %}
+              <span class="subnote">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if not s.equipes and not s.tecnicos %}
+              <span class="badge badge-ambar" style="margin-right:6px;">sem vínculo</span>
+            {% endif %}
             <form method="post" action="{{ url_for('dash.supervisor_remover') }}"
                   onsubmit="return confirm('Remover o papel de supervisor de {{ s.nome }}? A conta de acesso continua ativa.');">
               <input type="hidden" name="usuario_id" value="{{ s.usuario_id }}">
@@ -130,4 +201,31 @@
   </div>
 </div>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Filtro do seletor de técnicos. São 102 nomes: rolar a lista inteira para
+  // achar um é o que faria a tela ser abandonada no meio do cadastro.
+  // Esconde também o cabeçalho da empresa que ficou sem nenhum nome visível,
+  // senão a lista vira uma sequência de títulos vazios.
+  (function () {
+    const busca = document.getElementById("busca-tecnico");
+    if (!busca) return;
+    busca.addEventListener("input", () => {
+      const q = busca.value.trim().toLowerCase();
+      document.querySelectorAll("#lista-tecnicos .grupo-marcar").forEach((g) => {
+        let visiveis = 0;
+        g.querySelectorAll(".linha-marcar").forEach((l) => {
+          // Marcado sempre aparece: some-lo esconderia do usuário o que ele
+          // está prestes a enviar.
+          const bate = !q || l.dataset.busca.includes(q) || l.querySelector("input").checked;
+          l.style.display = bate ? "" : "none";
+          if (bate) visiveis += 1;
+        });
+        g.style.display = visiveis ? "" : "none";
+      });
+    });
+  })();
+</script>
 {% endblock %}

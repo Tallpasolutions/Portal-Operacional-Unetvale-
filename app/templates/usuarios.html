@@ -28,7 +28,19 @@
         <tbody>
           {% for u in usuarios %}
             <tr>
-              <td>{{ u.nome or '—' }}</td><td>{{ u.email }}</td><td>{{ (u.criado_em or '')[:10] }}</td>
+              <td>
+                <!-- O nome é editável aqui porque é atributo da CONTA: corrigir
+                     neste lugar corrige em todos os outros (cadastro de
+                     supervisor, filtro do IQI/IQM). O e-mail não, que é a
+                     identidade de login. -->
+                <form method="post" action="{{ url_for('dash.usuario_renomear') }}"
+                      style="display:flex;gap:6px;align-items:center;">
+                  <input type="hidden" name="usuario_id" value="{{ u.id }}">
+                  <input type="text" name="nome" value="{{ u.nome or '' }}" required
+                         style="padding:5px 8px;min-width:190px;">
+                  <button class="btn-ghost" type="submit" title="Salvar o nome">Salvar</button>
+                </form>
+              </td><td>{{ u.email }}</td><td>{{ (u.criado_em or '')[:10] }}</td>
               <td>
                 <form method="post" action="{{ url_for('auth.redefinir_senha_usuario') }}" style="display:flex;gap:6px;align-items:center;">
                   <input type="hidden" name="email" value="{{ u.email }}">

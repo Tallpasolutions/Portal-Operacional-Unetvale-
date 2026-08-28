@@ -36,10 +36,22 @@
     return MESES_NOME[mm - 1] + (mesFechado(mesStr) ? "" : " (Parcial)");
   }
 
-  const empresasDisponiveis = () => [...new Set(dados().tecnicos.map((t) => empresaDe(t.nome)))].sort();
+  // Base do recorte: o supervisor escolhido (null = todos). Vem antes dos
+  // chips de empresa, que refinam dentro do que o supervisor já alcança.
+  let alcanceSup = null;
+
+  const noAlcance = () =>
+    window.__iqiSupervisor
+      ? window.__iqiSupervisor.filtrar(dados().tecnicos, alcanceSup)
+      : dados().tecnicos;
+
+  // As empresas oferecidas saem do alcance do supervisor, não do universo
+  // inteiro: com um supervisor escolhido, um chip de empresa fora do time
+  // dele só poderia levar a um recorte vazio.
+  const empresasDisponiveis = () => [...new Set(noAlcance().map((t) => empresaDe(t.nome)))].sort();
 
   function tecnicosFiltrados() {
-    return dados().tecnicos
+    return noAlcance()
       .filter((t) => !empresasSel.size || empresasSel.has(empresaDe(t.nome)))
       .sort((a, b) => a.nome.localeCompare(b.nome, "pt"));
   }
@@ -49,26 +61,44 @@
     return mesesSel.size ? todos.filter((m) => mesesSel.has(m)) : todos;
   }
 
+  /** Diz por que o recorte ficou vazio; gráfico em branco parece defeito. */
+  function notaSupervisor() {
+    const box = document.getElementById("tm-supervisores");
+    if (!box || !window.__iqiSupervisor) return;
+    let nota = box.parentNode.querySelector(".nota-sup");
+    if (!nota) {
+      nota = document.createElement("div");
+      nota.className = "subnote nota-sup";
+      nota.style.cssText = "flex-basis:100%;margin:2px 0 0";
+      box.insertAdjacentElement("afterend", nota);
+    }
+    nota.textContent = window.__iqiSupervisor.aviso(alcanceSup, dados().tecnicos) || "";
+  }
+
   function renderFiltros() {
     document.querySelectorAll(".tm-ind-nome").forEach((e) => (e.textContent = dados().label || indAtual));
 
-    // Supervisor seleciona as equipes dele de uma vez. Fica ao lado dos chips
-    // de empresa em vez de substituí-los: depois de escolher o supervisor dá
-    // para tirar uma equipe específica do recorte, o que um filtro exclusivo
-    // não permitiria.
+    // O supervisor recorta a base; os chips de empresa refinam dentro dela.
+    // Não dá para traduzir o supervisor em chips de empresa, como era antes:
+    // o vínculo pode ser de técnicos avulsos dentro de uma empresa que ele não
+    // supervisiona inteira — marcar a empresa mostraria colegas de outro time.
     const supBox = document.getElementById("tm-supervisores");
     const SUP = window.__iqiSupervisor ? window.__iqiSupervisor.lista : [];
     if (supBox) {
       supBox.innerHTML = SUP.length
-        ? SUP.map((s) =>
-            `<button class="fchip" data-sup="${s.id}" title="${s.equipes.join(", ")}">${s.nome}</button>`).join("")
+        ? SUP.map((s) => {
+            const partes = [];
+            if (s.equipes && s.equipes.length) partes.push(s.equipes.join(", "));
+            if (s.tecnicos && s.tecnicos.length) partes.push(`${s.tecnicos.length} tecnico(s) avulso(s)`);
+            return `<button class="fchip" data-sup="${s.id}" title="${partes.join(" + ") || "sem vinculo"}">${s.nome}</button>`;
+          }).join("")
         : '<span style="font-size:12.5px;color:var(--muted)">nenhum cadastrado — veja Configurações</span>';
       supBox.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
-        const s = SUP.find((x) => x.id === b.dataset.sup);
         const jaEra = b.classList.contains("on");
+        alcanceSup = jaEra ? null : window.__iqiSupervisor.alcanceDe(b.dataset.sup);
         empresasSel.clear();
-        if (!jaEra && s) for (const eq of s.equipes) empresasSel.add(eq);
         renderFiltros(); renderTabela();
+        notaSupervisor();
         // `renderFiltros` reconstruiu os chips: remarca pelo dataset, não pela
         // referência antiga do elemento, que já saiu do DOM.
         if (!jaEra) {
@@ -143,7 +173,7 @@
     const btn = e.target.closest("button[data-id]");
     if (!btn || btn.dataset.id === indAtual) return;
     indAtual = btn.dataset.id;
-    empresasSel.clear(); mesesSel.clear();
+    empresasSel.clear(); mesesSel.clear(); alcanceSup = null;
     document.querySelectorAll("#tm-supervisores .fchip").forEach((x) => x.classList.remove("on"));
     renderFiltros(); renderTabela();
   });

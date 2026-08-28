@@ -56,20 +56,18 @@ def produtividade():
 # Equipes de infraestrutura NÃO participam do IQI/IQM (só time operacional).
 _INFRA = re.compile(r"\binfra\b|fandaruff", re.I)
 
-# Empresas que aparecem separadas no WVSA mas são a mesma na operação. O
-# rótulo do técnico vem como "EMPRESA - Nome"; aqui só a parte da empresa é
-# reescrita, o nome é preservado.
-_APELIDOS_EMPRESA = {
-    "WAVE SUPERVISOR": "WAVE",
-}
-
-
 def _agrupar_empresa(rotulo):
+    """Reescreve só a empresa do rótulo "EMPRESA - Nome"; o nome é preservado.
+
+    O mapa de apelidos mora em `supervisores` porque o vínculo do supervisor
+    compara por ele. Duas cópias divergindo fariam o filtro perder técnicos
+    sem erro nenhum na tela.
+    """
     i = rotulo.find(" - ")
     if i < 0:
         return rotulo
     empresa, nome = rotulo[:i].strip(), rotulo[i + 3:]
-    return f"{_APELIDOS_EMPRESA.get(empresa.upper(), empresa)} - {nome}"
+    return f"{supervisores.APELIDOS_EMPRESA.get(empresa.upper(), empresa)} - {nome}"
 
 
 def _so_operacional(payload):
@@ -96,7 +94,8 @@ def iqi():
         pacote["IQM"] = _so_operacional(iqm_row["payload"])
     return render_template("iqi.html", ativo="iqi", pacote=pacote,
                            meta=_meta(iqi_row or iqm_row),
-                           supervisores=_supervisores_para_filtro(usuario_atual()))
+                           supervisores=_supervisores_para_filtro(usuario_atual()),
+                           apelidos_empresa=supervisores.APELIDOS_EMPRESA)
 
 
 @bp.route("/massivas")
@@ -246,10 +245,34 @@ def troca_poste_rede():
 @admin_obrigatorio
 def usuarios():
     try:
-        lista = supa.select("usuarios", {"select": "nome,email,criado_em", "order": "criado_em.asc"})
+        lista = supa.select("usuarios",
+                            {"select": "id,nome,email,criado_em", "order": "criado_em.asc"})
     except Exception:
         lista = []
     return render_template("usuarios.html", ativo="usuarios", usuarios=lista)
+
+
+@bp.route("/usuarios/renomear", methods=["POST"])
+@admin_obrigatorio
+def usuario_renomear():
+    """Corrige o nome de exibição de uma conta.
+
+    O nome é atributo da CONTA, então a correção mora aqui e não na tela de
+    supervisores: arrumar num lugar arruma em todos — lista de usuários,
+    cadastro de supervisor e o filtro do IQI/IQM. O e-mail não muda, porque é
+    a identidade de login; trocá-lo é criar outra conta, não renomear esta.
+    """
+    uid = (request.form.get("usuario_id") or "").strip()
+    nome = " ".join((request.form.get("nome") or "").split())
+    if not uid or not nome:
+        flash("Informe o usuário e o novo nome.", "erro")
+        return redirect(url_for("dash.usuarios"))
+    try:
+        supa.update("usuarios", {"id": uid}, {"nome": nome})
+        flash(f"Nome atualizado para {nome}.", "ok")
+    except Exception as e:
+        flash(f"Erro ao renomear: {e}", "erro")
+    return redirect(url_for("dash.usuarios"))
 
 
 @bp.route("/configuracoes")
@@ -265,6 +288,7 @@ def configuracoes():
     if u["is_admin"]:
         contexto["supervisores"] = supervisores.listar()
         contexto["equipes"] = supervisores.equipes_disponiveis()
+        contexto["tecnicos_por_empresa"] = supervisores.tecnicos_disponiveis()
         try:
             contexto["usuarios"] = supa.select(
                 "usuarios", {"select": "id,nome,email", "order": "nome.asc"})
@@ -316,20 +340,55 @@ def supervisor_remover():
 @bp.route("/supervisores/equipe", methods=["POST"])
 @admin_obrigatorio
 def supervisor_equipe():
-    """Liga ou desliga uma equipe de um supervisor."""
+    """Liga ou desliga equipes de um supervisor.
+
+    Aceita várias equipes numa submissão: supervisor com uma equipe só é a
+    exceção, não a regra — o Hygor tem três. Uma ida ao servidor por equipe
+    fazia o cadastro virar repetição.
+    """
     uid = (request.form.get("usuario_id") or "").strip()
-    equipe = (request.form.get("equipe") or "").strip()
+    equipes = [e.strip() for e in request.form.getlist("equipe") if e.strip()]
     acao = request.form.get("acao") or "vincular"
-    if not uid or not equipe:
-        flash("Informe o supervisor e a equipe.", "erro")
+    if not uid or not equipes:
+        flash("Informe o supervisor e ao menos uma equipe.", "erro")
         return redirect(url_for("dash.configuracoes"))
     try:
-        if acao == "desvincular":
-            supervisores.desvincular(uid, equipe)
-            flash(f"Equipe {equipe} desvinculada.", "ok")
-        else:
-            supervisores.vincular(uid, equipe)
-            flash(f"Equipe {equipe} vinculada.", "ok")
+        for equipe in equipes:
+            if acao == "desvincular":
+                supervisores.desvincular(uid, equipe)
+            else:
+                supervisores.vincular(uid, equipe)
+        verbo = "desvinculada" if acao == "desvincular" else "vinculada"
+        flash(f"{len(equipes)} equipe(s) {verbo}(s): {', '.join(equipes)}.", "ok")
+    except Exception as e:
+        flash(f"Erro ao alterar o vínculo: {e}", "erro")
+    return redirect(url_for("dash.configuracoes"))
+
+
+@bp.route("/supervisores/tecnico", methods=["POST"])
+@admin_obrigatorio
+def supervisor_tecnico():
+    """Liga ou desliga técnicos avulsos de um supervisor.
+
+    Existe porque a empresa nem sempre é a unidade de supervisão: os 26
+    técnicos da UNETVALE se dividem entre supervisores, e vincular a empresa
+    inteira mostraria a cada um o time do outro.
+    """
+    uid = (request.form.get("usuario_id") or "").strip()
+    rotulos = [r.strip() for r in request.form.getlist("tecnico") if r.strip()]
+    acao = request.form.get("acao") or "vincular"
+    if not uid or not rotulos:
+        flash("Informe o supervisor e ao menos um técnico.", "erro")
+        return redirect(url_for("dash.configuracoes"))
+    try:
+        for rotulo in rotulos:
+            if acao == "desvincular":
+                # Aqui vem a chave normalizada, que é o que a tabela guarda.
+                supervisores.desvincular_tecnico(uid, rotulo)
+            else:
+                supervisores.vincular_tecnico(uid, rotulo)
+        verbo = "desvinculado" if acao == "desvincular" else "vinculado"
+        flash(f"{len(rotulos)} técnico(s) {verbo}(s).", "ok")
     except Exception as e:
         flash(f"Erro ao alterar o vínculo: {e}", "erro")
     return redirect(url_for("dash.configuracoes"))
@@ -354,8 +413,9 @@ def _supervisores_para_filtro(u):
     """
     if not u["is_admin"]:
         return []
-    return [{"id": s["usuario_id"], "nome": s["nome"], "equipes": s["equipes"]}
-            for s in supervisores.listar() if s["equipes"]]
+    return [{"id": s["usuario_id"], "nome": s["nome"], "equipes": s["equipes"],
+             "tecnicos": [t["chave"] for t in s["tecnicos"]]}
+            for s in supervisores.listar() if s["equipes"] or s["tecnicos"]]
 
 
 def _meta(row):

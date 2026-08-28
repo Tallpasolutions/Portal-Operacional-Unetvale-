@@ -8,14 +8,60 @@ aponta — este módulo não mexe nisso.
 O que o papel muda: o supervisor vê os números apenas das equipes dele, e não
 enxerga o módulo Troca de Poste.
 
+O alcance de um supervisor é a UNIÃO de duas formas de vínculo:
+
+  * por EQUIPE (`supervisor_equipes`) — a empresa inteira, que é o caso comum;
+  * por TÉCNICO (`supervisor_tecnicos`) — nome a nome, para quando a empresa
+    não é a unidade de supervisão. A UNETVALE tem 26 técnicos repartidos entre
+    supervisores diferentes, e INFRA WAVE hoje responde a dois supervisores ao
+    mesmo tempo: sem vínculo por técnico, um deles enxergaria gente que não é
+    dele.
+
 `equipe` é o nome da empresa exatamente como o WVSA entrega no rótulo
 "EMPRESA - Nome" (WAVE, RM, UNETVALE...). É a chave que os painéis já usam
 para agrupar, então é por ela que o vínculo é feito — nada de um id novo que
 teria de ser reconciliado a cada coleta.
 """
+import re
 import sys
+import unicodedata
 
 from . import dados, supa
+
+# Empresas que o WVSA entrega separadas mas que são a mesma na operação.
+# Fica aqui, e não em routes.py, porque a comparação do vínculo e a exibição
+# no painel PRECISAM concordar: se o IQI mostra "WAVE - Fulano" e o vínculo
+# guardou "WAVE SUPERVISOR - Fulano", o filtro perde o técnico em silêncio.
+APELIDOS_EMPRESA = {
+    "WAVE SUPERVISOR": "WAVE",
+}
+
+
+def empresa_de(rotulo):
+    """Empresa a partir de "EMPRESA - Nome", já com o apelido resolvido."""
+    i = (rotulo or "").find(" - ")
+    if i < 0:
+        return ""
+    e = rotulo[:i].strip().upper()
+    return APELIDOS_EMPRESA.get(e, e)
+
+
+def chave_tecnico(rotulo):
+    """Chave estável de comparação para um rótulo "EMPRESA - Nome".
+
+    Maiúsculas, sem acento e com espaços colapsados. O WVSA não é consistente:
+    o mesmo técnico vem como "INFRA UNET -  Mauricio Capitanio" num painel e
+    com espaço simples no outro. Comparar o texto cru transformaria uma pessoa
+    em duas e o vínculo simplesmente não pegaria — sem erro nenhum na tela.
+    """
+    if not rotulo:
+        return ""
+    i = rotulo.find(" - ")
+    if i >= 0:
+        rotulo = f"{empresa_de(rotulo)} - {rotulo[i + 3:]}"
+    sem_acento = "".join(c for c in unicodedata.normalize("NFD", rotulo)
+                         if unicodedata.category(c) != "Mn")
+    return re.sub(r"\s+", " ", sem_acento).strip().upper()
 
 
 def _falhou(onde, erro):
@@ -40,9 +86,27 @@ def listar():
         _falhou("listar", e)
         return []
 
+    # Num try próprio de propósito: enquanto a migration 0004 não roda, esta
+    # tabela não existe. Junto com o bloco acima, a falha apagaria a lista
+    # inteira de supervisores da tela — o recurso novo derrubaria o antigo.
+    # Assim o vínculo por equipe continua funcionando e só o avulso some.
+    try:
+        avulsos = supa.select("supervisor_tecnicos", {
+            "select": "usuario_id,tecnico,rotulo", "usuario_id": f"in.({','.join(ids)})",
+            "order": "rotulo.asc",
+        })
+    except Exception as e:
+        _falhou("listar/tecnicos", e)
+        avulsos = []
+
     por_usuario = {}
     for v in vinculos:
         por_usuario.setdefault(v["usuario_id"], []).append(v["equipe"])
+
+    tecs = {}
+    for a in avulsos:
+        tecs.setdefault(a["usuario_id"], []).append(
+            {"chave": a["tecnico"], "rotulo": a["rotulo"]})
 
     mapa = {u["id"]: u for u in usuarios}
     saida = []
@@ -55,6 +119,7 @@ def listar():
             "nome": u.get("nome") or u["email"].split("@")[0],
             "email": u["email"],
             "equipes": por_usuario.get(u["id"], []),
+            "tecnicos": tecs.get(u["id"], []),
         })
     return sorted(saida, key=lambda s: s["nome"].lower())
 
@@ -101,6 +166,68 @@ def vincular(usuario_id, equipe):
 
 def desvincular(usuario_id, equipe):
     supa.delete("supervisor_equipes", {"usuario_id": usuario_id, "equipe": equipe})
+
+
+def tecnicos_de(usuario_id):
+    """Técnicos vinculados nome a nome. Lista de chaves normalizadas."""
+    if not usuario_id:
+        return []
+    try:
+        linhas = supa.select("supervisor_tecnicos", {
+            "select": "tecnico", "usuario_id": f"eq.{usuario_id}",
+        })
+    except Exception as e:
+        _falhou("tecnicos_de", e)
+        return []
+    return [l["tecnico"] for l in linhas]
+
+
+def vincular_tecnico(usuario_id, rotulo):
+    """Liga um técnico avulso. Guarda a chave normalizada e o rótulo original.
+
+    A chave é o que o filtro compara; o rótulo é só para a tela conseguir
+    mostrar o nome com acento e a grafia que o WVSA usa.
+    """
+    chave = chave_tecnico(rotulo)
+    if not chave:
+        raise ValueError("rótulo de técnico vazio")
+    supa.upsert("supervisor_tecnicos",
+                {"usuario_id": usuario_id, "tecnico": chave, "rotulo": rotulo},
+                on_conflict="usuario_id,tecnico")
+
+
+def desvincular_tecnico(usuario_id, chave):
+    supa.delete("supervisor_tecnicos", {"usuario_id": usuario_id, "tecnico": chave})
+
+
+def tecnicos_disponiveis():
+    """Todos os técnicos conhecidos, como "EMPRESA - Nome", para o seletor.
+
+    Junta as duas fontes porque nenhuma sozinha tem todo mundo: a
+    produtividade traz 93 técnicos e o IQI 57, com 45 em comum — quem só
+    aparece num dos dois ficaria fora do seletor e não teria como ser
+    vinculado. Agrupado por empresa, que é como a tela precisa exibir.
+    """
+    rotulos = {}
+
+    regs = ((dados.get_modulo("produtividade") or {}).get("payload") or {}).get("registros") or []
+    for r in regs:
+        if r.get("e") and r.get("t"):
+            rotulos.setdefault(chave_tecnico(f"{r['e']} - {r['t']}"), f"{r['e']} - {r['t']}")
+
+    for mod in ("iqi", "iqm"):
+        for t in ((dados.get_modulo(mod) or {}).get("payload") or {}).get("tecnicos") or []:
+            nome = t.get("nome") or ""
+            if " - " in nome:
+                rotulos.setdefault(chave_tecnico(nome), nome)
+
+    por_empresa = {}
+    for chave, rotulo in rotulos.items():
+        por_empresa.setdefault(empresa_de(rotulo) or "(sem empresa)", []).append(
+            {"chave": chave, "rotulo": rotulo, "nome": rotulo.split(" - ", 1)[-1]})
+    for lista in por_empresa.values():
+        lista.sort(key=lambda t: t["nome"].lower())
+    return dict(sorted(por_empresa.items()))
 
 
 def equipes_disponiveis():
