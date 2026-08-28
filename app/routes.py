@@ -11,7 +11,7 @@ from flask import (
     session, url_for
 )
 
-from . import supa, dados, solicitacao, supervisores, troca_poste as tp
+from . import acoes, supa, dados, solicitacao, supervisores, troca_poste as tp
 from .auth import login_obrigatorio, admin_obrigatorio, usuario_atual
 
 bp = Blueprint("dash", __name__)
@@ -510,3 +510,243 @@ def ingest():
         "atualizado_em": datetime.now(timezone.utc).isoformat(),
     }, on_conflict="modulo")
     return jsonify({"ok": True})
+
+
+# --------------------------------------------------------------------------
+# Módulo Ações
+#
+# Primeiro módulo do portal em que o dado NASCE aqui. Produtividade, IQI e
+# Massivas são espelho do WVSA e podem ser recoletados; aqui não há de onde
+# recoletar, então o recorte de quem vê o quê é feito no servidor e o
+# histórico é append-only.
+# --------------------------------------------------------------------------
+def _usuarios_para_escolha():
+    """Contas ativas, para os seletores de responsável e apoio."""
+    try:
+        return supa.select("usuarios", {"select": "id,nome,email", "order": "nome.asc"})
+    except Exception:
+        return []
+
+
+def _acao_ou_404(acao_id, u, exigir=None):
+    """Carrega a ação e confere a permissão numa tacada só.
+
+    Devolver 404 em vez de 403 quando a pessoa não pode ver é deliberado: um
+    403 confirmaria que a ação existe, e o código dela é sequencial e fácil de
+    adivinhar.
+    """
+    a = acoes.obter(acao_id)
+    if not a or not acoes.pode_ver(u, a):
+        abort(404)
+    if exigir and not exigir(u, a):
+        abort(403)
+    return a
+
+
+@bp.route("/acoes")
+@login_obrigatorio
+def acoes_view():
+    u = usuario_atual()
+    filtros = {k: (request.args.get(k) or "").strip() or None
+               for k in ("responsavel", "area", "status", "prioridade", "situacao")}
+    lista = acoes.listar(u, filtros)
+
+    # O Painel recebe a MESMA lista que a aba Ações, e não uma consulta
+    # própria: painel que refaz a consulta é painel que discorda da tabela.
+    return render_template(
+        "acoes.html", ativo="acoes", sem_sync=True,
+        aba=request.args.get("aba", "painel"),
+        acoes=lista, resumo=acoes.resumo(lista), filtros=filtros,
+        areas=acoes.areas(), usuarios=_usuarios_para_escolha(),
+        status_opcoes=acoes.STATUS, prioridades=acoes.PRIORIDADES,
+        pode_criar=acoes.pode_gerir(u), ultimos=acoes.ultimos_eventos(),
+        reunioes=acoes.listar_reunioes(u),
+        gestores=acoes.gestores() if u["is_admin"] else [],
+        areas_todas=acoes.areas(incluir_inativas=True) if u["is_admin"] else [])
+
+
+@bp.route("/acoes/<acao_id>")
+@login_obrigatorio
+def acao_detalhe(acao_id):
+    u = usuario_atual()
+    a = _acao_ou_404(acao_id, u)
+    return render_template(
+        "acao_detalhe.html", ativo="acoes", sem_sync=True, acao=a,
+        eventos=acoes.eventos(acao_id), areas=acoes.areas(),
+        usuarios=_usuarios_para_escolha(),
+        status_opcoes=acoes.STATUS, prioridades=acoes.PRIORIDADES,
+        pode_gerir=acoes.pode_gerir(u, a), pode_atualizar=acoes.pode_atualizar(u, a))
+
+
+@bp.route("/acoes/nova", methods=["POST"])
+@login_obrigatorio
+def acao_nova():
+    u = usuario_atual()
+    if not acoes.pode_gerir(u):
+        abort(403)
+    try:
+        a = acoes.criar(request.form.to_dict(), u["id"],
+                        apoio_ids=request.form.getlist("apoio"))
+        flash(f"Ação {a['codigo']} criada.", "ok")
+        return redirect(url_for("dash.acao_detalhe", acao_id=a["id"]))
+    except Exception as e:
+        flash(f"Erro ao criar a ação: {e}", "erro")
+        return redirect(url_for("dash.acoes_view", aba="acoes"))
+
+
+@bp.route("/acoes/<acao_id>/editar", methods=["POST"])
+@login_obrigatorio
+def acao_editar(acao_id):
+    u = usuario_atual()
+    _acao_ou_404(acao_id, u, exigir=acoes.pode_gerir)
+    try:
+        acoes.editar(acao_id, request.form.to_dict(),
+                     apoio_ids=request.form.getlist("apoio"))
+        flash("Ação atualizada.", "ok")
+    except Exception as e:
+        flash(f"Erro ao editar: {e}", "erro")
+    return redirect(url_for("dash.acao_detalhe", acao_id=acao_id))
+
+
+@bp.route("/acoes/<acao_id>/atualizar", methods=["POST"])
+@login_obrigatorio
+def acao_atualizar(acao_id):
+    u = usuario_atual()
+    _acao_ou_404(acao_id, u, exigir=acoes.pode_atualizar)
+    f = request.form
+    try:
+        acoes.atualizar(
+            acao_id, u["id"], f.get("texto"),
+            status=f.get("status") or None,
+            progresso=f.get("progresso") if f.get("progresso") not in (None, "") else None,
+            proximo_passo=f.get("proximo_passo"),
+            evidencia=f.get("evidencia") or None,
+            data_conclusao=f.get("data_conclusao") or None)
+        flash("Atualização registrada.", "ok")
+    except Exception as e:
+        flash(str(e), "erro")
+    return redirect(url_for("dash.acao_detalhe", acao_id=acao_id))
+
+
+@bp.route("/acoes/<acao_id>/comentar", methods=["POST"])
+@login_obrigatorio
+def acao_comentar(acao_id):
+    u = usuario_atual()
+    _acao_ou_404(acao_id, u, exigir=acoes.pode_gerir)
+    try:
+        acoes.comentar(acao_id, u["id"], request.form.get("texto"),
+                       reuniao_id=request.form.get("reuniao_id") or None)
+        flash("Comentário registrado.", "ok")
+    except Exception as e:
+        flash(str(e), "erro")
+    destino = request.form.get("voltar_para")
+    if destino == "reuniao" and request.form.get("reuniao_id"):
+        return redirect(url_for("dash.reuniao_detalhe", reuniao_id=request.form["reuniao_id"]))
+    return redirect(url_for("dash.acao_detalhe", acao_id=acao_id))
+
+
+@bp.route("/reunioes/nova", methods=["POST"])
+@login_obrigatorio
+def reuniao_nova():
+    u = usuario_atual()
+    if not acoes.pode_gerir(u):
+        abort(403)
+    f = request.form
+    try:
+        r = acoes.criar_reuniao(f.get("titulo"), f.get("tipo"), f.get("data"),
+                                f.getlist("participantes"), u["id"])
+        return redirect(url_for("dash.reuniao_detalhe", reuniao_id=r["id"]))
+    except Exception as e:
+        flash(str(e), "erro")
+        return redirect(url_for("dash.acoes_view", aba="reunioes"))
+
+
+@bp.route("/reunioes/<reuniao_id>")
+@login_obrigatorio
+def reuniao_detalhe(reuniao_id):
+    u = usuario_atual()
+    r = acoes.obter_reuniao(reuniao_id)
+    if not r:
+        abort(404)
+    # Participante enxerga a própria reunião; conduzir é só de gestor.
+    if not (u["is_admin"] or r.get("criada_por") == u["id"]
+            or u["id"] in r["participantes"]):
+        abort(404)
+    return render_template(
+        "reuniao.html", ativo="acoes", sem_sync=True, reuniao=r,
+        pauta=acoes.pauta(r, u), usuarios=_usuarios_para_escolha(),
+        conduz=acoes.pode_gerir(u))
+
+
+@bp.route("/reunioes/<reuniao_id>/encerrar", methods=["POST"])
+@login_obrigatorio
+def reuniao_encerrar(reuniao_id):
+    u = usuario_atual()
+    if not acoes.pode_gerir(u):
+        abort(403)
+    try:
+        acoes.encerrar_reuniao(reuniao_id, request.form.get("notas"))
+        flash("Reunião encerrada. A ata está congelada.", "ok")
+    except Exception as e:
+        flash(str(e), "erro")
+    return redirect(url_for("dash.reuniao_detalhe", reuniao_id=reuniao_id))
+
+
+# ---- Configurações do módulo (só admin) ----------------------------------
+@bp.route("/acoes/areas", methods=["POST"])
+@admin_obrigatorio
+def acoes_area():
+    f = request.form
+    acao = f.get("acao") or "criar"
+    try:
+        if acao == "criar":
+            acoes.criar_area(f.get("nome") or "")
+            flash("Área criada.", "ok")
+        elif acao == "renomear":
+            acoes.renomear_area(f.get("area_id"), f.get("nome") or "")
+            flash("Área renomeada.", "ok")
+        else:
+            # Desativar em vez de apagar: ação antiga precisa continuar
+            # dizendo de que área ela era.
+            acoes.definir_area_ativa(f.get("area_id"), acao == "ativar")
+            flash("Área " + ("reativada." if acao == "ativar" else "desativada."), "ok")
+    except Exception as e:
+        flash(f"Erro: {e}", "erro")
+    return redirect(url_for("dash.acoes_view", aba="config"))
+
+
+@bp.route("/acoes/gestores", methods=["POST"])
+@admin_obrigatorio
+def acoes_gestor():
+    f = request.form
+    uid = (f.get("usuario_id") or "").strip()
+    ids = [a for a in f.getlist("area_id") if a]
+    if not uid or not ids:
+        flash("Escolha o usuário e ao menos uma área.", "erro")
+        return redirect(url_for("dash.acoes_view", aba="config"))
+    try:
+        for area_id in ids:
+            if f.get("acao") == "desvincular":
+                acoes.desvincular_gestor(uid, area_id)
+            else:
+                acoes.vincular_gestor(uid, area_id)
+        flash("Vínculo de gestor atualizado.", "ok")
+    except Exception as e:
+        flash(f"Erro: {e}", "erro")
+    return redirect(url_for("dash.acoes_view", aba="config"))
+
+
+@bp.route("/acoes/<acao_id>/excluir", methods=["POST"])
+@login_obrigatorio
+def acao_excluir(acao_id):
+    """Só apaga ação sem histórico — engano de digitação, não reescrita do
+    passado. Ver `acoes.excluir`."""
+    u = usuario_atual()
+    _acao_ou_404(acao_id, u, exigir=acoes.pode_gerir)
+    try:
+        acoes.excluir(acao_id)
+        flash("Ação apagada.", "ok")
+        return redirect(url_for("dash.acoes_view", aba="acoes"))
+    except Exception as e:
+        flash(str(e), "erro")
+        return redirect(url_for("dash.acao_detalhe", acao_id=acao_id))

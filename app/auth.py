@@ -38,19 +38,40 @@ def _eh_supervisor_cache(uid):
     return g._eh_supervisor
 
 
+def _areas_gestor_cache(uid):
+    """Áreas que a pessoa gerencia no módulo Ações.
+
+    Mesmo cache por requisição do supervisor, e pelo mesmo motivo: sem ele
+    seriam várias idas ao PostgREST na mesma requisição.
+    """
+    if not uid:
+        return []
+    if not hasattr(g, "_areas_gestor"):
+        from . import acoes
+        g._areas_gestor = acoes.areas_do_gestor(uid)
+    return g._areas_gestor
+
+
 def usuario_atual():
     email = session.get("email")
     uid = session.get("uid")
     eh_sup = _eh_supervisor_cache(uid)
+    eh_admin = bool(email) and email == _admin_email()
+    areas_gestor = _areas_gestor_cache(uid)
     return {
         "id": session.get("uid"),
         "nome": session.get("nome"),
         "email": email,
-        "is_admin": bool(email) and email == _admin_email(),
+        "is_admin": eh_admin,
         "is_supervisor": eh_sup,
         # Supervisor não enxerga Troca de Poste: o módulo é de infraestrutura
         # e não tem recorte por equipe operacional.
-        "ve_troca_poste": not eh_sup or (bool(email) and email == _admin_email()),
+        "ve_troca_poste": not eh_sup or eh_admin,
+        # Ações: gestor é papel próprio do módulo, por área. Não se confunde
+        # com supervisor, que é de equipe de campo — a pessoa pode ser um,
+        # outro, os dois ou nenhum.
+        "areas_gestor": areas_gestor,
+        "is_gestor_acoes": eh_admin or bool(areas_gestor),
     }
 
 

@@ -1,0 +1,384 @@
+{% extends "base.html" %}
+{% block title %}Ações · Unetvale{% endblock %}
+{% block page_title %}Ações{% endblock %}
+{% block content %}
+
+{% macro nome_usuario(uid) %}{% for u in usuarios %}{% if u.id == uid %}{{ u.nome or u.email }}{% endif %}{% endfor %}{% endmacro %}
+{% macro nome_area(aid) %}{% for a in areas %}{% if a.id == aid %}{{ a.nome }}{% endif %}{% endfor %}{% endmacro %}
+
+{# A situação vira cor antes de virar texto: quem abre a tela precisa ver o
+   que está pegando fogo sem ler a coluna. #}
+{% macro badge_situacao(a) %}
+  {% if a.situacao == 'Atrasada' %}<span class="badge badge-vermelho">Atrasada {{ a.dias }}d</span>
+  {% elif a.situacao == 'Vence em breve' %}<span class="badge badge-ambar">{{ 'Vence hoje' if a.dias == 0 else 'Vence em ' ~ a.dias ~ 'd' }}</span>
+  {% elif a.situacao == 'Concluída' %}<span class="badge badge-verde">Concluída</span>
+  {% elif a.situacao == 'Cancelada' %}<span class="badge badge-cinza">Cancelada</span>
+  {% elif a.situacao == 'Sem prazo' %}<span class="badge badge-cinza">Sem prazo</span>
+  {% else %}<span class="badge badge-verde">No prazo</span>{% endif %}
+{% endmacro %}
+
+<div class="view-bar">
+  <div class="view-switch" id="ac-abas">
+    <button data-aba="painel" class="{{ 'active' if aba == 'painel' }}">Painel</button>
+    <button data-aba="acoes" class="{{ 'active' if aba == 'acoes' }}">Ações</button>
+    <button data-aba="reunioes" class="{{ 'active' if aba == 'reunioes' }}">Reuniões</button>
+    {% if usuario.is_admin %}
+    <button data-aba="config" class="{{ 'active' if aba == 'config' }}">Configurações</button>
+    {% endif %}
+  </div>
+</div>
+
+{% with mensagens = get_flashed_messages(with_categories=true) %}
+  {% for categoria, msg in mensagens %}
+  <div class="alert-{{ 'ok' if categoria == 'ok' else 'erro' }}">{{ msg }}</div>
+  {% endfor %}
+{% endwith %}
+
+<!-- ===================== Painel ===================== -->
+<section data-painel="painel" {% if aba != 'painel' %}hidden{% endif %}>
+  <div class="kpis">
+    <div class="kpi"><div class="v">{{ resumo.total }}</div><div class="l">Total de ações</div></div>
+    <div class="kpi"><div class="v" style="color:var(--success)">{{ resumo.concluidas }}</div><div class="l">Concluídas</div></div>
+    <div class="kpi"><div class="v">{{ resumo.em_andamento }}</div><div class="l">Em andamento</div></div>
+    <div class="kpi"><div class="v" style="color:var(--danger)">{{ resumo.atrasadas }}</div><div class="l">Atrasadas</div></div>
+    <div class="kpi"><div class="v" style="color:var(--warning)">{{ resumo.vence_em_breve }}</div><div class="l">Vencem em 7 dias</div></div>
+    <div class="kpi"><div class="v">{{ resumo.pct_conclusao }}%</div><div class="l">Conclusão</div></div>
+  </div>
+
+  {% if resumo.total %}
+  <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr));margin:18px 0;">
+    <div class="card"><div class="card-h">Distribuição por status</div>
+      <div class="card-b"><div class="chart-box"><canvas id="g-status"></canvas></div></div></div>
+    <div class="card"><div class="card-h">Risco por prioridade</div>
+      <div class="card-b"><div class="chart-box"><canvas id="g-prioridade"></canvas></div></div></div>
+    <div class="card"><div class="card-h">Situação dos prazos</div>
+      <div class="card-b"><div class="chart-box"><canvas id="g-situacao"></canvas></div></div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-h">Últimas atualizações</div>
+    <div class="card-b">
+      {% if ultimos %}
+      <div class="linha-tempo">
+        {% for e in ultimos %}
+        <div class="evento evento-{{ e.tipo }}">
+          <div class="evento-meta">
+            <b>{{ nome_usuario(e.autor_id) or '—' }}</b>
+            <span>{{ e.criado_em[:10]|replace('-', '/') }}</span>
+            {% if e.status_novo %}<span class="badge badge-cinza">{{ e.status_novo }}{% if e.progresso_novo is not none %} · {{ e.progresso_novo }}%{% endif %}</span>{% endif %}
+          </div>
+          <div class="evento-texto">{{ e.texto }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}<div class="vazio">Nenhuma atualização registrada ainda.</div>{% endif %}
+    </div>
+  </div>
+  {% else %}
+  <div class="card"><div class="card-b"><div class="vazio">
+    Nenhuma ação por aqui ainda.
+    {% if pode_criar %}Crie a primeira na aba <b>Ações</b>.{% else %}Quando alguma for atribuída a você, ela aparece aqui.{% endif %}
+  </div></div></div>
+  {% endif %}
+</section>
+
+<!-- ===================== Ações ===================== -->
+<section data-painel="acoes" {% if aba != 'acoes' %}hidden{% endif %}>
+  <!-- No celular os filtros ficam recolhidos: cinco selects de altura inteira
+       empurrariam a primeira ação para fora da tela, e quem abre no campo quer
+       ver a lista, não o formulário. No computador ficam sempre abertos. -->
+  <button class="btn sec so-mobile-inline" type="button" id="btn-filtros" aria-expanded="false">
+    Filtros{% if filtros.values()|select|list %} <span class="badge badge-ambar">ativos</span>{% endif %}
+  </button>
+  <form class="toolbar" method="get" id="ac-filtros">
+    <input type="hidden" name="aba" value="acoes">
+    <label>Pessoa <select name="responsavel">
+      <option value="">Todas as pessoas</option>
+      {% for u in usuarios %}<option value="{{ u.id }}" {{ 'selected' if filtros.responsavel == u.id }}>{{ u.nome or u.email }}</option>{% endfor %}
+    </select></label>
+    <label>Área <select name="area">
+      <option value="">Todas</option>
+      {% for a in areas %}<option value="{{ a.id }}" {{ 'selected' if filtros.area == a.id }}>{{ a.nome }}</option>{% endfor %}
+    </select></label>
+    <label>Status <select name="status">
+      <option value="">Todos</option>
+      {% for s in status_opcoes %}<option value="{{ s }}" {{ 'selected' if filtros.status == s }}>{{ s }}</option>{% endfor %}
+    </select></label>
+    <label>Prioridade <select name="prioridade">
+      <option value="">Todas</option>
+      {% for p in prioridades %}<option value="{{ p }}" {{ 'selected' if filtros.prioridade == p }}>{{ p }}</option>{% endfor %}
+    </select></label>
+    <label>Prazo <select name="situacao">
+      <option value="">Todos</option>
+      {% for s in ['Atrasada', 'Vence em breve', 'No prazo', 'Sem prazo'] %}
+      <option value="{{ s }}" {{ 'selected' if filtros.situacao == s }}>{{ s }}</option>{% endfor %}
+    </select></label>
+    <button class="btn sec" type="submit">Filtrar</button>
+    <a class="btn-ghost" href="{{ url_for('dash.acoes_view', aba='acoes') }}">Limpar</a>
+  </form>
+  {% if pode_criar %}<button class="btn" type="button" id="btn-nova" style="margin-bottom:14px;">+ Nova ação</button>{% endif %}
+
+  <p class="subnote">
+    {{ acoes|length }} {{ 'ação' if acoes|length == 1 else 'ações' }}
+    {% if resumo.atrasadas %} · <b style="color:var(--danger)">{{ resumo.atrasadas }} atrasada(s)</b>{% endif %}
+    {% if resumo.vence_em_breve %} · {{ resumo.vence_em_breve }} vence(m) em 7 dias{% endif %}
+  </p>
+
+  {% if acoes %}
+  <!-- Tabela no computador; abaixo de 820px o CSS troca para os cartões. -->
+  <div class="card so-desktop">
+    <div class="card-b tabela-wrap" style="padding:0;">
+      <table class="tbl">
+        <thead><tr>
+          <th>ID</th><th>Ação</th><th>Área</th><th>Responsável</th>
+          <th>Prazo</th><th class="num">Progresso</th><th>Situação</th>
+        </tr></thead>
+        <tbody>
+          {% for a in acoes %}
+          <tr class="clicavel" data-href="{{ url_for('dash.acao_detalhe', acao_id=a.id) }}">
+            <td class="cod"><b>{{ a.codigo }}</b></td>
+            <td>{{ a.titulo }}
+              {% if a.prioridade in ('Crítica', 'Alta') %}<span class="badge badge-ambar">{{ a.prioridade }}</span>{% endif %}</td>
+            <td>{{ nome_area(a.area_id) or '—' }}</td>
+            <td>{{ nome_usuario(a.responsavel_id) or '—' }}</td>
+            <td>{{ a.prazo|replace('-', '/') if a.prazo else '—' }}</td>
+            <td><span class="prog"><span class="barra"><i style="width:{{ a.progresso }}%"></i></span><b>{{ a.progresso }}%</b></span></td>
+            <td>{{ badge_situacao(a) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Cartões no celular: tabela de 7 colunas no telefone é ilegível, e é no
+       telefone que a ação é atualizada em campo. -->
+  <div class="so-mobile">
+    {% for a in acoes %}
+    <a class="cartao-acao" href="{{ url_for('dash.acao_detalhe', acao_id=a.id) }}">
+      <div class="cartao-topo"><b>{{ a.codigo }}</b> {{ badge_situacao(a) }}</div>
+      <div class="cartao-titulo">{{ a.titulo }}</div>
+      <div class="cartao-meta">{{ nome_area(a.area_id) or '—' }} · {{ nome_usuario(a.responsavel_id) }}</div>
+      <div class="cartao-meta">Prazo {{ a.prazo|replace('-', '/') if a.prazo else '—' }}</div>
+      <span class="barra"><i style="width:{{ a.progresso }}%"></i></span>
+      <div class="cartao-meta">{{ a.progresso }}%{% if a.proximo_passo %} · ▸ {{ a.proximo_passo }}{% endif %}</div>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="card"><div class="card-b"><div class="vazio">
+    Nenhuma ação com esses filtros.
+  </div></div></div>
+  {% endif %}
+
+  {% if pode_criar %}
+  <div class="card" id="form-nova" hidden style="margin-top:16px;">
+    <div class="card-h">Nova ação</div>
+    <div class="card-b">
+      <form method="post" action="{{ url_for('dash.acao_nova') }}">
+        <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(230px,1fr));">
+          <div class="field" style="grid-column:1/-1;">
+            <label>Ação <span class="subnote">verbo + entrega objetiva</span></label>
+            <input type="text" name="titulo" required maxlength="200" style="width:100%;"
+                   placeholder="Consolidar padrão de vistoria de rede">
+          </div>
+          <div class="field" style="grid-column:1/-1;">
+            <label>Entrega esperada</label>
+            <input type="text" name="entrega_esperada" style="width:100%;"
+                   placeholder="Padrão aprovado, publicado e comunicado">
+          </div>
+          <div class="field"><label>Área</label>
+            <select name="area_id" required style="width:100%;">
+              <option value="">Selecione…</option>
+              {% for a in areas %}<option value="{{ a.id }}">{{ a.nome }}</option>{% endfor %}
+            </select></div>
+          <div class="field"><label>Responsável <span class="subnote">obrigatório</span></label>
+            <select name="responsavel_id" required style="width:100%;">
+              <option value="">Selecione…</option>
+              {% for u in usuarios %}<option value="{{ u.id }}">{{ u.nome or u.email }}</option>{% endfor %}
+            </select></div>
+          <div class="field"><label>Prazo</label>
+            <input type="date" name="prazo" style="width:100%;"></div>
+          <div class="field"><label>Prioridade</label>
+            <select name="prioridade" style="width:100%;">
+              {% for p in prioridades %}<option value="{{ p }}" {{ 'selected' if p == 'Média' }}>{{ p }}</option>{% endfor %}
+            </select></div>
+        </div>
+        <div class="field">
+          <label>Apoio <span class="subnote">apoio não substitui o dono</span></label>
+          <div class="lista-marcar" style="max-height:150px;">
+            {% for u in usuarios %}
+            <label class="linha-marcar"><input type="checkbox" name="apoio" value="{{ u.id }}"> {{ u.nome or u.email }}</label>
+            {% endfor %}
+          </div>
+        </div>
+        <button class="btn" type="submit">Criar ação</button>
+        <button class="btn-ghost" type="button" id="btn-cancelar-nova">Cancelar</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+</section>
+
+<!-- ===================== Reuniões ===================== -->
+<section data-painel="reunioes" {% if aba != 'reunioes' %}hidden{% endif %}>
+  {% if pode_criar %}
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-h">Nova reunião</div>
+    <div class="card-b">
+      <p class="subnote" style="margin-top:0;">
+        A pauta é montada sozinha com as ações em aberto dos participantes —
+        atrasadas e críticas primeiro, que é a ordem em que precisam ser discutidas.
+      </p>
+      <form method="post" action="{{ url_for('dash.reuniao_nova') }}">
+        <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(210px,1fr));">
+          <div class="field"><label>Título</label>
+            <input type="text" name="titulo" required style="width:100%;"
+                   placeholder="Acompanhamento semanal — Infraestrutura"></div>
+          <div class="field"><label>Tipo</label>
+            <select name="tipo" required style="width:100%;">
+              <option value="grupo">Em grupo</option>
+              <option value="individual">Individual</option>
+            </select></div>
+          <div class="field"><label>Data</label>
+            <input type="date" name="data" style="width:100%;"></div>
+        </div>
+        <div class="field">
+          <label>Participantes</label>
+          <div class="lista-marcar" style="max-height:170px;">
+            {% for u in usuarios %}
+            <label class="linha-marcar"><input type="checkbox" name="participantes" value="{{ u.id }}"> {{ u.nome or u.email }}</label>
+            {% endfor %}
+          </div>
+        </div>
+        <button class="btn" type="submit">Abrir reunião</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <div class="card-h">Reuniões ({{ reunioes|length }})</div>
+    <div class="card-b tabela-wrap">
+      {% if reunioes %}
+      <table class="tbl">
+        <thead><tr><th>Reunião</th><th>Tipo</th><th>Data</th><th>Participantes</th><th>Situação</th></tr></thead>
+        <tbody>
+          {% for r in reunioes %}
+          <tr class="clicavel" data-href="{{ url_for('dash.reuniao_detalhe', reuniao_id=r.id) }}">
+            <td><b>{{ r.titulo }}</b></td>
+            <td>{{ 'Individual' if r.tipo == 'individual' else 'Em grupo' }}</td>
+            <td>{{ r.data|replace('-', '/') }}</td>
+            <td>{{ r.participantes|length }}</td>
+            <td>{% if r.encerrada_em %}<span class="badge badge-cinza">Ata congelada</span>
+                {% else %}<span class="badge badge-verde">Em andamento</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="vazio">Nenhuma reunião ainda.</div>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+<!-- ===================== Configurações ===================== -->
+{% if usuario.is_admin %}
+<section data-painel="config" {% if aba != 'config' %}hidden{% endif %}>
+  <p class="subnote">
+    <b>Status</b> e <b>Prioridade</b> não aparecem aqui de propósito: "Concluída" e "Cancelada"
+    decidem o cálculo da situação do prazo, e renomeá-los pela tela quebraria o Painel em silêncio.
+  </p>
+
+  <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(330px,1fr));">
+    <div class="card">
+      <div class="card-h">Áreas</div>
+      <div class="card-b">
+        <form method="post" action="{{ url_for('dash.acoes_area') }}" class="toolbar" style="margin:0 0 12px;">
+          <input type="hidden" name="acao" value="criar">
+          <input type="text" name="nome" required placeholder="Nome da área">
+          <button class="btn" type="submit">Adicionar</button>
+        </form>
+        <table class="tbl">
+          <thead><tr><th>Área</th><th>Situação</th><th>Ações</th></tr></thead>
+          <tbody>
+            {% for a in areas_todas %}
+            <tr>
+              <td>{{ a.nome }}</td>
+              <td>{% if a.ativo %}<span class="badge badge-verde">Ativa</span>
+                  {% else %}<span class="badge badge-cinza">Desativada</span>{% endif %}</td>
+              <td>
+                <form method="post" action="{{ url_for('dash.acoes_area') }}" style="display:inline;">
+                  <input type="hidden" name="area_id" value="{{ a.id }}">
+                  <input type="hidden" name="acao" value="{{ 'desativar' if a.ativo else 'ativar' }}">
+                  <button class="btn-ghost" type="submit">{{ 'Desativar' if a.ativo else 'Reativar' }}</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p class="subnote">Área não se apaga, se desativa — ação antiga precisa continuar dizendo de que área era.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-h">Gestores por área</div>
+      <div class="card-b">
+        <p class="subnote" style="margin-top:0;">
+          Gestor cria ações, conduz reuniões e comenta nas áreas dele. É papel próprio deste
+          módulo — não se confunde com supervisor de equipe de campo.
+        </p>
+        <form method="post" action="{{ url_for('dash.acoes_gestor') }}">
+          <div class="field"><label>Usuário</label>
+            <select name="usuario_id" required style="width:100%;">
+              <option value="">Selecione…</option>
+              {% for u in usuarios %}<option value="{{ u.id }}">{{ u.nome or u.email }}</option>{% endfor %}
+            </select></div>
+          <div class="field"><label>Áreas <span class="subnote">(pode marcar várias)</span></label>
+            <div class="lista-marcar" style="max-height:180px;">
+              {% for a in areas %}
+              <label class="linha-marcar"><input type="checkbox" name="area_id" value="{{ a.id }}"> {{ a.nome }}</label>
+              {% endfor %}
+            </div></div>
+          <input type="hidden" name="acao" value="vincular">
+          <button class="btn" type="submit">Vincular como gestor</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px;">
+    <div class="card-h">Gestores cadastrados ({{ gestores|length }})</div>
+    <div class="card-b tabela-wrap">
+      {% if gestores %}
+      <table class="tbl">
+        <thead><tr><th>Gestor</th><th>E-mail</th><th>Áreas</th></tr></thead>
+        <tbody>
+          {% for g in gestores %}
+          <tr>
+            <td><b>{{ g.nome }}</b></td><td>{{ g.email }}</td>
+            <td>{% for a in g.areas %}
+              <form method="post" action="{{ url_for('dash.acoes_gestor') }}" style="display:inline;">
+                <input type="hidden" name="usuario_id" value="{{ g.usuario_id }}">
+                <input type="hidden" name="area_id" value="{{ a.id }}">
+                <input type="hidden" name="acao" value="desvincular">
+                <span class="chip">{{ a.nome }}<button type="submit" title="Remover">×</button></span>
+              </form>
+            {% endfor %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}<div class="vazio">Nenhum gestor vinculado. Só o admin cria ações por enquanto.</div>{% endif %}
+    </div>
+  </div>
+</section>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>window.__RESUMO__ = {{ resumo|tojson }};</script>
+<script src="{{ url_for('static', filename='js/acoes.js') }}"></script>
+{% endblock %}

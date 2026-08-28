@@ -228,3 +228,82 @@ table.tbl tr.total td{ font-weight:800; background:var(--fundo); }
   font-size:11.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
   padding:5px 8px;border-radius:6px;margin:2px 0}
 .grupo-titulo span{font-weight:600;opacity:.75}
+
+/* ===== Módulo Ações ===== */
+
+/* Barra de progresso. Fina na tabela, grossa na ficha da ação. */
+.barra{ display:inline-block; width:70px; height:6px; border-radius:4px;
+  background:var(--borda-2); vertical-align:middle; overflow:hidden; }
+.barra i{ display:block; height:100%; background:var(--brand); border-radius:4px; }
+.barra-grossa{ width:100%; height:10px; margin-top:12px; }
+
+tr.clicavel{ cursor:pointer; }
+
+/* Ficha da ação: rótulo em cima, valor embaixo, quebrando sozinha no celular. */
+.ficha{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px 18px; }
+.ficha .l, .card-b .l{ display:block; font-size:11.5px; font-weight:700; color:var(--muted);
+  text-transform:uppercase; letter-spacing:.03em; }
+.ficha b{ font-size:14px; color:var(--ink-d); }
+
+/* Linha do tempo: atualização e comentário na MESMA lista, separados pela cor
+   da borda. O comentário do gestor quase sempre responde a uma atualização
+   específica — em duas listas o leitor teria de casar as datas na mão. */
+.linha-tempo{ display:flex; flex-direction:column; gap:14px; }
+.evento{ border-left:3px solid var(--borda-2); padding:2px 0 2px 12px; }
+.evento-atualizacao{ border-left-color:var(--brand); }
+.evento-comentario{ border-left-color:var(--ouro); background:#fffdf5; border-radius:0 6px 6px 0; padding-right:10px; }
+.evento-meta{ display:flex; flex-wrap:wrap; align-items:center; gap:8px;
+  font-size:12px; color:var(--muted); margin-bottom:3px; }
+.evento-meta b{ color:var(--ink-d); font-size:12.5px; }
+.evento-texto{ font-size:13.5px; color:var(--ink); white-space:pre-wrap; }
+
+/* Pauta da reunião */
+.item-pauta{ border:1px solid var(--borda-2); border-radius:9px; padding:12px 14px; margin-bottom:10px; }
+.item-pauta.comentada{ background:#f7fbf9; border-color:#bfe6d5; }
+.item-pauta-topo{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.item-pauta-topo a{ color:var(--ink-d); text-decoration:none; font-size:13.5px; }
+.item-pauta-topo a:hover{ color:var(--brand); }
+.item-pauta-meta{ font-size:12.5px; color:var(--muted); margin-top:4px; }
+.form-comentar{ display:flex; gap:8px; margin-top:10px; }
+.form-comentar input{ flex:1; min-width:0; }
+
+/* Cartões da lista no celular. A tabela some e estes aparecem — 7 colunas num
+   telefone é ilegível, e é no telefone que a ação é atualizada em campo. */
+.so-mobile{ display:none; }
+.cartao-acao{ display:block; background:var(--branco); border:1px solid var(--borda-2);
+  border-radius:10px; padding:14px; margin-bottom:10px; text-decoration:none;
+  color:var(--ink); box-shadow:var(--sombra); }
+.cartao-topo{ display:flex; align-items:center; justify-content:space-between; gap:8px;
+  margin-bottom:6px; }
+.cartao-topo b{ color:var(--ink-d); font-size:13px; }
+.cartao-titulo{ font-size:14.5px; font-weight:600; color:var(--ink-d); line-height:1.35;
+  margin-bottom:6px; }
+.cartao-meta{ font-size:12.5px; color:var(--muted); margin-top:4px; }
+.cartao-acao .barra{ width:100%; margin-top:8px; }
+
+@media (max-width:820px){
+  .so-desktop{ display:none; }
+  .so-mobile{ display:block; }
+
+  /* As abas rolam em vez de quebrar em duas linhas e comerem a tela. */
+  .view-switch{ overflow-x:auto; max-width:100%; }
+  .view-switch button{ white-space:nowrap; padding:9px 14px; }
+
+  /* Alvos de dedo: no campo a atualização é feita em pé, com uma mão. */
+  .toolbar{ gap:10px; }
+  .toolbar label, .toolbar select, .toolbar input{ width:100%; }
+  .field input, .field select, .field textarea{ font-size:16px; }  /* 16px evita o zoom do iOS */
+  .btn, .btn.sec{ padding:11px 18px; }
+  #rng-progresso{ height:28px; }
+}
+
+/* Código da ação não quebra: "AC-001" partido em duas linhas deixa de ser um
+   identificador e vira ruído. */
+.tbl td.cod{ white-space:nowrap; }
+/* Barra e percentual na mesma linha — empilhados, o olho não sabe qual número
+   pertence a qual barra. */
+.prog{ display:inline-flex; align-items:center; gap:8px; }
+.prog b{ font-variant-numeric:tabular-nums; font-size:12.5px; color:var(--muted); min-width:34px; }
+/* Botão que só existe no celular (o de recolher os filtros). */
+.so-mobile-inline{ display:none; }
+@media (max-width:820px){ .so-mobile-inline{ display:inline-flex; margin-bottom:12px; } }
