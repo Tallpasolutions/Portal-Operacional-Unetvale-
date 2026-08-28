@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}{{ reuniao.titulo }} · Reuniões · Unetvale{% endblock %}
+{% block page_title %}Reunião{% endblock %}
+{% block content %}
+
+{% macro nome_usuario(uid) %}{% for u in usuarios %}{% if u.id == uid %}{{ u.nome or u.email }}{% endif %}{% endfor %}{% endmacro %}
+
+<div class="view-bar">
+  <a class="btn-ghost" href="{{ url_for('dash.acoes_view', aba='reunioes') }}">← Voltar para as reuniões</a>
+</div>
+
+<div class="card">
+  <div class="card-h">
+    <span>{{ reuniao.titulo }}</span>
+    {% if reuniao.encerrada_em %}<span class="badge badge-cinza">Ata congelada</span>
+    {% else %}<span class="badge badge-verde">Em andamento</span>{% endif %}
+  </div>
+  <div class="card-b">
+    <div class="ficha">
+      <div><span class="l">Tipo</span><b>{{ 'Individual' if reuniao.tipo == 'individual' else 'Em grupo' }}</b></div>
+      <div><span class="l">Data</span><b>{{ reuniao.data|replace('-', '/') }}</b></div>
+      <div><span class="l">Participantes</span><b>{% for uid in reuniao.participantes %}{{ nome_usuario(uid) }}{{ ', ' if not loop.last }}{% endfor %}</b></div>
+    </div>
+    {% if reuniao.notas %}<p style="margin:14px 0 0;"><span class="l">Notas gerais</span><br>{{ reuniao.notas }}</p>{% endif %}
+  </div>
+</div>
+
+<div class="card" style="margin-top:16px;">
+  <div class="card-h">
+    <span>Pauta ({{ pauta|length }})</span>
+    <span class="subnote" style="margin:0;">atrasadas e críticas primeiro</span>
+  </div>
+  <div class="card-b">
+    {% if pauta %}
+    <p class="subnote" style="margin-top:0;">
+      Só ações em aberto dos participantes. Concluídas e canceladas ficam fora — a reunião é
+      sobre o que está de pé; o histórico mora na própria ação.
+    </p>
+    {% for a in pauta %}
+    <div class="item-pauta {{ 'comentada' if a.comentada }}">
+      <div class="item-pauta-topo">
+        <a href="{{ url_for('dash.acao_detalhe', acao_id=a.id) }}"><b>{{ a.codigo }}</b> {{ a.titulo }}</a>
+        {% if a.situacao == 'Atrasada' %}<span class="badge badge-vermelho">Atrasada {{ a.dias }}d</span>
+        {% elif a.situacao == 'Vence em breve' %}<span class="badge badge-ambar">{{ 'Vence hoje' if a.dias == 0 else 'Vence em ' ~ a.dias ~ 'd' }}</span>
+        {% elif a.situacao == 'Sem prazo' %}<span class="badge badge-cinza">Sem prazo</span>
+        {% else %}<span class="badge badge-verde">No prazo</span>{% endif %}
+        {% if a.prioridade in ('Crítica', 'Alta') %}<span class="badge badge-ambar">{{ a.prioridade }}</span>{% endif %}
+        {% if a.comentada %}<span class="badge badge-verde">✓ comentada</span>{% endif %}
+      </div>
+      <div class="item-pauta-meta">
+        {{ nome_usuario(a.responsavel_id) }} · {{ a.progresso }}%
+        {% if a.proximo_passo %} · ▸ {{ a.proximo_passo }}{% endif %}
+      </div>
+      {% if conduz and not reuniao.encerrada_em %}
+      <form method="post" action="{{ url_for('dash.acao_comentar', acao_id=a.id) }}" class="form-comentar">
+        <input type="hidden" name="reuniao_id" value="{{ reuniao.id }}">
+        <input type="hidden" name="voltar_para" value="reuniao">
+        <input type="text" name="texto" required placeholder="Consideração do gestor sobre esta ação…">
+        <button class="btn sec" type="submit">Registrar</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endfor %}
+    {% else %}
+    <div class="vazio">
+      Nenhuma ação em aberto para os participantes desta reunião.
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% if conduz and not reuniao.encerrada_em %}
+<div class="card" style="margin-top:16px;">
+  <div class="card-h">Encerrar reunião</div>
+  <div class="card-b">
+    <p class="subnote" style="margin-top:0;">
+      Encerrar congela a ata: os comentários ficam como foram ditos no dia e a reunião não
+      aceita mais registros. Cada comentário continua aparecendo na linha do tempo da ação,
+      marcado com a reunião de origem.
+    </p>
+    <form method="post" action="{{ url_for('dash.reuniao_encerrar', reuniao_id=reuniao.id) }}"
+          onsubmit="return confirm('Encerrar a reunião? Depois disso não é possível comentar nela.');">
+      <div class="field">
+        <label>Notas gerais da reunião</label>
+        <textarea name="notas" rows="3" style="width:100%;"
+                  placeholder="Decisões que não pertencem a uma ação específica.">{{ reuniao.notas or '' }}</textarea>
+      </div>
+      <button class="btn" type="submit">Encerrar e gerar ata</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

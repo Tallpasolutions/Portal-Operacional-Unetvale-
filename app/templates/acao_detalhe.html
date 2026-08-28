@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% block title %}{{ acao.codigo }} · Ações · Unetvale{% endblock %}
+{% block page_title %}{{ acao.codigo }}{% endblock %}
+{% block content %}
+
+{% macro nome_usuario(uid) %}{% for u in usuarios %}{% if u.id == uid %}{{ u.nome or u.email }}{% endif %}{% endfor %}{% endmacro %}
+
+<div class="view-bar">
+  <a class="btn-ghost" href="{{ url_for('dash.acoes_view', aba='acoes') }}">← Voltar para as ações</a>
+</div>
+
+<div class="card">
+  <div class="card-h">
+    <span>{{ acao.titulo }}</span>
+    {% if acao.situacao == 'Atrasada' %}<span class="badge badge-vermelho">Atrasada há {{ -acao.dias }} dia(s)</span>
+    {% elif acao.situacao == 'Vence em breve' %}<span class="badge badge-ambar">{{ 'Vence hoje' if acao.dias == 0 else 'Vence em ' ~ acao.dias ~ ' dia(s)' }}</span>
+    {% elif acao.situacao == 'Concluída' %}<span class="badge badge-verde">Concluída</span>
+    {% elif acao.situacao == 'Cancelada' %}<span class="badge badge-cinza">Cancelada</span>
+    {% elif acao.situacao == 'Sem prazo' %}<span class="badge badge-cinza">Sem prazo</span>
+    {% else %}<span class="badge badge-verde">No prazo</span>{% endif %}
+  </div>
+  <div class="card-b">
+    <div class="ficha">
+      <div><span class="l">Área</span><b>{% for a in areas %}{% if a.id == acao.area_id %}{{ a.nome }}{% endif %}{% endfor %}{% if not acao.area_id %}—{% endif %}</b></div>
+      <div><span class="l">Responsável</span><b>{{ nome_usuario(acao.responsavel_id) or '—' }}</b></div>
+      <div><span class="l">Apoio</span><b>{% for uid in acao.apoio_ids %}{{ nome_usuario(uid) }}{{ ', ' if not loop.last }}{% endfor %}{% if not acao.apoio_ids %}—{% endif %}</b></div>
+      <div><span class="l">Abertura</span><b>{{ acao.data_abertura|replace('-', '/') if acao.data_abertura else '—' }}</b></div>
+      <div><span class="l">Prazo</span><b>{{ acao.prazo|replace('-', '/') if acao.prazo else '—' }}</b></div>
+      <div><span class="l">Prioridade</span><b>{{ acao.prioridade }}</b></div>
+      <div><span class="l">Status</span><b>{{ acao.status }}</b></div>
+      <div><span class="l">Progresso</span><b>{{ acao.progresso }}%</b></div>
+    </div>
+    <span class="barra barra-grossa"><i style="width:{{ acao.progresso }}%"></i></span>
+
+    {% if acao.entrega_esperada %}
+    <p style="margin:14px 0 0;"><span class="l">Entrega esperada</span><br>{{ acao.entrega_esperada }}</p>
+    {% endif %}
+    {% if acao.proximo_passo %}
+    <p style="margin:12px 0 0;"><span class="l">Próximo passo</span><br><b>▸ {{ acao.proximo_passo }}</b></p>
+    {% endif %}
+    {% if acao.evidencia %}
+    <p style="margin:12px 0 0;"><span class="l">Evidência</span><br>{{ acao.evidencia }}</p>
+    {% endif %}
+    {% if acao.observacoes %}
+    <p style="margin:12px 0 0;"><span class="l">Observações</span><br>{{ acao.observacoes }}</p>
+    {% endif %}
+  </div>
+</div>
+
+{% if pode_atualizar and acao.status not in ('Concluída', 'Cancelada') %}
+<div class="card" style="margin-top:16px;">
+  <div class="card-h">Registrar atualização</div>
+  <div class="card-b">
+    <p class="subnote" style="margin-top:0;">
+      Mudar o estado e dizer o que houve andam juntos: na planilha dava para mexer no status sem
+      escrever nada, e semanas depois ninguém lembrava o porquê.
+    </p>
+    <form method="post" action="{{ url_for('dash.acao_atualizar', acao_id=acao.id) }}" id="form-atualizar">
+      <div class="field">
+        <label>O que mudou <span class="subnote">obrigatório</span></label>
+        <textarea name="texto" rows="3" required style="width:100%;"
+                  placeholder="Versão preliminar consolidada, falta validar com o supervisor."></textarea>
+      </div>
+      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
+        <div class="field"><label>Status</label>
+          <select name="status" id="sel-status" style="width:100%;">
+            {% for s in status_opcoes %}<option value="{{ s }}" {{ 'selected' if s == acao.status }}>{{ s }}</option>{% endfor %}
+          </select></div>
+        <div class="field"><label>Progresso <b id="lbl-progresso">{{ acao.progresso }}%</b></label>
+          <input type="range" name="progresso" id="rng-progresso" min="0" max="100" step="5"
+                 value="{{ acao.progresso }}" style="width:100%;"></div>
+      </div>
+      <div class="field">
+        <label>Próximo passo {% if acao.atrasada %}<span class="subnote" style="color:var(--danger)">obrigatório: ação atrasada exige escalonamento</span>{% endif %}</label>
+        <input type="text" name="proximo_passo" style="width:100%;"
+               value="{{ acao.proximo_passo or '' }}" {{ 'required' if acao.atrasada }}>
+      </div>
+      <div id="campos-conclusao" hidden>
+        <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
+          <div class="field"><label>Data de conclusão</label>
+            <input type="date" name="data_conclusao" id="in-data-conclusao" style="width:100%;"></div>
+          <div class="field"><label>Evidência <span class="subnote">link, documento ou referência</span></label>
+            <input type="text" name="evidencia" id="in-evidencia" style="width:100%;"
+                   value="{{ acao.evidencia or '' }}"></div>
+        </div>
+      </div>
+      <button class="btn" type="submit">Salvar atualização</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+{% if pode_gerir %}
+<div class="card" style="margin-top:16px;">
+  <div class="card-h">Comentário do gestor</div>
+  <div class="card-b">
+    <form method="post" action="{{ url_for('dash.acao_comentar', acao_id=acao.id) }}">
+      <div class="field">
+        <textarea name="texto" rows="2" required style="width:100%;"
+                  placeholder="Consideração, decisão ou cobrança."></textarea>
+      </div>
+      <button class="btn sec" type="submit">Registrar comentário</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+<div class="card" style="margin-top:16px;">
+  <div class="card-h">Linha do tempo ({{ eventos|length }})</div>
+  <div class="card-b">
+    {% if eventos %}
+    <div class="linha-tempo">
+      {% for e in eventos %}
+      <div class="evento evento-{{ e.tipo }}">
+        <div class="evento-meta">
+          <b>{{ nome_usuario(e.autor_id) or '—' }}</b>
+          <span>{{ e.tipo == 'comentario' and 'comentário' or 'atualização' }}</span>
+          <span>{{ e.criado_em[:10]|replace('-', '/') }}</span>
+          {% if e.status_novo %}<span class="badge badge-cinza">{{ e.status_novo }}{% if e.progresso_novo is not none %} · {{ e.progresso_novo }}%{% endif %}</span>{% endif %}
+          {% if e.reuniao_id %}<span class="badge badge-ambar">de reunião</span>{% endif %}
+        </div>
+        <div class="evento-texto">{{ e.texto }}</div>
+        {% if e.evidencia %}<div class="evento-meta">Evidência: {{ e.evidencia }}</div>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="vazio">Nada registrado ainda. A primeira atualização começa o histórico.</div>
+    {% endif %}
+  </div>
+</div>
+
+{% if pode_gerir %}
+<div class="card" style="margin-top:16px;">
+  <div class="card-h">Editar definição <span class="subnote">dono, prazo, prioridade e área</span></div>
+  <div class="card-b">
+    <form method="post" action="{{ url_for('dash.acao_editar', acao_id=acao.id) }}">
+      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));">
+        <div class="field" style="grid-column:1/-1;"><label>Ação</label>
+          <input type="text" name="titulo" required value="{{ acao.titulo }}" style="width:100%;"></div>
+        <div class="field" style="grid-column:1/-1;"><label>Entrega esperada</label>
+          <input type="text" name="entrega_esperada" value="{{ acao.entrega_esperada or '' }}" style="width:100%;"></div>
+        <div class="field"><label>Área</label>
+          <select name="area_id" style="width:100%;">
+            {% for a in areas %}<option value="{{ a.id }}" {{ 'selected' if a.id == acao.area_id }}>{{ a.nome }}</option>{% endfor %}
+          </select></div>
+        <div class="field"><label>Responsável</label>
+          <select name="responsavel_id" required style="width:100%;">
+            {% for u in usuarios %}<option value="{{ u.id }}" {{ 'selected' if u.id == acao.responsavel_id }}>{{ u.nome or u.email }}</option>{% endfor %}
+          </select></div>
+        <div class="field"><label>Prazo</label>
+          <input type="date" name="prazo" value="{{ acao.prazo or '' }}" style="width:100%;"></div>
+        <div class="field"><label>Prioridade</label>
+          <select name="prioridade" style="width:100%;">
+            {% for p in prioridades %}<option value="{{ p }}" {{ 'selected' if p == acao.prioridade }}>{{ p }}</option>{% endfor %}
+          </select></div>
+      </div>
+      <div class="field"><label>Apoio</label>
+        <div class="lista-marcar" style="max-height:150px;">
+          {% for u in usuarios %}
+          <label class="linha-marcar"><input type="checkbox" name="apoio" value="{{ u.id }}"
+            {{ 'checked' if u.id in acao.apoio_ids }}> {{ u.nome or u.email }}</label>
+          {% endfor %}
+        </div></div>
+      <div class="field"><label>Observações</label>
+        <textarea name="observacoes" rows="2" style="width:100%;">{{ acao.observacoes or '' }}</textarea></div>
+      <button class="btn sec" type="submit">Salvar definição</button>
+    </form>
+    {% if not eventos %}
+    <hr style="border:none;border-top:1px solid var(--borda);margin:18px 0 14px;">
+    <p class="subnote" style="margin:0 0 10px;">
+      Esta ação ainda não tem registro nenhum, então dá para apagá-la — é o caso de ter sido
+      criada por engano. Depois do primeiro registro só cabe mudar o status para <b>Cancelada</b>:
+      o histórico não se reescreve.
+    </p>
+    <form method="post" action="{{ url_for('dash.acao_excluir', acao_id=acao.id) }}"
+          onsubmit="return confirm('Apagar {{ acao.codigo }}? Isso não pode ser desfeito.');">
+      <button class="btn-ghost" type="submit" style="color:var(--danger);">Apagar ação</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/acao_detalhe.js') }}"></script>
+{% endblock %}
