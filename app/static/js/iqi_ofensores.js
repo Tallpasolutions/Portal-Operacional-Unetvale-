@@ -30,9 +30,15 @@
     sel.value = mesIdx;
   }
 
+  // Recorte por supervisor: null = todos. Ver iqi_supervisor.js.
+  let alcanceSup = null; // equipes + tecnicos avulsos do supervisor
+
   function calcular() {
     const d = dados();
-    const avaliados = d.tecnicos
+    const base = window.__iqiSupervisor
+      ? window.__iqiSupervisor.filtrar(d.tecnicos, alcanceSup)
+      : d.tecnicos;
+    const avaliados = base
       .map((t) => ({ nome: t.nome, curto: t.nome.split(" - ").pop(),
                      os: t.m[mesIdx][0], cham: t.m[mesIdx][1], pct: t.m[mesIdx][2] }))
       .filter((r) => r.os >= d.minOS);
@@ -116,4 +122,12 @@
 
   // renderiza quando a visualização é ativada
   document.addEventListener("iqiview", (e) => { if (e.detail === "ofensores") render(); });
+
+  if (window.__iqiSupervisor) {
+    window.__iqiSupervisor.popular("sup-ofensores", (alcance) => {
+      alcanceSup = alcance;
+      render();
+    }, () => dados().tecnicos);
+  }
+
 })();

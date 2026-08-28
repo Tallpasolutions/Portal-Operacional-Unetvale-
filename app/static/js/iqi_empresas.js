@@ -17,6 +17,11 @@
   let mesIdx = 0;
   let chart = null;
   const selecionadas = new Set();
+  // Supervisor escolhido (null = todos). Recorta os TÉCNICOS antes de somar
+  // por empresa — traduzir supervisor em "empresas selecionadas", como era
+  // antes, inflaria a empresa com gente que não é dele quando o vínculo é de
+  // técnicos avulsos.
+  let alcanceSup = null;
 
   const DADOS = () => PACOTE[IND];
   const mesFechado = (m) => {
@@ -43,7 +48,10 @@
     const d = DADOS();
     if (!d) return [];
     const acc = new Map();
-    for (const t of d.tecnicos) {
+    const base = window.__iqiSupervisor
+      ? window.__iqiSupervisor.filtrar(d.tecnicos, alcanceSup)
+      : d.tecnicos;
+    for (const t of base) {
       const reg = t.m[mesIdx];
       if (!reg || reg[0] <= d.minOS) continue;
       const emp = empresaDe(t.nome);
@@ -67,9 +75,28 @@
     ).join("");
 
     $("emp-supervisores").innerHTML = SUPERVISORES.length
-      ? SUPERVISORES.map((s) =>
-          `<button class="fchip" data-sup="${s.id}" title="${s.equipes.join(', ')}">${s.nome}</button>`).join("")
+      ? SUPERVISORES.map((s) => {
+          const partes = [];
+          if (s.equipes && s.equipes.length) partes.push(s.equipes.join(", "));
+          if (s.tecnicos && s.tecnicos.length) partes.push(`${s.tecnicos.length} tecnico(s) avulso(s)`);
+          const on = alcanceSup && alcanceSup.id === s.id ? " on" : "";
+          return `<button class="fchip${on}" data-sup="${s.id}" title="${partes.join(" + ") || "sem vinculo"}">${s.nome}</button>`;
+        }).join("")
       : `<span style="font-size:12.5px;color:var(--muted)">nenhum supervisor com equipe vinculada — cadastre em Configurações</span>`;
+  }
+
+  /** Diz por que o recorte ficou vazio; tabela em branco parece defeito. */
+  function notaSupervisor() {
+    const box = $("emp-supervisores");
+    if (!box || !window.__iqiSupervisor) return;
+    let nota = box.parentNode.querySelector(".nota-sup");
+    if (!nota) {
+      nota = document.createElement("div");
+      nota.className = "subnote nota-sup";
+      nota.style.cssText = "flex-basis:100%;margin:2px 0 0";
+      box.insertAdjacentElement("afterend", nota);
+    }
+    nota.textContent = window.__iqiSupervisor.aviso(alcanceSup, DADOS().tecnicos) || "";
   }
 
   function renderKpis(linhas) {
@@ -192,16 +219,15 @@
   $("emp-supervisores").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-sup]");
     if (!b) return;
-    const sup = SUPERVISORES.find((s) => s.id === b.dataset.sup);
-    if (!sup) return;
-    // Clicar no supervisor troca o recorte pelas equipes dele; clicar de novo
-    // no mesmo limpa.
+    // Clicar no supervisor recorta pelo time dele; clicar de novo no mesmo
+    // limpa. Os chips de empresa são zerados junto, porque a lista de
+    // empresas muda com o recorte.
     const jaEra = b.classList.contains("on");
+    alcanceSup = jaEra ? null : window.__iqiSupervisor.alcanceDe(b.dataset.sup);
+    if (alcanceSup) alcanceSup.id = b.dataset.sup;
     selecionadas.clear();
-    if (!jaEra) for (const eq of sup.equipes) selecionadas.add(eq);
-    render(false);
-    document.querySelectorAll("#emp-supervisores .fchip").forEach((x) =>
-      x.classList.toggle("on", !jaEra && x === b));
+    render();
+    notaSupervisor();
   });
 
   // ---- seletores próprios (mesmo padrão das outras visões independentes) ---
@@ -223,6 +249,7 @@
     if (!b) return;
     IND = b.dataset.ind;
     selecionadas.clear();
+    alcanceSup = null;
     montarControles();
     render();
   });

@@ -23,10 +23,16 @@
   function streak(m, idx) { let s = 0; for (let i = idx; i >= 0; i--) { if (bateu(m[i])) s++; else break; } return s; }
   function streakFora(m, idx) { let s = 0; for (let i = idx; i >= 0; i--) { if (estourou(m[i])) s++; else break; } return s; }
 
+  // Recorte por supervisor: null = todos. Ver iqi_supervisor.js.
+  let alcanceSup = null; // equipes + tecnicos avulsos do supervisor
+
   function ranking(idx) {
     const crit = modo === "fora" ? estourou : bateu;
     const st = modo === "fora" ? streakFora : streak;
-    return DATA.tecnicos.filter((t) => crit(t.m[idx])).map((t) => ({
+    const base = window.__iqiSupervisor
+      ? window.__iqiSupervisor.filtrar(DATA.tecnicos, alcanceSup)
+      : DATA.tecnicos;
+    return base.filter((t) => crit(t.m[idx])).map((t) => ({
       nome: t.nome, curto: t.nome.split(" - ").pop(),
       empresa: t.nome.includes(" - ") ? t.nome.split(" - ")[0] : "",
       iqi: t.m[idx][2], os: t.m[idx][0], cham: t.m[idx][1], stars: st(t.m, idx),
@@ -250,4 +256,13 @@
   document.getElementById("btn-export-iqi").addEventListener("click", exportarImagem);
 
   aplicar(PACOTE[inds[0]]);
+
+  // Filtro por supervisor (visão Gráfico).
+  if (window.__iqiSupervisor) {
+    window.__iqiSupervisor.popular("sup-grafico", (alcance) => {
+      alcanceSup = alcance;
+      desenhar();   // nesta visão a função de redesenho chama-se `desenhar`
+    }, () => (DATA && DATA.tecnicos) || []);
+  }
+
 })();
