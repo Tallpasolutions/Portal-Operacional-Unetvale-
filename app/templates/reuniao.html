@@ -9,12 +9,6 @@
   <a class="btn-ghost" href="{{ url_for('dash.acoes_view', aba='reunioes') }}">← Voltar para as reuniões</a>
 </div>
 
-{% with mensagens = get_flashed_messages(with_categories=true) %}
-  {% for categoria, msg in mensagens %}
-  <div class="alert-{{ 'ok' if categoria == 'ok' else 'erro' }}">{{ msg }}</div>
-  {% endfor %}
-{% endwith %}
-
 <div class="card">
   <div class="card-h">
     <span>{{ reuniao.titulo }}</span>

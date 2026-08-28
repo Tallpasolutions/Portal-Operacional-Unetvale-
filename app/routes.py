@@ -299,6 +299,12 @@ def configuracoes():
         contexto["supervisores"] = supervisores.listar()
         contexto["equipes"] = supervisores.equipes_disponiveis()
         contexto["tecnicos_por_empresa"] = supervisores.tecnicos_disponiveis()
+        # Áreas e gestores do módulo Ações moram aqui, e não numa aba dentro
+        # dele: configuração espalhada em dois lugares é onde as pessoas
+        # param de achar.
+        contexto["areas"] = acoes.areas()
+        contexto["areas_todas"] = acoes.areas(incluir_inativas=True)
+        contexto["gestores"] = acoes.gestores()
         try:
             contexto["usuarios"] = supa.select(
                 "usuarios", {"select": "id,nome,email", "order": "nome.asc"})
@@ -560,9 +566,7 @@ def acoes_view():
         areas=acoes.areas(), usuarios=_usuarios_para_escolha(),
         status_opcoes=acoes.STATUS, prioridades=acoes.PRIORIDADES,
         pode_criar=acoes.pode_gerir(u), ultimos=acoes.ultimos_eventos(),
-        reunioes=acoes.listar_reunioes(u),
-        gestores=acoes.gestores() if u["is_admin"] else [],
-        areas_todas=acoes.areas(incluir_inativas=True) if u["is_admin"] else [])
+        reunioes=acoes.listar_reunioes(u))
 
 
 @bp.route("/acoes/<acao_id>")
@@ -712,7 +716,7 @@ def acoes_area():
             flash("Área " + ("reativada." if acao == "ativar" else "desativada."), "ok")
     except Exception as e:
         flash(f"Erro: {e}", "erro")
-    return redirect(url_for("dash.acoes_view", aba="config"))
+    return redirect(url_for("dash.configuracoes"))
 
 
 @bp.route("/acoes/gestores", methods=["POST"])
@@ -723,7 +727,7 @@ def acoes_gestor():
     ids = [a for a in f.getlist("area_id") if a]
     if not uid or not ids:
         flash("Escolha o usuário e ao menos uma área.", "erro")
-        return redirect(url_for("dash.acoes_view", aba="config"))
+        return redirect(url_for("dash.configuracoes"))
     try:
         for area_id in ids:
             if f.get("acao") == "desvincular":
@@ -733,7 +737,7 @@ def acoes_gestor():
         flash("Vínculo de gestor atualizado.", "ok")
     except Exception as e:
         flash(f"Erro: {e}", "erro")
-    return redirect(url_for("dash.acoes_view", aba="config"))
+    return redirect(url_for("dash.configuracoes"))
 
 
 @bp.route("/acoes/<acao_id>/excluir", methods=["POST"])
