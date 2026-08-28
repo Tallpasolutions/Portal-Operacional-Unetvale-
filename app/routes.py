@@ -44,13 +44,23 @@ def produtividade():
     # servidor, não escondendo no cliente — dado que não deve ser visto não
     # chega ao browser.
     if u["is_supervisor"] and not u["is_admin"]:
+        # Equipes inteiras MAIS técnicos avulsos: as duas formas de vínculo se
+        # somam. Olhar só as equipes esconderia do supervisor justamente quem
+        # foi vinculado nome a nome porque a empresa não é dele inteira.
         minhas = set(supervisores.equipes_de(u["id"]))
+        meus = set(supervisores.tecnicos_de(u["id"]))
+
+        def _dele(r):
+            return (r.get("e") in minhas
+                    or supervisores.chave_tecnico(f"{r.get('e')} - {r.get('t')}") in meus)
+
         p2 = dict(payload)
-        p2["registros"] = [r for r in payload.get("registros", []) if r.get("e") in minhas]
+        p2["registros"] = [r for r in payload.get("registros", []) if _dele(r)]
         p2["total"] = len(p2["registros"])
         payload = p2
     return render_template("produtividade.html", ativo="produtividade", payload=payload,
-                           meta=_meta(row), supervisores=_supervisores_para_filtro(u))
+                           meta=_meta(row), supervisores=_supervisores_para_filtro(u),
+                           apelidos_empresa=supervisores.APELIDOS_EMPRESA)
 
 
 # Equipes de infraestrutura NÃO participam do IQI/IQM (só time operacional).

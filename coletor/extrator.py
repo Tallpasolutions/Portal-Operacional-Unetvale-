@@ -88,13 +88,33 @@ def get_csrf_meta(s, base):
 # Busca de dados (POST /dados, um intervalo por vez)
 # ----------------------------------------------------------------------------
 def buscar_intervalo(s, base, csrf, data_inicio, data_fim):
-    """data_inicio/data_fim no formato DD/MM/AAAA. Retorna o HTML cru."""
+    """data_inicio/data_fim no formato DD/MM/AAAA. Retorna o HTML cru.
+
+    🚨 `empresa="todas"` NÃO é opcional. Não mexa.
+
+    O formulário do relatório tem um campo `empresa` (todas | unetvale | id).
+    Enquanto ele não era enviado, o WVSA aplicava o padrão dele — e esse padrão
+    passou a ser "só Unetvale" por volta de 01/07/2026. O coletor continuou
+    reportando sucesso e apagando-e-regravando o mês corrente com o resultado
+    reduzido; foram dois meses até alguém reparar que os terceiros sumiram.
+
+    Medido em 28/08/2026 no relatório de 23/06/2026:
+
+        sem o parâmetro ......  61 OS,  2 empresas
+        empresa="todas" ...... 249 OS, 17 empresas  <- igual ao que já estava
+                                                       gravado daquele dia
+
+    `infra="S"` é armadilha: parece "incluir infra", mas RESTRINGE o relatório
+    às equipes de infra (5 empresas em vez de 17). `empresa="todas"` sozinho já
+    traz as de infra junto. Não envie.
+    """
     headers = {
         "X-Requested-With": "XMLHttpRequest",
         "X-CSRF-TOKEN": csrf or "",
         "Referer": f"{base}/relatorios/operacional8",
     }
-    payload = {"dataInicio": data_inicio, "dataFim": data_fim, "visao": "T"}
+    payload = {"dataInicio": data_inicio, "dataFim": data_fim,
+               "visao": "T", "empresa": "todas"}
     r = s.post(
         f"{base}/relatorios/operacional8/dados",
         data=payload,
@@ -230,6 +250,55 @@ def limpar_intervalo(conn, ini_iso, fim_iso):
     conn.commit()
 
 
+# Abaixo disto o resultado novo é considerado degradado, não uma variação real.
+# Meia empresa a menos num mês fechado não acontece por acaso: ou o relatório
+# mudou de escopo, ou a sessão caiu no meio. Nos dois casos é melhor parar.
+LIMIAR_ENCOLHIMENTO = 0.5
+
+
+class ColetaDegradada(RuntimeError):
+    pass
+
+
+def conferir_encolhimento(conn, ini_iso, fim_iso, regs, permitir=False):
+    """Barra o apagar-e-regravar quando a coleta volta bem menor que o guardado.
+
+    Existe por causa de um incidente real: o relatório passou a devolver só a
+    Unetvale, e como cada rodada apaga o intervalo antes de gravar, o banco foi
+    sendo reescrito com o resultado reduzido por dois meses — sempre reportando
+    sucesso, porque "gravou" mesmo. Perder dado calado é pior do que falhar.
+
+    Compara empresas distintas, e não linhas: contagem de OS oscila sozinha
+    (dia parcial, reagendamento), mas um mês não perde metade das empresas por
+    variação normal.
+
+    Só vale quando já existe dado no intervalo — a primeira coleta de um mês
+    novo compara contra zero e passa direto, que é o certo.
+    """
+    antes = {e for (e,) in conn.execute(
+        "SELECT DISTINCT empresa FROM os WHERE dia >= ? AND dia <= ? AND empresa IS NOT NULL",
+        (ini_iso, fim_iso))}
+    if not antes:
+        return
+    depois = {r.get("empresa") for r in regs if r.get("empresa")}
+    if len(depois) >= len(antes) * LIMIAR_ENCOLHIMENTO:
+        return
+
+    sumiram = sorted(antes - depois)
+    aviso = (f"coleta degradada em {ini_iso}..{fim_iso}: "
+             f"{len(antes)} empresas no banco, {len(depois)} na resposta. "
+             f"Sumiram: {', '.join(sumiram[:8])}"
+             f"{'…' if len(sumiram) > 8 else ''}")
+    if permitir:
+        log(f"AVISO (--aceitar-encolhimento): {aviso}")
+        return
+    raise ColetaDegradada(
+        f"{aviso}\n"
+        "Nada foi apagado. Verifique se o relatório mudou de escopo antes de insistir "
+        "(o payload precisa de empresa='todas'). Para gravar assim mesmo, quando a queda "
+        "for real: --aceitar-encolhimento")
+
+
 def parse_data_hora(s):
     """'12/06/26 11:18' -> ('2026-06-12T11:18', '2026-06-12')"""
     s = _limpa(s)
@@ -309,6 +378,9 @@ def main():
     ap.add_argument("--inicio", help="DD/MM/AAAA")
     ap.add_argument("--fim", help="DD/MM/AAAA")
     ap.add_argument("--salvar-raw", action="store_true", help="salva o HTML cru de cada mês em raw/")
+    ap.add_argument("--aceitar-encolhimento", action="store_true",
+                    help="grava mesmo se a coleta vier com muito menos empresas que o banco "
+                         "(só quando a queda for real, não para contornar relatório quebrado)")
     args = ap.parse_args()
 
     cfg = load_config()
@@ -344,8 +416,10 @@ def main():
             with open(os.path.join(RAW_DIR, f"{ini:%Y-%m}.html"), "w", encoding="utf-8") as f:
                 f.write(html)
         regs = parse_html(html)
+        ini_iso, ult_iso = ini.strftime("%Y-%m-%d"), ult.strftime("%Y-%m-%d")
+        conferir_encolhimento(conn, ini_iso, ult_iso, regs, permitir=args.aceitar_encolhimento)
         # idempotência: limpa o intervalo consultado antes de reinserir
-        limpar_intervalo(conn, ini.strftime("%Y-%m-%d"), ult.strftime("%Y-%m-%d"))
+        limpar_intervalo(conn, ini_iso, ult_iso)
         n = salvar(conn, regs)
         total += n
         log(f"  -> {n} OS gravadas")
@@ -367,4 +441,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except ColetaDegradada as e:
+        # Mensagem legível em vez de traceback: quem lê isso é o coletor.log às
+        # 8 da manhã. Código 2 distingue "recusei de propósito" de erro geral.
+        log(f"ABORTADO: {e}")
+        sys.exit(2)
