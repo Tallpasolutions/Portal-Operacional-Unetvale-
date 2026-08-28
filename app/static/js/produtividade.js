@@ -12,6 +12,13 @@
   // um conjunto delas. Fica separado porque se combina com qualquer outro
   // filtro sem competir pelo mesmo Set.
   let semRetiradas = false;
+  // Supervisor escolhido (null = todos). Também fica fora de `filtros`, e pelo
+  // mesmo motivo do `semRetiradas`: o alcance dele é equipes OU técnicos
+  // avulsos, e as dimensões de `filtros` se combinam com E. Jogar as equipes
+  // em `filtros.e` e os avulsos em `filtros.t` pediria "da WAVE E chamado
+  // Fulano da UNETVALE" — recorte sempre vazio. Aqui é um recorte de base, e
+  // os filtros normais continuam refinando dentro dele.
+  let alcanceSup = null;
   let grupo = "todos"; // todos | infra | operacional
   // Infra = "INFRA" como palavra isolada (INFRA UNET/WAVE/SCHISTEL) + exceções por
   // nome (ex.: FANDARUFF). NÃO conta INFRASEG (operacional). Adicione novas equipes
@@ -64,7 +71,7 @@
   }
 
   function popularSelects() {
-    preencher("f-empresa", distinct(REGISTROS.map((r) => r.e)).sort(), "Todas as empresas", (v) => v);
+    preencher("f-empresa", distinct(REGISTROS.map((r) => r.e)).sort(), "Todas as equipes", (v) => v);
     preencher("f-tecnico", distinct(REGISTROS.map((r) => r.t)).sort(), "Todos os técnicos", (v) => v);
     preencher("f-mes", distinct(REGISTROS.map((r) => r.mes)).sort(), "Todos os meses", rotuloMes);
     preencher("f-semana", distinct(REGISTROS.map((r) => r.semana)).sort(), "Todas as semanas", rotuloSemana);
@@ -74,8 +81,17 @@
       valores.map((v) => `<option value="${v}">${rotulo(v)}</option>`).join("");
   }
 
+  /** O registro está no alcance do supervisor escolhido? Sem escolha, tudo está. */
+  function noAlcanceSup(r) {
+    if (!alcanceSup) return true;
+    if (alcanceSup.equipes.has(r.e)) return true;
+    const chave = window.__iqiSupervisor && window.__iqiSupervisor.chaveTecnico;
+    return chave ? alcanceSup.tecnicos.has(chave(`${r.e} - ${r.t}`)) : false;
+  }
+
   function passa(r) {
-    return (grupo === "todos" || ehInfra(r) === (grupo === "infra")) &&
+    return noAlcanceSup(r) &&
+      (grupo === "todos" || ehInfra(r) === (grupo === "infra")) &&
       (filtros.e.size === 0 || filtros.e.has(r.e)) &&
       (filtros.t.size === 0 || filtros.t.has(r.t)) &&
       (filtros.mes.size === 0 || filtros.mes.has(r.mes)) &&
@@ -92,9 +108,13 @@
   function definir(dim, valor) { filtros[dim].clear(); if (valor) filtros[dim].add(valor); renderTudo(); }
   function sincronizarSelects() {
     const map = { mes: "f-mes" };
-    // `f-empresa` fica sempre em branco: ele é um "adicionar equipe", e o que
-    // está selecionado aparece nos chips.
-    document.getElementById("f-empresa").value = "";
+    // `f-empresa` e `f-tecnico` ficam sempre em branco: são "adicionar", e o
+    // que está selecionado aparece nos chips.
+    const selEmp = document.getElementById("f-empresa");
+    preencher("f-empresa", distinct(baseSup().map((r) => r.e)).sort(),
+              rotuloVazio("equipe", filtros.e.size, "Todas as equipes"), (v) => v);
+    selEmp.value = "";
+    document.getElementById("f-tecnico").value = "";
     for (const [dim, id] of Object.entries(map)) {
       document.getElementById(id).value = filtros[dim].size === 1 ? [...filtros[dim]][0] : "";
     }
@@ -107,13 +127,33 @@
     preencher("f-semana", permitidas, filtros.mes.size ? "Todas as semanas do mês" : "Todas as semanas", rotuloSemana);
     document.getElementById("f-semana").value = atual;
   }
-  function tecnicosPermitidos() { const base = filtros.e.size ? REGISTROS.filter((r) => filtros.e.has(r.e)) : REGISTROS; return distinct(base.map((r) => r.t)).sort((a, b) => a.localeCompare(b)); }
+  // Os selects oferecem só o que está no alcance do supervisor escolhido: uma
+  // equipe fora do time dele só poderia levar a um recorte vazio.
+  const baseSup = () => (alcanceSup ? REGISTROS.filter(noAlcanceSup) : REGISTROS);
+  function tecnicosPermitidos() { const base = filtros.e.size ? baseSup().filter((r) => filtros.e.has(r.e)) : baseSup(); return distinct(base.map((r) => r.t)).sort((a, b) => a.localeCompare(b)); }
   function atualizarSelectTecnico() {
     const permitidos = tecnicosPermitidos(); const set = new Set(permitidos);
     for (const t of [...filtros.t]) if (!set.has(t)) filtros.t.delete(t);
-    const atual = filtros.t.size === 1 ? [...filtros.t][0] : "";
-    preencher("f-tecnico", permitidos, filtros.e.size ? "Todos os técnicos da equipe" : "Todos os técnicos", (v) => v);
-    document.getElementById("f-tecnico").value = atual;
+    preencher("f-tecnico", permitidos,
+              rotuloVazio("técnico", filtros.t.size,
+                          filtros.e.size ? "Todos os técnicos da equipe" : "Todos os técnicos"),
+              (v) => v);
+    // Volta a ficar em branco: o select ADICIONA, e o escolhido aparece nos
+    // chips. Deixar o último nome preso aqui sugeria que ele era "o" filtro,
+    // e não um entre vários.
+    document.getElementById("f-tecnico").value = "";
+  }
+
+  /**
+   * Texto da opção vazia dos selects que somam.
+   *
+   * Sem nada escolhido ele descreve o estado ("Todos os técnicos"); com algo
+   * escolhido vira convite ("+ Adicionar técnico…"). É a parte que não estava
+   * óbvia: o select se esvazia depois da escolha e ela reaparece como chip
+   * mais abaixo, o que se lê com facilidade como "não funcionou".
+   */
+  function rotuloVazio(oQue, quantos, textoTodos) {
+    return quantos ? `+ Adicionar ${oQue}…` : textoTodos;
   }
   // "Retirada", "Retirada Condomínio" e "Retirada de Cabos" — casadas pelo
   // nome, e não por índice fixo, porque a ordem do dicionário `fin` muda a
@@ -287,16 +327,29 @@
     sincronizarSelects(); renderTudo();
   });
 
-  // Escolher um supervisor seleciona as equipes dele de uma vez.
+  // Escolher um supervisor recorta a base pelo alcance dele — equipes inteiras
+  // e técnicos avulsos somados. Os filtros de equipe e técnico são zerados
+  // porque passam a refinar dentro de outro universo.
   const selSup = document.getElementById("f-supervisor");
   if (selSup) selSup.addEventListener("change", (e) => {
-    const sup = (window.__SUPERVISORES__ || []).find((s) => s.id === e.target.value);
+    alcanceSup = window.__iqiSupervisor
+      ? window.__iqiSupervisor.alcanceDe(e.target.value)
+      : null;
     filtros.e.clear();
-    filtros.t.clear();   // técnico de outra equipe deixaria o recorte vazio
-    if (sup) for (const eq of sup.equipes) filtros.e.add(eq);
+    filtros.t.clear();
+    atualizarSelectTecnico();
     sincronizarSelects(); renderTudo();
   });
-  document.getElementById("f-tecnico").addEventListener("change", (e) => definir("t", e.target.value));
+  // Técnico soma igual à equipe. `filtros.t` sempre foi um Set — o que impedia
+  // vários era o `definir()`, que limpa antes de adicionar. Comparar dois ou
+  // três técnicos é justamente o uso da tela.
+  document.getElementById("f-tecnico").addEventListener("change", (e) => {
+    const v = e.target.value;
+    if (v) filtros.t.add(v);
+    else filtros.t.clear();
+    e.target.value = "";
+    sincronizarSelects(); renderTudo();
+  });
   document.getElementById("f-mes").addEventListener("change", (e) => definir("mes", e.target.value));
   document.getElementById("f-semana").addEventListener("change", (e) => definir("semana", e.target.value));
   // Segmentado Infra / Operacional

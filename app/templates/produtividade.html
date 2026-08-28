@@ -15,14 +15,14 @@
       <button data-g="operacional">Operacional</button>
     </span>
   </label>
-  <label title="Escolher um supervisor seleciona as equipes dele">Supervisor
+  <label title="Recorta pelo time do supervisor: equipes inteiras mais os técnicos vinculados nome a nome">Supervisor
     <select id="f-supervisor">
       <option value="">Todos</option>
       {% for s in supervisores %}<option value="{{ s.id }}">{{ s.nome }}</option>{% endfor %}
     </select>
   </label>
   <label title="Escolha várias — cada uma vira um chip abaixo">Equipe <select id="f-empresa"></select></label>
-  <label>Técnico <select id="f-tecnico"></select></label>
+  <label title="Escolha vários — cada um vira um chip abaixo">Técnico <select id="f-tecnico"></select></label>
   <label>Mês <select id="f-mes"></select></label>
   <label>Semana <select id="f-semana"></select></label>
   <button class="btn sec" id="btn-rej">Só rejeitadas</button>
@@ -90,6 +90,13 @@
 
 {% block scripts %}
 <script>window.__PAYLOAD__ = {{ payload|tojson }};</script>
-<script>window.__SUPERVISORES__ = {{ supervisores|tojson }};</script>
+<script>
+  window.__SUPERVISORES__ = {{ supervisores|tojson }};
+  window.__APELIDOS_EMPRESA__ = {{ apelidos_empresa|tojson }};
+</script>
+<!-- Reaproveita a normalização do vínculo (chaveTecnico). Uma segunda cópia da
+     regra aqui divergiria da do IQI e o mesmo supervisor recortaria diferente
+     em cada tela. -->
+<script src="{{ url_for('static', filename='js/iqi_supervisor.js') }}"></script>
 <script src="{{ url_for('static', filename='js/produtividade.js') }}"></script>
 {% endblock %}
