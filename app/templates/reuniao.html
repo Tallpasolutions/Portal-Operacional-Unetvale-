@@ -176,12 +176,6 @@
           editada à mão
         {%- endif -%}
       </span>
-      {% if reuniao.encerrada_em %}
-      {# PDF só depois de encerrada: enquanto aberta a ata é rascunho e se
-         edita; fechada, é documento e se leva embora. Sai pelo diálogo de
-         impressão do navegador — zero dependência nova na função serverless. #}
-      <button class="ata-btn" type="button" id="ata-pdf">Baixar PDF</button>
-      {% endif %}
     </div>
   </div>
 </div>
@@ -270,10 +264,23 @@
 {# Sem cartão e sem campo de notas: encerrar é um ato, não um formulário. O que
    congela é o registro dos comentários do dia; a ata já foi salva antes. #}
 <form method="post" id="form-encerrar" class="encerrar-linha"
-      action="{{ url_for('dash.reuniao_encerrar', reuniao_id=reuniao.id) }}"
-      onsubmit="return confirm('Encerrar a reunião? Depois disso a ata não é mais editável.');">
-  <button class="btn" type="submit">Encerrar reunião</button>
+      action="{{ url_for('dash.reuniao_encerrar', reuniao_id=reuniao.id) }}">
+  {# `type="button"`: quem envia é o diálogo, depois do OK. #}
+  <button class="btn" type="button" id="abrir-encerrar">Encerrar reunião</button>
 </form>
+
+{# `<dialog>` nativo em vez do `confirm()` do navegador: o confirm abre uma
+   caixa do Chrome, com o domínio no topo e os botões do sistema, que não
+   pertence à tela. Isto aqui é a mesma pergunta, no meio da página, com os
+   botões do portal. Sem biblioteca. #}
+<dialog id="dlg-encerrar" class="modal">
+  <h3>Encerrar a reunião?</h3>
+  <p>Depois disso a ata não é mais editável.</p>
+  <div class="modal-acoes">
+    <button class="btn sec" type="button" data-fechar>Cancelar</button>
+    <button class="btn" type="button" id="confirmar-encerrar">Encerrar</button>
+  </div>
+</dialog>
 {% endif %}
 
 {% endblock %}
@@ -298,12 +305,24 @@
 {% endif %}
 
 <script>
-  // O botão de PDF abre o diálogo de impressão: o navegador é quem gera o
-  // arquivo. Evita uma biblioteca de PDF na função serverless e produz um PDF
-  // de verdade, não um HTML renomeado. O recorte é o `@media print` do CSS.
-  document.addEventListener("click", function (e) {
-    if (e.target && e.target.id === "ata-pdf") window.print();
-  });
+  (function () {
+    var dlg = document.getElementById("dlg-encerrar");
+    var abrir = document.getElementById("abrir-encerrar");
+    if (!dlg || !abrir) return;
+    abrir.addEventListener("click", function () { dlg.showModal(); });
+    dlg.addEventListener("click", function (e) {
+      // Clique fora do conteúdo (na área escurecida) fecha.
+      if (e.target === dlg || (e.target.dataset && e.target.dataset.fechar !== undefined)) dlg.close();
+    });
+    document.getElementById("confirmar-encerrar").addEventListener("click", function () {
+      dlg.close();
+      // `requestSubmit` e não `submit`: o `submit()` cru NÃO dispara o evento,
+      // e é nele que o reuniao.js para a gravação e gera a ata antes de
+      // congelar. Com `submit()` o último trecho se perderia.
+      document.getElementById("form-encerrar").requestSubmit();
+    });
+  })();
+
 </script>
 {% if conduz and not reuniao.encerrada_em %}
 <script>

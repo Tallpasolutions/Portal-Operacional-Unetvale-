@@ -126,9 +126,12 @@ gravar: sem isso, um clique sem edição reescreveria o documento (o serializado
 põe linha em branco onde o gerador não punha) e a ata apareceria como "editada
 à mão" sem ninguém ter editado.
 
-Encerrada, a ata vira **PDF** pelo diálogo de impressão do navegador — o
-`@media print` do `style.css` é o recorte. Sem biblioteca de PDF na função
-serverless.
+O **PDF é da reunião inteira** (ficha, ata, itens e os comentários registrados
+nela), não só da ata, e o botão fica na **lista** — que é onde se procura por
+ele depois. Sai por `reuniao_pdf.html`, uma página solta que imprime sozinha ao
+abrir: não estende `base.html` porque o PDF não leva sidebar nem topbar, e
+escondê-las com `@media print` seria carregar o que se pretende esconder. Quem
+gera o arquivo é o navegador — sem biblioteca de PDF na função serverless.
 
 ### Papéis
 

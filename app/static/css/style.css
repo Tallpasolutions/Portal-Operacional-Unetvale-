@@ -435,8 +435,8 @@ tr.clicavel{ cursor:pointer; }
    nova numa funcao serverless — e o resultado e PDF de verdade, nao HTML
    renomeado. Some tudo que nao e a ata: sidebar, topbar, pauta, formularios. */
 @media print{
-  .sidebar, .topbar, .view-bar, .gravador, .ata-acoes, .ata-editar,
-  .item-acao, form, .flash, .subnote{ display:none !important; }
+  .sidebar, .topbar, .view-bar, .ata-rodape, .item-acao, .modal,
+  form, .flash, .subnote{ display:none !important; }
   body, .main, .content{ background:#fff; margin:0; padding:0; }
   .card{ border:none; box-shadow:none; page-break-inside:avoid; }
   .card-h{ border-bottom:1px solid #ddd; padding-left:0; }
@@ -444,3 +444,19 @@ tr.clicavel{ cursor:pointer; }
   .ata{ max-width:none; font-size:12pt; }
   a{ color:#000; text-decoration:none; }
 }
+
+/* ---------- Diálogo de confirmação ---------------------------------------
+   `<dialog>` nativo: o `confirm()` do navegador abre uma caixa do sistema,
+   com o domínio no topo, que não pertence à tela do portal. */
+.modal{ border:none; border-radius:12px; padding:22px 24px; max-width:400px;
+  box-shadow:0 18px 48px rgba(11,23,39,.22); color:var(--ink); }
+.modal::backdrop{ background:rgba(11,23,39,.42); }
+.modal h3{ margin:0 0 8px; font-size:16px; color:var(--ink-d); }
+.modal p{ margin:0; font-size:13.5px; color:var(--muted); }
+.modal-acoes{ display:flex; justify-content:flex-end; gap:10px; margin-top:20px; }
+
+/* "Gerar PDF" na lista de reuniões: age, não informa — por isso não é badge. */
+.btn-pdf{ display:inline-block; background:#fff; border:1px solid var(--borda-2);
+  color:var(--brand-d); border-radius:8px; padding:5px 12px; font-size:12px;
+  font-weight:700; text-decoration:none; }
+.btn-pdf:hover{ background:var(--brand); border-color:var(--brand); color:#fff; }
