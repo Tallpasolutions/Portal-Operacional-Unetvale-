@@ -156,6 +156,30 @@ existe, e códigos como `AC-001` são fáceis de adivinhar.
 SQL Editor do Supabase (ou por `psycopg` com a `DATABASE_URL`). São **aditivas**:
 nada de `drop`/`alter` destrutivo em tabela com dado de produção.
 
+### Git: confira se o commit chegou na main
+
+**Antes de dizer que algo está corrigido, rode:**
+
+```bash
+git fetch origin && git log --oneline origin/main..HEAD
+```
+
+Se listar alguma coisa, **não está na main** — e portanto não está em produção.
+
+Isto virou regra porque aconteceu duas vezes seguidas no módulo Reuniões: o PR
+foi mergeado enquanto a correção seguinte ainda estava sendo escrita. O commit
+ficou órfão na branch, o PR fechou, e a `main` saiu com o defeito que todo mundo
+achava resolvido. Nos dois casos o erro só apareceu porque alguém foi usar a
+tela — não porque o Git avisou.
+
+Duas consequências práticas:
+
+* Depois de mergear, **confira se a branch ainda está à frente**
+  (`gh pr view <n> --json state,mergedAt` e o `log` acima). Se estiver, abra
+  outro PR: a mesma branch serve, ela fica zerada depois do merge.
+* Enquanto uma correção estiver sendo escrita, **segure o merge**. Push não
+  reabre PR fechado.
+
 ### Comentários
 
 Explique **por quê**, não o quê. Registre a decisão e o que aconteceria se fosse
