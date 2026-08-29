@@ -764,6 +764,18 @@ def reuniao_gravacao_iniciar(reuniao_id):
     return jsonify({"ok": True})
 
 
+@bp.route("/reunioes/<reuniao_id>/gravacao/parar", methods=["POST"])
+@login_obrigatorio
+def reuniao_gravacao_parar(reuniao_id):
+    """Chamada pelo JS quando a captura parou e a fila esvaziou."""
+    u = usuario_atual()
+    _reuniao_ou_404(reuniao_id, u, exigir_conduz=True)
+    try:
+        return jsonify({"status": reuniao_ia.parar_gravacao(reuniao_id)})
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 502
+
+
 @bp.route("/reunioes/<reuniao_id>/audio/url", methods=["POST"])
 @login_obrigatorio
 def reuniao_audio_url(reuniao_id):

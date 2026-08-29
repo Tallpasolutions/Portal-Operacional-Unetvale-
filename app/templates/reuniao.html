@@ -15,7 +15,7 @@
     {% if reuniao.encerrada_em %}<span class="badge badge-cinza">Ata congelada</span>
     {% else %}<span class="badge badge-verde">Em andamento</span>{% endif %}
     {% if estado.status == 'gravando' %}<span class="badge badge-vermelho">● Gravando</span>
-    {% elif estado.status == 'transcrevendo' %}<span class="badge badge-ambar">Transcrevendo</span>
+    {% elif estado.status == 'transcrevendo' %}<span class="badge badge-ambar">Ata pendente</span>
     {% elif estado.tem_ata %}<span class="badge badge-verde">Ata pronta</span>{% endif %}
   </div>
   <div class="card-b">
@@ -87,6 +87,15 @@
 
     <div class="gravador-medidor"><i id="g-nivel"></i></div>
     <div id="g-aviso" class="aviso-erro" style="display:none;"></div>
+
+    {# Sem este botão, quem parasse a gravação sem encerrar a reunião ficava
+       com os trechos transcritos e nenhum caminho para gerar a ata. #}
+    {% if estado.ok and not estado.tem_ata %}
+    <form method="post" action="{{ url_for('dash.reuniao_ata', reuniao_id=reuniao.id) }}"
+          style="margin-top:14px;">
+      <button class="btn" type="submit">Gerar ata dos {{ estado.ok }} trecho(s) transcritos</button>
+    </form>
+    {% endif %}
 
     {% if estado.erro %}
     <p class="subnote" style="margin-bottom:0;">
@@ -261,6 +270,7 @@
     podeGravar: true,
     trechoSegundos: {{ trecho_segundos }},
     urlIniciar: "{{ url_for('dash.reuniao_detalhe', reuniao_id=reuniao.id) }}/gravacao/iniciar",
+    urlParar: "{{ url_for('dash.reuniao_detalhe', reuniao_id=reuniao.id) }}/gravacao/parar",
     urlAudio: "{{ url_for('dash.reuniao_detalhe', reuniao_id=reuniao.id) }}/audio/url",
     urlTranscrever: "{{ url_for('dash.reuniao_detalhe', reuniao_id=reuniao.id) }}/audio/__N__/transcrever",
     urlAta: "{{ url_for('dash.reuniao_detalhe', reuniao_id=reuniao.id) }}/ata"

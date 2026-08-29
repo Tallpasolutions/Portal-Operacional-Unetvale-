@@ -74,6 +74,28 @@ def iniciar_gravacao(reuniao_id):
     })
 
 
+def parar_gravacao(reuniao_id):
+    """Fecha a captura sem gerar a ata, e devolve o estado que sobrou.
+
+    Existe porque "parar" e "gerar a ata" são coisas separadas: dá para parar
+    no meio, olhar os trechos e gerar depois. Sem esta chamada a reunião ficava
+    com `gravacao_status='gravando'` para sempre — a lista mostrava o selo
+    vermelho de gravação em andamento em reunião que já tinha acabado.
+    """
+    lista = trechos(reuniao_id)
+    if not lista:
+        # Clicou em gravar e parou antes de qualquer trecho fechar: volta ao
+        # estado inicial, em vez de deixar rastro de uma gravação que não houve.
+        novo = "sem_gravacao"
+    elif any(t["status"] == "ok" for t in lista):
+        # Áudio transcrito, ata ainda não gerada.
+        novo = "transcrevendo"
+    else:
+        novo = "erro"
+    supa.update("reunioes", {"id": reuniao_id}, {"gravacao_status": novo})
+    return novo
+
+
 def autorizar_trecho(reuniao_id, indice, formato):
     """Reserva o lugar do trecho e devolve a URL de escrita para o browser.
 

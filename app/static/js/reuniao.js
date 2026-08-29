@@ -126,7 +126,7 @@
         enviando = false;
         atualizarEstado();
         bombear();
-        if (!gravando && !fila.length && encerrandoDepois) gerarAta();
+        talvezConcluir();
       })
       .catch(function (e) {
         enviando = false;
@@ -142,17 +142,40 @@
         }
         setTimeout(bombear, 4000);
         atualizarEstado();
+        // Também aqui: se o trecho foi descartado após 3 tentativas, a fila
+        // pode ter esvaziado e a reunião precisa ser fechada assim mesmo.
+        talvezConcluir();
       });
   }
 
   function atualizarEstado() {
-    var pend = fila.length + (enviando ? 0 : 0);
+    // `fila[0]` continua na fila enquanto é enviado, então `fila.length` já
+    // conta o que está em trânsito.
+    var pend = fila.length;
     if (gravando) {
       texto(elEstado, "Trecho " + (indice + 1) +
             (pend ? " · " + pend + " na fila" : " · em dia"));
     } else if (pend) {
       texto(elEstado, "Enviando os últimos " + pend + " trecho(s)…");
+    } else {
+      // O ramo que faltava. Sem ele o texto congelava em "Enviando os últimos
+      // 1 trecho(s)…" mesmo depois de tudo terminar, e parecia travado.
+      texto(elEstado, indice
+        ? "Gravação encerrada · " + indice + " trecho(s) transcritos."
+        : "Parado");
     }
+  }
+
+  /** Só termina quando a captura parou E a fila esvaziou. */
+  function talvezConcluir() {
+    if (gravando || fila.length || enviando) return;
+    if (encerrandoDepois) { gerarAta(); return; }
+    atualizarEstado();
+    // Avisa o servidor: sem isto a reunião fica com status "gravando" para
+    // sempre e a lista mostra o selo vermelho de gravação em andamento.
+    json(cfg.urlParar, {})
+      .then(function () { window.location.reload(); })
+      .catch(function () { /* a tela já diz o que aconteceu; recarregar é luxo */ });
   }
 
   // ------------------------------------------------------------ rotação
@@ -250,10 +273,9 @@
     painel.classList.remove("gravando");
     if (elNivel) elNivel.style.width = "0%";
     atualizarEstado();
-    if (!fila.length && !enviando) {
-      if (encerrandoDepois) gerarAta();
-      else texto(elEstado, "Gravação encerrada. Trechos transcritos.");
-    }
+    // Isto roda no `onstop`, quando a fila quase sempre AINDA tem trecho.
+    // Quem realmente fecha é o `talvezConcluir` chamado ao fim de cada envio.
+    talvezConcluir();
   }
 
   function gerarAta() {
