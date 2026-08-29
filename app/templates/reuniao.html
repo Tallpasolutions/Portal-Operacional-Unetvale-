@@ -9,21 +9,63 @@
   <a class="btn-ghost" href="{{ url_for('dash.acoes_view', aba='reunioes') }}">← Voltar para as reuniões</a>
 </div>
 
-<div class="card">
-  <div class="card-h">
-    <span>{{ reuniao.titulo }}</span>
-    {% if reuniao.encerrada_em %}<span class="badge badge-cinza">Ata congelada</span>
-    {% else %}<span class="badge badge-verde">Em andamento</span>{% endif %}
-    {% if estado.status == 'gravando' %}<span class="badge badge-vermelho">● Gravando</span>
-    {% elif estado.status == 'transcrevendo' %}<span class="badge badge-ambar">Ata pendente</span>
-    {% elif estado.tem_ata %}<span class="badge badge-verde">Ata pronta</span>{% endif %}
-  </div>
+<div class="card gravador" id="gravador">
+  <div class="card-h"><span>{{ reuniao.titulo }}</span></div>
   <div class="card-b">
-    <div class="ficha">
+    {# Uma linha só com tudo o que descreve a reunião — inclusive gravar.
+       A gravação não é assunto à parte: é uma propriedade desta reunião,
+       como a data e os participantes. #}
+    <div class="ficha ficha-reuniao">
       <div><span class="l">Tipo</span><b>{{ 'Individual' if reuniao.tipo == 'individual' else 'Em grupo' }}</b></div>
       <div><span class="l">Data</span><b>{{ reuniao.data|replace('-', '/') }}</b></div>
       <div><span class="l">Participantes</span><b>{% for uid in reuniao.participantes %}{{ nome_usuario(uid) }}{{ ', ' if not loop.last }}{% endfor %}</b></div>
+      <div><span class="l">Status da reunião</span>
+        {% if reuniao.encerrada_em %}<span class="badge badge-cinza">Encerrada</span>
+        {% else %}<span class="badge badge-verde">Em andamento</span>{% endif %}
+      </div>
+      <div><span class="l">Status da ata</span>
+        {% if estado.status == 'gravando' %}<span class="badge badge-vermelho">● Gravando</span>
+        {% elif estado.tem_ata %}<span class="badge badge-verde">Pronta</span>
+        {% elif estado.status == 'transcrevendo' %}<span class="badge badge-ambar">Pendente</span>
+        {% elif estado.status == 'erro' %}<span class="badge badge-vermelho">Falhou</span>
+        {% else %}<span class="badge badge-cinza">Sem gravação</span>{% endif %}
+      </div>
+
+      {% if conduz and not reuniao.encerrada_em %}
+      <div class="ficha-gravador">
+        <span class="l">Gravação</span>
+        {# Um controle só: o botão da esquerda cicla Gravar / Pausar / Retomar,
+           e Concluir aparece na mesma pílula depois que a captura começa.
+           Concluir gera a ata sozinho. #}
+        <div class="grav-pill" id="g-pill" data-estado="parado">
+          <button class="grav-primario" type="button" id="g-primario">
+            <span class="grav-icone" id="g-icone"></span>
+            <span id="g-rotulo">Gravar</span>
+          </button>
+          <span class="grav-tempo" id="g-relogio">00:00</span>
+          <div class="grav-onda" id="g-onda" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <button class="grav-fim" type="button" id="g-concluir">Concluir</button>
+        </div>
+      </div>
+      {% endif %}
     </div>
+
+    {% if conduz and not reuniao.encerrada_em %}
+    <div class="grav-status" id="g-estado"></div>
+    <div id="g-aviso" class="aviso-erro" style="display:none;"></div>
+
+    {# Resgate: só aparece quando há trecho transcrito e a ata não saiu — o
+       caso em que a geração automática falhou. Sem ele a reunião fica com o
+       áudio transcrito e nenhum caminho para a ata. #}
+    {% if estado.ok and not estado.tem_ata %}
+    <form method="post" action="{{ url_for('dash.reuniao_ata', reuniao_id=reuniao.id) }}"
+          style="margin-top:12px;">
+      <button class="btn sec" type="submit">Gerar ata dos {{ estado.ok }} trecho(s) já transcritos</button>
+    </form>
+    {% endif %}
+    {% if estado.erro_msg %}<div class="aviso-erro">{{ estado.erro_msg }}</div>{% endif %}
+    {% endif %}
+
     {% if reuniao.notas %}<p style="margin:14px 0 0;"><span class="l">Notas gerais</span><br>{{ reuniao.notas }}</p>{% endif %}
   </div>
 </div>
@@ -54,54 +96,6 @@
       </div>
     </div>
     {% endfor %}
-  </div>
-</div>
-{% endif %}
-
-{# Gravação — só para quem conduz e só enquanto a reunião está aberta.
-   O recorte é do servidor: para os demais este bloco não existe no HTML. #}
-{% if conduz and not reuniao.encerrada_em %}
-<div class="card gravador" id="gravador" style="margin-top:16px;">
-  <div class="card-h"><span>Gravação</span></div>
-  <div class="card-b">
-
-    {# Um controle só: o botão da esquerda cicla Gravar / Pausar / Retomar, e
-       Concluir aparece dentro da mesma pílula depois que a captura começa.
-       Concluir gera a ata sozinho — não existe botão de "gerar ata" no fluxo
-       normal. O que sobrou embaixo é resgate, para quando a geração falhar. #}
-    <div class="grav-pill" id="g-pill" data-estado="parado">
-      <button class="grav-primario" type="button" id="g-primario">
-        <span class="grav-icone" id="g-icone"></span>
-        <span id="g-rotulo">Gravar</span>
-      </button>
-      <span class="grav-tempo" id="g-relogio">00:00</span>
-      <div class="grav-onda" id="g-onda" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-      <button class="grav-fim" type="button" id="g-concluir">Concluir</button>
-    </div>
-
-      {% if estado.ok %}
-      {# Regera a ata a partir da transcrição que já existe. NÃO transcreve o
-         áudio de novo — depois de 30 dias o áudio nem existe mais. #}
-      <form method="post" action="{{ url_for('dash.reuniao_ata', reuniao_id=reuniao.id) }}"
-            style="display:inline;">
-        <button class="grav-secundario" type="submit" title="Reescreve a ata a partir da transcrição já existente">
-          Gerar ata novamente
-        </button>
-      </form>
-      {% endif %}
-
-    <div class="grav-status" id="g-estado"></div>
-    <div id="g-aviso" class="aviso-erro" style="display:none;"></div>
-
-    {# Resgate: só aparece quando há trecho transcrito e a ata não saiu — que é
-       o caso em que a geração automática falhou. #}
-    {% if estado.ok and not estado.tem_ata %}
-    <form method="post" action="{{ url_for('dash.reuniao_ata', reuniao_id=reuniao.id) }}"
-          style="margin-top:12px;">
-      <button class="btn sec" type="submit">Gerar ata dos {{ estado.ok }} trecho(s) já transcritos</button>
-    </form>
-    {% endif %}
-    {% if estado.erro_msg %}<div class="aviso-erro">{{ estado.erro_msg }}</div>{% endif %}
   </div>
 </div>
 {% endif %}

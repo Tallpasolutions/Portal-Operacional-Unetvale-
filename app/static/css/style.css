@@ -317,7 +317,25 @@ tr.clicavel{ cursor:pointer; }
    aparecendo só depois que a captura começa. Quem decide o que se vê é o
    atributo `data-estado`, escrito pelo JS — nada de classe solta. */
 .grav-pill{ display:inline-flex; align-items:center; gap:12px; padding:6px 6px 6px 8px;
-  background:var(--fundo); border:1px solid var(--borda-2); border-radius:999px; }
+  background:var(--fundo); border:1px solid var(--borda-2); border-radius:999px;
+  /* Dentro da ficha o espaço é de uma coluna: quebra em vez de escapar. */
+  flex-wrap:wrap; max-width:100%; }
+
+/* A ficha da reunião tem seis coisas numa linha só, e a última é a gravação —
+   ela não é cartão à parte, é uma propriedade da reunião como a data.
+   Colunas explícitas, e não `auto-fit`: com `auto-fit` a sexta trilha colapsa
+   por estar "vazia" (o conteúdo dela é um item que ocupa duas) e a pílula cai
+   para a linha de baixo. As cinco primeiras se ajustam ao conteúdo; a
+   gravação fica com o que sobrar, que é o que ela precisa ao crescer durante
+   a captura. */
+.ficha-reuniao{ grid-template-columns:repeat(5,minmax(90px,auto)) minmax(150px,1fr);
+  align-items:start; }
+
+/* Abaixo de 820px empilha: seis colunas numa tela estreita viram seis fatias
+   ilegíveis. */
+@media (max-width:820px){
+  .ficha-reuniao{ grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); }
+}
 
 .grav-primario, .grav-fim{ display:inline-flex; align-items:center; gap:8px; border:none;
   border-radius:999px; padding:9px 16px; font-size:13.5px; font-weight:600;
@@ -356,7 +374,8 @@ tr.clicavel{ cursor:pointer; }
 [data-estado="parado"] .grav-fim{ display:none; }
 [data-estado="pausado"] .grav-onda i{ background:var(--muted-l); }
 
-.grav-status{ font-size:12.5px; color:var(--muted); margin-top:10px; min-height:17px; }
+.grav-status{ font-size:12.5px; color:var(--muted); margin-top:14px; min-height:0; }
+.grav-status:empty{ margin-top:0; }
 
 /* Gravando: borda vermelha pulsando no cartão. Discrição aqui seria defeito,
    não qualidade — é o aviso de que o microfone está aberto. */
@@ -388,13 +407,6 @@ tr.clicavel{ cursor:pointer; }
 .ata em{ color:var(--muted); font-style:normal; font-size:12.5px; }
 
 /* ---------- Ata: ações, edição e impressão ------------------------------- */
-.grav-secundario{ background:transparent; border:1px solid var(--borda-2); color:var(--muted);
-  border-radius:999px; padding:8px 14px; font-size:12.5px; font-weight:600; cursor:pointer;
-  margin-left:10px; vertical-align:middle; }
-.grav-secundario:hover{ background:#fff; color:var(--brand-d); border-color:var(--brand); }
-
-/* Discretos de propósito: a ata é para ler, e três botões azuis competindo com
-   o texto era o que estava feio. */
 .ata-rodape{ display:flex; align-items:center; gap:12px; margin-top:16px;
   padding-top:12px; border-top:1px solid var(--borda); }
 .ata-estado{ font-size:12px; color:var(--muted-l); margin-right:auto; }
