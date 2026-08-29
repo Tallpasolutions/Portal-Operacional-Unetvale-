@@ -39,18 +39,24 @@ INDICADORES = {
 }
 
 
-def _cfg_env():
+def _cfg_env(sufixo=""):
+    """Credenciais do ambiente. `sufixo` escolhe qual par usar.
+
+    Existem dois porque o WVSA recorta relatorio POR USUARIO, e nem sempre com
+    403: o IDF (indicadores9) devolve HTTP 200 com tudo zerado para quem nao
+    tem o recorte. Ver `login_gestor`.
+    """
     base = os.environ.get("W8_BASE", "https://wvsa8.unetvale.com.br")
-    user = os.environ.get("W8_USER")
-    pwd = os.environ.get("W8_PASS")
+    user = os.environ.get(f"W8_USER{sufixo}")
+    pwd = os.environ.get(f"W8_PASS{sufixo}")
     if not user or not pwd:
-        raise RuntimeError("W8_USER / W8_PASS nao configurados (.env)")
+        raise RuntimeError(f"W8_USER{sufixo} / W8_PASS{sufixo} nao configurados (.env)")
     return base, user, pwd
 
 
-def login():
+def login(sufixo=""):
     """Retorna uma requests.Session autenticada."""
-    base, user, pwd = _cfg_env()
+    base, user, pwd = _cfg_env(sufixo)
     s = requests.Session()
     s.headers.update({"User-Agent": "Mozilla/5.0 (IQI-bot)"})
     r = s.get(base + "/login", timeout=30)
@@ -61,9 +67,30 @@ def login():
                 data={"_token": m.group(1), "username": user, "password": pwd},
                 allow_redirects=True, timeout=30)
     if "/login" in r2.url:
-        raise RuntimeError("Falha no login (usuario/senha incorretos?)")
+        raise RuntimeError(f"Falha no login de {user} (usuario/senha incorretos?)")
     s.base = base
+    # Guardado para a mensagem de erro do coletor dizer QUAL das duas sessoes
+    # falhou. Com duas credenciais em jogo, "falha no login" sozinho manda
+    # conferir a senha errada.
+    s.usuario = user
     return s
+
+
+def login_gestor():
+    """Sessao do usuario gestor (W8_USER_GESTOR / W8_PASS_GESTOR).
+
+    Necessaria para dois relatorios, e as duas recusas tem cara diferente:
+
+      * `/relatorios/operacional15` (salas do Rocketchat) devolve HTTP 403
+        limpo para quem nao tem acesso;
+      * `/relatorios/indicadores9` (IDF) devolve HTTP **200 com tudo zerado**.
+
+    Medido em 29/08/2026, mesmo endpoint e mesmo periodo (01-29/08): o usuario
+    comum recebeu "Sem dados" nos tres canais; o gestor, Ligacoes 211 (nota
+    4.58), Chats 1087 (4.48) e OS 297 (4.51). O segundo caso e o perigoso —
+    sem esta sessao o coletor gravaria zeros e reportaria sucesso.
+    """
+    return login("_GESTOR")
 
 
 def listar_tecnicos(s, cfg):

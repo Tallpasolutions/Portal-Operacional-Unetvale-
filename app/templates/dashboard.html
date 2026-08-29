@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · Unetvale{% endblock %}
+{% block page_title %}Dashboard — Visão Gerencial{% endblock %}
+{% block content %}
+
+{# Uma página só, sem sub-abas: a leitura gerencial é a soma dos blocos, e
+   dividi-la em abas obrigaria a trocar de tela para relacionar reincidência
+   com cancelamento — que é justamente a relação que interessa. A ordem
+   desce do indicador para a causa: qualidade, causa raiz, churn, fila,
+   atendimento. #}
+
+<h3 class="secao">Qualidade · reincidência</h3>
+<div class="grid charts-2" style="margin-bottom:8px;">
+  <div class="card">
+    <div class="card-h"><span>IQI · instalação</span><span class="subnote" style="margin:0" id="iqi-meta"></span></div>
+    <div class="card-b">
+      <div class="par-mes" id="iqi-par"></div>
+      <div class="chart-box" style="height:170px;margin-top:14px;"><canvas id="g-iqi-serie"></canvas></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-h"><span>IQM · manutenção</span><span class="subnote" style="margin:0" id="iqm-meta"></span></div>
+    <div class="card-b">
+      <div class="par-mes" id="iqm-par"></div>
+      <div class="chart-box" style="height:170px;margin-top:14px;"><canvas id="g-iqm-serie"></canvas></div>
+    </div>
+  </div>
+</div>
+
+<h3 class="secao">Causa raiz da reincidência</h3>
+<p class="subnote">
+  Categoria 4 é a causa real após análise interna; Categoria 5 é o detalhe dela.
+  <b>Falha Massiva entra no ranking</b> — é a segunda maior causa e o relatório do WVSA a esconde por padrão.
+  Para cruzar com empresa, equipe ou supervisor, use a visualização
+  <a href="{{ url_for('dash.iqi') }}">Causa raiz do IQI/IQM</a>.
+</p>
+<div class="toolbar">
+  <label>Indicador <span class="view-switch" id="cr-ind">
+    <button data-ind="IQI">IQI</button><button data-ind="IQM">IQM</button></span></label>
+  <label>Mês <select id="cr-mes"></select></label>
+  <div class="kpi" style="padding:8px 14px;"><span class="l">Reincidências no mês</span> <b class="v" id="cr-total" style="font-size:18px;">0</b></div>
+</div>
+<div class="grid charts-2" style="margin-bottom:16px;">
+  <div class="card"><div class="card-h">Categoria 4 · causa real</div>
+    <div class="card-b"><div class="rank" id="cr-cat4"></div></div></div>
+  <div class="card"><div class="card-h">Categoria 5 · detalhe da causa</div>
+    <div class="card-b"><div class="rank" id="cr-cat5"></div></div></div>
+</div>
+<div class="grid charts-2" style="margin-bottom:16px;">
+  <div class="card"><div class="card-h">Categoria 1 · motivo declarado pelo cliente</div>
+    <div class="card-b"><div class="rank" id="cr-cat1"></div></div></div>
+  <div class="card"><div class="card-h">Categoria 2 · encerramento do N1</div>
+    <div class="card-b"><div class="rank" id="cr-cat2"></div></div></div>
+</div>
+<div class="card"><div class="card-h">Onde concentra</div>
+  <div class="card-b"><div class="rank" id="cr-cidades"></div></div></div>
+
+<h3 class="secao">Cancelamentos · churn válido</h3>
+<p class="subnote">Somente cancelamentos <b>válidos para o churn</b> (o mesmo recorte do ICP).
+  O CMT é a fatia do grupo PROBLEMA TECNICO.</p>
+<div class="grid charts-2" style="margin-bottom:16px;">
+  <div class="card">
+    <div class="card-h"><span>CMT · cancelamento por motivo técnico</span></div>
+    <div class="card-b">
+      <div class="par-mes" id="cmt-par"></div>
+      <div class="rank" id="cmt-motivos" style="margin-top:14px;"></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-h"><span>Por grupo de motivo</span><span class="subnote" style="margin:0" id="ca-quando"></span></div>
+    <div class="card-b"><div class="rank" id="ca-grupos"></div></div>
+  </div>
+</div>
+<div class="toolbar">
+  <label>Mês <select id="ca-mes"></select></label>
+  <div class="kpi" style="padding:8px 14px;"><span class="l">Cancelamentos</span> <b class="v" id="ca-total" style="font-size:18px;">0</b></div>
+  <div class="kpi" style="padding:8px 14px;"><span class="l">Motivo técnico</span> <b class="v" id="ca-tec" style="font-size:18px;color:var(--danger);">0</b></div>
+  <div class="kpi" style="padding:8px 14px;"><span class="l">Receita perdida</span> <b class="v" id="ca-valor" style="font-size:18px;">—</b></div>
+</div>
+<div class="grid charts-2" style="margin-bottom:16px;">
+  <div class="card"><div class="card-h">Por cidade</div><div class="card-b"><div class="rank" id="ca-cidades"></div></div></div>
+  <div class="card"><div class="card-h">Tempo de casa</div><div class="card-b"><div class="rank" id="ca-casa"></div></div></div>
+</div>
+<div class="card"><div class="card-h">Faixa de ticket</div>
+  <div class="card-b"><div class="rank" id="ca-ticket"></div></div></div>
+
+<h3 class="secao">Esteira de agendamento</h3>
+<p class="subnote">
+  <b>Esteira útil</b> = fila sem as retiradas. Retirada é equipamento a recolher de quem já cancelou —
+  somada ao resto, ela domina a fila e esconde o que a operação consegue atacar.
+</p>
+<div class="kpis" id="es-kpis"></div>
+<div class="card" style="margin-bottom:16px;">
+  <div class="card-h"><span>Movimento do dia</span><span class="subnote" style="margin:0" id="es-mov-quando"></span></div>
+  <div class="card-b"><div class="kpis" id="es-mov" style="margin-bottom:0;"></div></div>
+</div>
+<div class="grid charts-2">
+  <div class="card"><div class="card-h">Por finalidade</div><div class="card-b"><div class="rank" id="es-fin"></div></div></div>
+  <div class="card"><div class="card-h">Por cidade</div><div class="card-b"><div class="rank" id="es-cid"></div></div></div>
+</div>
+
+<h3 class="secao">Atendimento · IDF e salas</h3>
+<p class="subnote">Nota de 0 a 5 dos feedbacks. O contraste mostra o ofensor: quanto do volume
+  saiu <b>sem a solicitação resolvida</b> (em OS, sem a internet funcionando).</p>
+<div class="kpis" id="idf-kpis"></div>
+<div class="grid charts-2">
+  <div class="card">
+    <div class="card-h"><span>Resolvido × não resolvido</span><span class="subnote" style="margin:0" id="idf-mes"></span></div>
+    <div class="card-b"><div id="idf-reguas"></div>
+      <div class="tm-legenda subnote" style="margin-top:10px;">
+        <span><span class="leg-dot ok"></span> resolvido</span>
+        <span><span class="leg-dot fora"></span> não resolvido</span>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-h"><span>Salas · Solicitações Rocketchat</span></div>
+    <div class="card-b"><div class="kpis" id="salas-kpis" style="margin-bottom:0;"></div>
+      <div class="rank" id="salas-tipos" style="margin-top:14px;"></div></div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>window.__DASH__ = {{ pacote|tojson }};</script>
+<script src="{{ url_for('static', filename='js/dashboard_rank.js') }}"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}

@@ -166,6 +166,30 @@
       body = `<tr><td class="sticky-col">—</td><td colspan="${meses.length * 3}" style="text-align:center;color:var(--muted);padding:24px;">Nenhum técnico para os filtros selecionados.</td></tr>`;
     }
     document.getElementById("tab-mensal").innerHTML = `<thead><tr>${h1}</tr><tr>${h2}</tr></thead><tbody>${body}</tbody>`;
+    publicar();
+  }
+
+  /** Estado dos filtros desta visualização, para os blocos abaixo da tabela.
+   *
+   * A Causa raiz fica na mesma página e usa estes mesmos chips: supervisor,
+   * empresa e período. Dois conjuntos de filtros na mesma tela deixariam
+   * alguém ler a causa raiz de uma equipe ao lado da tabela de outra.
+   *
+   * `meses` sai em "AAAA-MM" porque é assim que o payload das categorias
+   * indexa; aqui dentro eles são "MM/AAAA", que é o formato do IQI/IQM.
+   */
+  function publicar() {
+    document.dispatchEvent(new CustomEvent("iqifiltrotabela", { detail: {
+      ind: indAtual,
+      alcanceSup: alcanceSup,
+      empresas: [...empresasSel],
+      meses: mesesExibidos().map((m) => { const [mm, aa] = m.split("/"); return `${aa}-${mm}`; }),
+      // Quais meses estão fechados, pela MESMA regra da tabela (fim do mês +
+      // 30 dias de auditoria). Sem repassar, a Causa raiz marcaria só o
+      // último como parcial e julho apareceria fechado no dia 29 de agosto.
+      fechados: mesesExibidos().filter(mesFechado)
+        .map((m) => { const [mm, aa] = m.split("/"); return `${aa}-${mm}`; }),
+    } }));
   }
 
   // Segue o indicador do seletor compartilhado (#indToggle do iqi.js), sem alterá-lo.
@@ -178,12 +202,14 @@
     renderFiltros(); renderTabela();
   });
 
-  // Alterna entre as visualizações (grafico | tabela | ofensores). Avisa as
-  // demais via evento "iqiview" para renderizarem ao serem exibidas.
+  // Alterna entre as DUAS visualizações. Ofensores e Por empresa moram dentro
+  // do Gráfico; a Causa raiz, dentro da Tabela mensal. O evento "iqiview" avisa
+  // os blocos de dentro para renderizarem ao serem exibidos — canvas e tabela
+  // medidos com a página oculta saem com tamanho zero.
   sw.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
     sw.querySelectorAll("button").forEach((x) => x.classList.toggle("active", x === b));
     const v = b.dataset.view;
-    ["grafico", "tabela", "ofensores", "empresas"].forEach((nome) => {
+    ["grafico", "tabela"].forEach((nome) => {
       const el = document.getElementById("view-" + nome);
       if (el) el.hidden = nome !== v;
     });

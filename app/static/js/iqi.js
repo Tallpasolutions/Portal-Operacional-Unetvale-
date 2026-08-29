@@ -39,6 +39,20 @@
     }));
   }
 
+  /** Estado do filtro único da visualização Gráfico.
+   *
+   * Ofensores e Por empresa ficam abaixo do gráfico, na mesma página, e
+   * seguem estes valores em vez de terem seletor próprio: dois seletores de
+   * mês na mesma tela é a receita para alguém ler o ofensor de julho ao lado
+   * do gráfico de agosto e não perceber.
+   */
+  function publicar() {
+    if (!DATA) return;
+    document.dispatchEvent(new CustomEvent("iqifiltro", { detail: {
+      ind: IND, mesIdx: mesIdx, mes: DATA.meses[mesIdx], alcanceSup: alcanceSup,
+    } }));
+  }
+
   function aplicar(data) {
     DATA = data; MINOS = data.minOS; IND = data.indicador || IND;
     document.getElementById("tituloGrafico").textContent = IND;
@@ -66,6 +80,7 @@
     sel.value = def; mesIdx = def;
     selecionado = null;
     desenhar();
+    publicar();
   }
 
   function desenhar() {
@@ -238,7 +253,9 @@
     desenhar();
   }));
 
-  document.getElementById("mes").addEventListener("change", (e) => { mesIdx = +e.target.value; selecionado = null; desenhar(); });
+  document.getElementById("mes").addEventListener("change", (e) => {
+    mesIdx = +e.target.value; selecionado = null; desenhar(); publicar();
+  });
   document.getElementById("metaInput").addEventListener("input", (e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v > 0) { META = v; desenhar(); } });
   document.querySelectorAll("#tab-iqi thead th").forEach((th) => th.addEventListener("click", () => {
     const k = th.dataset.key; if (tableSort.key === k) tableSort.dir *= -1; else { tableSort.key = k; tableSort.dir = 1; } desenhar();
@@ -257,11 +274,26 @@
 
   aplicar(PACOTE[inds[0]]);
 
+  // Republica quando o documento termina de carregar.
+  //
+  // Os blocos Ofensores e Por empresa são <script> que vêm DEPOIS deste, então
+  // o `publicar()` de dentro do `aplicar()` acima roda antes de eles existirem
+  // e cai no vazio — as duas tabelas nasciam vazias até o primeiro clique em
+  // algum filtro. `setTimeout(…, 0)` não resolve: o timer pode ser atendido
+  // entre dois <script> da mesma página, que foi exatamente o que aconteceu.
+  // `DOMContentLoaded` só dispara depois do último script síncrono.
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", publicar);
+  } else {
+    publicar();
+  }
+
   // Filtro por supervisor (visão Gráfico).
   if (window.__iqiSupervisor) {
     window.__iqiSupervisor.popular("sup-grafico", (alcance) => {
       alcanceSup = alcance;
       desenhar();   // nesta visão a função de redesenho chama-se `desenhar`
+      publicar();
     }, () => (DATA && DATA.tecnicos) || []);
   }
 

@@ -7,10 +7,14 @@
 //
 // Ao selecionar mais de uma empresa, a linha de rodapé traz o consolidado das
 // selecionadas, pela mesma fórmula (soma de reincidências ÷ soma de OSs).
+//
+// Fica DENTRO da visualização Gráfico, abaixo dela. Mês, indicador e
+// supervisor vêm do evento `iqifiltro` (iqi.js) em vez de seletores próprios —
+// os chips de empresa continuam aqui porque refinam só este bloco e não têm
+// equivalente no filtro de cima.
 (function () {
   const PACOTE = window.__PACOTE__ || {};
   if (!document.getElementById("view-empresas") || !Object.keys(PACOTE).length) return;
-  const SUPERVISORES = window.__SUPERVISORES__ || [];
 
   const inds = Object.keys(PACOTE);
   let IND = inds[0];
@@ -74,29 +78,6 @@
       `<button class="fchip ${selecionadas.has(l.empresa) ? "on" : ""}" data-emp="${l.empresa}">${l.empresa}</button>`
     ).join("");
 
-    $("emp-supervisores").innerHTML = SUPERVISORES.length
-      ? SUPERVISORES.map((s) => {
-          const partes = [];
-          if (s.equipes && s.equipes.length) partes.push(s.equipes.join(", "));
-          if (s.tecnicos && s.tecnicos.length) partes.push(`${s.tecnicos.length} tecnico(s) avulso(s)`);
-          const on = alcanceSup && alcanceSup.id === s.id ? " on" : "";
-          return `<button class="fchip${on}" data-sup="${s.id}" title="${partes.join(" + ") || "sem vinculo"}">${s.nome}</button>`;
-        }).join("")
-      : `<span style="font-size:12.5px;color:var(--muted)">nenhum supervisor com equipe vinculada — cadastre em Configurações</span>`;
-  }
-
-  /** Diz por que o recorte ficou vazio; tabela em branco parece defeito. */
-  function notaSupervisor() {
-    const box = $("emp-supervisores");
-    if (!box || !window.__iqiSupervisor) return;
-    let nota = box.parentNode.querySelector(".nota-sup");
-    if (!nota) {
-      nota = document.createElement("div");
-      nota.className = "subnote nota-sup";
-      nota.style.cssText = "flex-basis:100%;margin:2px 0 0";
-      box.insertAdjacentElement("afterend", nota);
-    }
-    nota.textContent = window.__iqiSupervisor.aviso(alcanceSup, DADOS().tecnicos) || "";
   }
 
   function renderKpis(linhas) {
@@ -216,48 +197,19 @@
     render(false);
   });
 
-  $("emp-supervisores").addEventListener("click", (e) => {
-    const b = e.target.closest("button[data-sup]");
-    if (!b) return;
-    // Clicar no supervisor recorta pelo time dele; clicar de novo no mesmo
-    // limpa. Os chips de empresa são zerados junto, porque a lista de
-    // empresas muda com o recorte.
-    const jaEra = b.classList.contains("on");
-    alcanceSup = jaEra ? null : window.__iqiSupervisor.alcanceDe(b.dataset.sup);
-    if (alcanceSup) alcanceSup.id = b.dataset.sup;
-    selecionadas.clear();
-    render();
-    notaSupervisor();
-  });
-
-  // ---- seletores próprios (mesmo padrão das outras visões independentes) ---
-  function montarControles() {
-    const d = DADOS();
-    const selMes = $("emp-mes");
-    selMes.innerHTML = d.meses.map((m, i) =>
-      `<option value="${i}">${m}${mesFechado(m) ? "" : " (Parcial)"}</option>`).join("");
-    mesIdx = Math.min(mesIdx || d.meses.length - 1, d.meses.length - 1);
-    selMes.value = mesIdx;
-
-    $("emp-ind").innerHTML = inds.map((i) =>
-      `<button data-ind="${i}" class="${i === IND ? "active" : ""}">${i}</button>`).join("");
-  }
-
-  $("emp-mes").addEventListener("change", (e) => { mesIdx = Number(e.target.value); render(); });
-  $("emp-ind").addEventListener("click", (e) => {
-    const b = e.target.closest("button[data-ind]");
-    if (!b) return;
-    IND = b.dataset.ind;
-    selecionadas.clear();
-    alcanceSup = null;
-    montarControles();
+  // Mês, indicador e supervisor vêm do filtro único da página (iqi.js).
+  document.addEventListener("iqifiltro", (e) => {
+    const trocouInd = e.detail.ind && e.detail.ind !== IND;
+    IND = e.detail.ind || IND;
+    mesIdx = Math.min(e.detail.mesIdx, DADOS().meses.length - 1);
+    alcanceSup = e.detail.alcanceSup;
+    // Trocar de indicador zera os chips: a lista de empresas com volume muda
+    // entre IQI e IQM, e um chip que sobrou de outra visão vira recorte vazio.
+    if (trocouInd) selecionadas.clear();
     render();
   });
 
-  // Renderiza ao entrar na visão: o canvas mede 0 enquanto está oculto.
-  document.addEventListener("iqiview", (e) => {
-    if (e.detail !== "empresas") return;
-    montarControles();
-    render();
-  });
+  // Renderiza ao entrar na visão que contém este bloco: o canvas mede 0
+  // enquanto está oculto, e um gráfico desenhado assim não se recupera.
+  document.addEventListener("iqiview", (e) => { if (e.detail === "grafico") render(); });
 })();

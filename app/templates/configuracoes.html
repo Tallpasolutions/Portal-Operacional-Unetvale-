@@ -200,6 +200,50 @@
     {% endif %}
   </div>
 </div>
+<h3 class="secao" id="metas-dashboard">Metas do Dashboard</h3>
+<p class="subnote">
+  Campo em branco significa <b>meta não definida</b>: o card mostra o número e omite a
+  comparação, em vez de medir contra um alvo que ninguém combinou.
+</p>
+<div class="card" style="margin-bottom:16px;">
+  <div class="card-h">Exibição</div>
+  <div class="card-b">
+    <form method="post" action="{{ url_for('dash.dashboard_config') }}" class="toolbar" style="margin:0;">
+      <label>Meses comparados nos cards
+        <input type="number" name="meses_visiveis" min="1" max="24" style="width:90px;"
+               value="{{ meses_visiveis }}">
+      </label>
+      <button class="btn" type="submit">Salvar</button>
+      <span class="subnote" style="flex-basis:100%;margin:4px 0 0;">
+        O coletor guarda de <b>janeiro do ano corrente</b> até o mês atual; isto é só quanto a tela
+        mostra lado a lado. O último mês sempre aparece como <b>parcial</b> — a janela de
+        reincidência dele ainda não fechou.
+      </span>
+    </form>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:22px;">
+  <div class="card-h">Metas por indicador</div>
+  <div class="card-b">
+    <form method="post" action="{{ url_for('dash.dashboard_metas') }}">
+      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr));">
+        {% for m in metas_conhecidas %}
+        <div class="field">
+          <label for="meta-{{ m.chave }}">{{ m.rotulo }}
+            <span class="badge badge-cinza">{{ 'quanto menor, melhor' if m.direcao == 'menor' else 'quanto maior, melhor' }}</span>
+          </label>
+          <input type="text" inputmode="decimal" id="meta-{{ m.chave }}" name="meta-{{ m.chave }}"
+                 placeholder="sem meta"
+                 value="{{ (metas_dashboard.get(m.chave) or {}).get('valor') or '' }}">
+        </div>
+        {% endfor %}
+      </div>
+      <button class="btn" type="submit">Salvar metas</button>
+    </form>
+  </div>
+</div>
+
 <h3 class="secao">Ações</h3>
 <p class="subnote">
   Áreas e gestores do módulo <b>Ações</b>. Ficam aqui, e não dentro do módulo, para que

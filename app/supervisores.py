@@ -37,6 +37,18 @@ APELIDOS_EMPRESA = {
 }
 
 
+# Equipes de infraestrutura NÃO participam do IQI/IQM — é regra de negócio, e
+# a mesma regra vale no Dashboard. Mora aqui, ao lado de APELIDOS_EMPRESA, pelo
+# mesmo motivo: duas cópias divergem na primeira empresa nova e passam a contar
+# populações diferentes em telas que se citam. Supervisor de infra
+# legitimamente vê zero no indicador.
+_INFRA = re.compile(r"\binfra\b|fandaruff", re.I)
+
+
+def eh_infra(rotulo):
+    return bool(_INFRA.search(rotulo or ""))
+
+
 def empresa_de(rotulo):
     """Empresa a partir de "EMPRESA - Nome", já com o apelido resolvido."""
     i = (rotulo or "").find(" - ")

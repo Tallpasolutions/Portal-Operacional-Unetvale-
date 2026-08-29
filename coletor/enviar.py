@@ -6,6 +6,7 @@ Reaproveita os scripts originais SEM mudar a lógica de negócio:
   - extrator.py    -> Produtividade (mantém SQLite local p/ histórico incremental)
   - w8_client.py   -> IQI / IQM
   - fetch_wvsa.py  -> Massivas (model.json)
+  - gerencial.py   -> Dashboard (5 relatórios da visão gerencial)
 
 Cada módulo vira um upsert na tabela `dados_modulo` (modulo, payload, status).
 Agende com cron às 08/10/12/14/16/18h (ver README).
@@ -13,7 +14,11 @@ Agende com cron às 08/10/12/14/16/18h (ver README).
 Uso:
   python enviar.py                 # todos os módulos (incremental)
   python enviar.py --full          # reconstrói o histórico da Produtividade
-  python enviar.py --so iqi        # roda só um módulo (produtividade|iqi|massivas)
+  python enviar.py --so iqi        # roda só um módulo (veja MODULOS)
+
+Os módulos `ger_*` alimentam o Dashboard. Dois deles (`ger_idf`, `ger_salas`)
+usam a SEGUNDA sessão do WVSA (W8_USER_GESTOR), porque o relatório é recortado
+por usuário — e o IDF recorta devolvendo 200 com tudo zerado, não 403.
 """
 import argparse
 import json
@@ -63,6 +68,43 @@ def supa_upsert(modulo, payload, status="ok"):
     )
     r.raise_for_status()
     log(f"  -> Supabase: {modulo} ({status})")
+
+
+def supa_ler(modulo):
+    """Payload atual do módulo, ou None.
+
+    Serve ao merge incremental: a rodada normal recoleta só o mês corrente e o
+    anterior, mas o payload precisa continuar com os meses do backfill. Sem
+    isto, cada rodada apagaria o histórico e o gráfico de 13 meses viraria de
+    dois.
+    """
+    url = os.environ["SUPABASE_URL"].rstrip("/")
+    key = os.environ["SUPABASE_SERVICE_KEY"]
+    try:
+        r = requests.get(
+            f"{url}/rest/v1/dados_modulo",
+            params={"modulo": f"eq.{modulo}", "select": "payload"},
+            headers={"apikey": key, "Authorization": f"Bearer {key}"},
+            timeout=30,
+        )
+        r.raise_for_status()
+        linhas = r.json()
+        return (linhas[0].get("payload") if linhas else None) or None
+    except Exception as e:
+        log(f"  !! não consegui ler o payload anterior de {modulo}: {e}")
+        return None
+
+
+def supa_inserir(tabela, registro):
+    url = os.environ["SUPABASE_URL"].rstrip("/")
+    key = os.environ["SUPABASE_SERVICE_KEY"]
+    r = requests.post(
+        f"{url}/rest/v1/{tabela}",
+        headers={"apikey": key, "Authorization": f"Bearer {key}",
+                 "Content-Type": "application/json", "Prefer": "return=minimal"},
+        json=registro, timeout=60,
+    )
+    r.raise_for_status()
 
 
 def marcar_erro(modulo, erro):
@@ -194,10 +236,120 @@ def coletar_massivas():
 
 
 # --------------------------------------------------------------------------
+# Dashboard (visão gerencial) — 5 relatórios, 2 sessões
+# --------------------------------------------------------------------------
+# As sessões são criadas UMA vez por execução e reaproveitadas pelos cinco
+# módulos: cada login é um round-trip e o WVSA não gosta de sequência de
+# autenticações. `_SESSOES` vive só o processo.
+_SESSOES = {}
+
+
+def _sessao(gestor=False):
+    import w8_client
+    chave = "gestor" if gestor else "padrao"
+    if chave not in _SESSOES:
+        _SESSOES[chave] = w8_client.login_gestor() if gestor else w8_client.login()
+        log(f"  sessão {chave}: {_SESSOES[chave].usuario}")
+    return _SESSOES[chave]
+
+
+def _meses(full):
+    import gerencial as g
+    return g.meses_do_backfill() if full else g.meses_da_rodada()
+
+
+def coletar_ger_categorias(full=False):
+    import gerencial as g
+    supa_upsert("ger_categorias", g.coletar_categorias(
+        _sessao(), _meses(full), anterior=supa_ler("ger_categorias")))
+
+
+def coletar_ger_cancelamentos(full=False):
+    import gerencial as g
+    supa_upsert("ger_cancelamentos", g.coletar_cancelamentos(
+        _sessao(), _meses(full), anterior=supa_ler("ger_cancelamentos")))
+
+
+def coletar_ger_idf(full=False):
+    import gerencial as g
+    supa_upsert("ger_idf", g.coletar_idf(
+        _sessao(gestor=True), _meses(full), anterior=supa_ler("ger_idf")))
+
+
+def coletar_ger_salas(full=False):
+    import gerencial as g
+    supa_upsert("ger_salas", g.coletar_salas(_sessao(gestor=True)))
+
+
+def coletar_ger_esteira(full=False):
+    """Foto da fila AGORA + uma linha no histórico.
+
+    As duas coisas são necessárias e são diferentes: `dados_modulo` responde
+    "como está a fila", e o histórico responde "quantas entraram e quantas
+    saíram desde a abertura" — que é diferença entre duas fotos.
+    """
+    import gerencial as g
+    dados = g.coletar_esteira(_sessao())
+    supa_upsert("ger_esteira", dados)
+    gravar_snapshot_esteira(dados)
+    expurgar_snapshots()
+
+
+def gravar_snapshot_esteira(dados):
+    """Uma linha por coleta. A primeira do dia é a `abertura`.
+
+    A migration tem índice único parcial em (dia) where abertura, então uma
+    segunda rodada às 08h (retry após queda de rede) não cria uma segunda
+    abertura — o insert falha e caímos para `abertura=false`. Sem isso o
+    entrou/saiu passaria a comparar contra a foto errada, sem erro na tela.
+    """
+    from datetime import date
+    hoje = date.today().isoformat()
+    linha = {
+        "dia": hoje, "total": dados["total"],
+        "por_finalidade": dados["por_finalidade"], "oss": dados["oss"],
+    }
+    try:
+        supa_inserir("dashboard_esteira_snapshot", {**linha, "abertura": True})
+        log("  -> snapshot da esteira gravado (abertura do dia)")
+        return
+    except Exception:
+        pass
+    try:
+        supa_inserir("dashboard_esteira_snapshot", {**linha, "abertura": False})
+        log("  -> snapshot da esteira gravado")
+    except Exception as e:
+        log(f"  !! snapshot da esteira não gravou: {e}")
+
+
+def expurgar_snapshots(dias=90):
+    """Best-effort. O painel olha o dia corrente; o resto é histórico curto."""
+    from datetime import date, timedelta
+    corte = (date.today() - timedelta(days=dias)).isoformat()
+    try:
+        url = os.environ["SUPABASE_URL"].rstrip("/")
+        key = os.environ["SUPABASE_SERVICE_KEY"]
+        requests.delete(
+            f"{url}/rest/v1/dashboard_esteira_snapshot",
+            params={"dia": f"lt.{corte}"},
+            headers={"apikey": key, "Authorization": f"Bearer {key}",
+                     "Prefer": "return=minimal"},
+            timeout=30,
+        )
+    except Exception:
+        pass
+
+
+# --------------------------------------------------------------------------
 MODULOS = {
     "produtividade": coletar_produtividade,
     "iqi": coletar_iqi,
     "massivas": coletar_massivas,
+    "ger_categorias": coletar_ger_categorias,
+    "ger_cancelamentos": coletar_ger_cancelamentos,
+    "ger_esteira": coletar_ger_esteira,
+    "ger_idf": coletar_ger_idf,
+    "ger_salas": coletar_ger_salas,
 }
 
 
@@ -214,7 +366,9 @@ def wvsa_alcancavel():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--full", action="store_true", help="reconstrói o histórico da Produtividade")
+    ap.add_argument("--full", action="store_true",
+                    help="reconstrói o histórico: Produtividade do zero e os "
+                         "13 meses dos módulos ger_* (demorado, ~125 MB)")
     ap.add_argument("--so", choices=list(MODULOS), help="roda apenas um módulo")
     args = ap.parse_args()
 
@@ -229,8 +383,10 @@ def main():
     falhas = 0
     for modulo in alvos:
         try:
-            if modulo == "produtividade":
-                coletar_produtividade(full=args.full)
+            if modulo == "produtividade" or modulo.startswith("ger_"):
+                # Estes aceitam `full`: para a Produtividade é recriar o SQLite,
+                # para os `ger_*` é o backfill dos 13 meses.
+                MODULOS[modulo](full=args.full)
             else:
                 MODULOS[modulo]()
             log_evento(modulo, "ok", "Atualizado com sucesso")
