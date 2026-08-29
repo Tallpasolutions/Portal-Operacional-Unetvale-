@@ -321,20 +321,17 @@ tr.clicavel{ cursor:pointer; }
   /* Dentro da ficha o espaço é de uma coluna: quebra em vez de escapar. */
   flex-wrap:wrap; max-width:100%; }
 
-/* A ficha da reunião tem seis coisas numa linha só, e a última é a gravação —
-   ela não é cartão à parte, é uma propriedade da reunião como a data.
-   Colunas explícitas, e não `auto-fit`: com `auto-fit` a sexta trilha colapsa
-   por estar "vazia" (o conteúdo dela é um item que ocupa duas) e a pílula cai
-   para a linha de baixo. As cinco primeiras se ajustam ao conteúdo; a
-   gravação fica com o que sobrar, que é o que ela precisa ao crescer durante
-   a captura. */
-.ficha-reuniao{ grid-template-columns:repeat(5,minmax(90px,auto)) minmax(150px,1fr);
-  align-items:start; }
+/* A linha da reunião: dado à esquerda, estado e ação à direita.
+   Não é grid de colunas iguais — "Tipo" precisa de 70px e a lista de
+   participantes de 300, e forçar as duas na mesma medida foi o que
+   desequilibrou a linha. Flex deixa cada uma ocupar o que precisa e joga o
+   estado para a direita. */
+.reuniao-linha{ display:flex; flex-wrap:wrap; align-items:center; gap:14px 28px; }
+.reuniao-linha > div{ min-width:0; }
+.reuniao-estado{ margin-left:auto; display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
 
-/* Abaixo de 820px empilha: seis colunas numa tela estreita viram seis fatias
-   ilegíveis. */
 @media (max-width:820px){
-  .ficha-reuniao{ grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); }
+  .reuniao-estado{ margin-left:0; width:100%; }
 }
 
 .grav-primario, .grav-fim{ display:inline-flex; align-items:center; gap:8px; border:none;
@@ -382,9 +379,11 @@ tr.clicavel{ cursor:pointer; }
 .gravador.gravando,
 .gravador:has([data-estado="gravando"]){ border-color:var(--danger);
   box-shadow:0 0 0 1px var(--danger) inset; }
-.gravador.gravando .card-h::after,
-.gravador:has([data-estado="gravando"]) .card-h::after{ content:"● GRAVANDO"; margin-left:auto;
-  color:var(--danger); font-size:11.5px; font-weight:700; animation:pisca 1.6s infinite; }
+/* O aviso de microfone aberto é UM: o selo "● Gravando" na própria linha,
+   piscando. Antes havia também um `::after` no cabeçalho dizendo o mesmo — dois
+   avisos idênticos a 3cm um do outro não avisam o dobro, só poluem. */
+.gravador.gravando .badge-vermelho,
+.gravador:has([data-estado="gravando"]) .badge-vermelho{ animation:pisca 1.6s infinite; }
 @keyframes pisca{ 50%{ opacity:.35; } }
 
 .aviso-erro{ background:#fdecee; color:#b21f37; border:1px solid #f5c2cc;

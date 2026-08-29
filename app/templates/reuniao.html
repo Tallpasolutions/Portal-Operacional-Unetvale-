@@ -15,28 +15,27 @@
     {# Uma linha só com tudo o que descreve a reunião — inclusive gravar.
        A gravação não é assunto à parte: é uma propriedade desta reunião,
        como a data e os participantes. #}
-    <div class="ficha ficha-reuniao">
+    {# Dado à esquerda, estado e ação à direita. Os três da direita não levam
+       rótulo: "Em andamento", "Pronta" e "Gravar" já dizem o que são, e
+       rotular o óbvio empurrava o resto da linha para o canto. #}
+    <div class="reuniao-linha">
       <div><span class="l">Tipo</span><b>{{ 'Individual' if reuniao.tipo == 'individual' else 'Em grupo' }}</b></div>
       <div><span class="l">Data</span><b>{{ reuniao.data|replace('-', '/') }}</b></div>
       <div><span class="l">Participantes</span><b>{% for uid in reuniao.participantes %}{{ nome_usuario(uid) }}{{ ', ' if not loop.last }}{% endfor %}</b></div>
-      <div><span class="l">Status da reunião</span>
+
+      <div class="reuniao-estado">
         {% if reuniao.encerrada_em %}<span class="badge badge-cinza">Encerrada</span>
         {% else %}<span class="badge badge-verde">Em andamento</span>{% endif %}
-      </div>
-      <div><span class="l">Status da ata</span>
-        {% if estado.status == 'gravando' %}<span class="badge badge-vermelho">● Gravando</span>
-        {% elif estado.tem_ata %}<span class="badge badge-verde">Pronta</span>
-        {% elif estado.status == 'transcrevendo' %}<span class="badge badge-ambar">Pendente</span>
-        {% elif estado.status == 'erro' %}<span class="badge badge-vermelho">Falhou</span>
-        {% else %}<span class="badge badge-cinza">Sem gravação</span>{% endif %}
-      </div>
 
-      {% if conduz and not reuniao.encerrada_em %}
-      <div class="ficha-gravador">
-        <span class="l">Gravação</span>
-        {# Um controle só: o botão da esquerda cicla Gravar / Pausar / Retomar,
-           e Concluir aparece na mesma pílula depois que a captura começa.
-           Concluir gera a ata sozinho. #}
+        {% if estado.status == 'gravando' %}<span class="badge badge-vermelho">● Gravando</span>
+        {% elif estado.tem_ata %}<span class="badge badge-verde">Ata pronta</span>
+        {% elif estado.status == 'transcrevendo' %}<span class="badge badge-ambar">Ata pendente</span>
+        {% elif estado.status == 'erro' %}<span class="badge badge-vermelho">Ata falhou</span>
+        {% else %}<span class="badge badge-cinza">Sem gravação</span>{% endif %}
+
+        {% if conduz and not reuniao.encerrada_em %}
+        {# Um controle só: o botão cicla Gravar / Pausar / Retomar, e Concluir
+           aparece na mesma pílula depois que a captura começa. #}
         <div class="grav-pill" id="g-pill" data-estado="parado">
           <button class="grav-primario" type="button" id="g-primario">
             <span class="grav-icone" id="g-icone"></span>
@@ -46,8 +45,8 @@
           <div class="grav-onda" id="g-onda" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
           <button class="grav-fim" type="button" id="g-concluir">Concluir</button>
         </div>
+        {% endif %}
       </div>
-      {% endif %}
     </div>
 
     {% if conduz and not reuniao.encerrada_em %}
