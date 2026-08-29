@@ -32,6 +32,38 @@ TIMEOUT = int(os.environ.get("GROQ_TIMEOUT", "45"))
 MAX_TENTATIVAS = 3
 ESPERA_PADRAO = 4  # segundos, quando o 429 não diz Retry-After
 
+# Teto de tokens por minuto da conta. MEDIDO, não lido em tabela: o header
+# `x-ratelimit-limit-tokens` da própria API diz 8000 no tier gratuito
+# (`on_demand`); a tabela do site mostra 250000, que é do Developer Plan.
+#
+# 🚨 O `max_tokens` que reservamos para a RESPOSTA conta neste teto. Reservar
+# 8000 estourava a cota do minuto sozinho, antes de mandar uma linha de texto:
+# HTTP 413 "Request too large ... Requested 8537".
+#
+# Subiu de plano? Troque só este número — nada mais no código depende do tier.
+TPM = int(os.environ.get("GROQ_TPM", "8000"))
+
+# Margem: o teto é por MINUTO e por conta, então as transcrições e a chamada
+# anterior ainda estão consumindo. 85% deixa espaço para elas.
+ORCAMENTO = int(TPM * 0.85)
+
+# Português rende ~3,5 caracteres por token. Serve para recusar cedo, com
+# mensagem que explica, em vez de tomar 413 no meio da geração da ata.
+CHARS_POR_TOKEN = 3.5
+
+# Reserva para a resposta da ata. Exportada para que `reuniao_ia` decida o que
+# mandar usando o MESMO número — dois orçamentos separados divergem calados.
+MAX_TOKENS_ATA = 2000
+
+
+def tokens_aprox(texto):
+    return int(len(texto or "") / CHARS_POR_TOKEN)
+
+
+def cabe(texto, max_tokens):
+    """O par entrada+resposta cabe no orçamento de um minuto?"""
+    return tokens_aprox(texto) + max_tokens <= ORCAMENTO
+
 
 class IAIndisponivel(RuntimeError):
     """Falta configuração ou a Groq recusou.
@@ -139,7 +171,7 @@ def transcrever(audio, formato="audio/webm", nome="trecho.webm"):
 
 
 # ----------------------------------------------------------------- texto
-def _conversar(sistema, usuario, json_estrito=False, max_tokens=4000):
+def _conversar(sistema, usuario, json_estrito=False, max_tokens=1500):
     """Uma pergunta, uma resposta em texto. Levanta se vier vazia.
 
     🚨 ARMADILHA PAGA (28/08/2026): o gpt-oss é modelo de RACIOCÍNIO, e os
@@ -170,6 +202,16 @@ def _conversar(sistema, usuario, json_estrito=False, max_tokens=4000):
 
     if json_estrito:
         corpo["response_format"] = {"type": "json_object"}
+
+    # Recusa cedo e explicando, em vez de deixar a Groq devolver 413 com uma
+    # mensagem sobre TPM que não diz o que fazer.
+    entrada = f"{sistema}\n{usuario}"
+    if not cabe(entrada, max_tokens):
+        raise IAIndisponivel(
+            f"O texto ({tokens_aprox(entrada)} tokens) mais a resposta "
+            f"({max_tokens}) passam do teto de {TPM} tokens por minuto da conta. "
+            "Reduza o trecho enviado ou aumente GROQ_TPM depois de subir de plano."
+        )
 
     r = _post("/chat/completions", json=corpo,
               headers={"Content-Type": "application/json"})
@@ -218,7 +260,9 @@ def notas_do_trecho(texto):
         REGRA_COMUM + " Resuma o trecho em no máximo 5 marcadores curtos, "
         "preservando números, prazos e nomes exatamente como aparecem.",
         texto,
-        max_tokens=1500,
+        # 5 marcadores curtos cabem de sobra em 600, e as notas de 30
+        # trechos precisam somar pouco para a ata final caber no minuto.
+        max_tokens=600,
     )
 
 
@@ -266,7 +310,7 @@ def gerar_ata(texto, pauta=None, participantes=None, data_reuniao=None):
     contexto.append("Transcrição:\n" + texto)
 
     bruto = _conversar(REGRA_COMUM + "\n" + ESQUEMA_ATA,
-                       "\n\n".join(contexto), json_estrito=True, max_tokens=8000)
+                       "\n\n".join(contexto), json_estrito=True, max_tokens=2000)
     try:
         dados = json.loads(bruto)
     except json.JSONDecodeError as e:
@@ -294,5 +338,5 @@ def texto_executivo(fatos):
         "foram apurados e estão corretos. Não some, não conte e não estime "
         "nada por conta própria.",
         fatos,
-        max_tokens=4000,
+        max_tokens=1200,
     )

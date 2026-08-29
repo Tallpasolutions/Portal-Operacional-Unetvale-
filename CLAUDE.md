@@ -259,6 +259,21 @@ deixa o expurgo travado para sempre no mesmo registro.
 leitura autenticada ainda devolve o arquivo por um tempo. Para conferir se um
 objeto sumiu, use o endpoint de listagem, não o GET.
 
+**O limite que morde na Groq é TPM, e a tabela do site mente sobre ele.** A
+página de modelos mostra os limites do *Developer Plan*; a conta gratuita
+(`on_demand`) tem **8.000 tokens por minuto**, 31x menos. O número verdadeiro
+está no header `x-ratelimit-limit-tokens` de qualquer resposta — **meça, não
+leia**. Pior: o `max_tokens` reservado para a RESPOSTA conta nesse teto, então
+reservar 8.000 estoura a cota sozinho, antes de mandar uma linha (HTTP 413
+"Request too large"). Vive em `GROQ_TPM` no `.env`, e `ia.cabe()` recusa cedo
+com mensagem explicando, em vez de deixar o 413 aparecer no meio da ata.
+
+**Com 8.000 TPM, a ata NÃO sai da transcrição crua.** Uma reunião de 60 min tem
+~15.700 tokens e nunca cabe numa chamada. O caminho normal é pelas notas por
+trecho — que é justamente por que elas são calculadas durante a reunião, com o
+trecho ainda na mão. Reunião muito longa nem com notas cabe: aí a ata sai
+**carimbada como parcial**, nunca cortada em silêncio.
+
 **Ids de modelo da Groq mudam.** Ficam em `GROQ_MODELO_*` no ambiente. Cravados
 no código, viram um HTTP 400 sem explicação no dia em que a Groq aposentar o id.
 

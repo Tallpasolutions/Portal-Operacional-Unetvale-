@@ -33,11 +33,16 @@ from .acoes import _data
 
 # ---------------------------------------------------------------- config
 BUCKET = os.environ.get("REUNIAO_BUCKET", "reuniao-audio")
-# Acima disso a ata é montada a partir das notas por trecho em vez da
-# transcrição inteira. 120k caracteres ~= 30k tokens em português, contra os
-# 131k de contexto do gpt-oss-120b: reunião de até ~2h entra inteira. Reuniões
-# aqui duram 60 min em média, então o caminho normal é a transcrição real.
-ATA_MAX_CHARS = int(os.environ.get("REUNIAO_ATA_MAX_CHARS", "120000"))
+# Teto para mandar a transcrição CRUA. O que manda de verdade é o orçamento de
+# tokens por minuto da conta (`ia.cabe`); este número é só um limite legível
+# por cima dele.
+#
+# 🚨 O gargalo NÃO é o contexto do modelo (131k tokens), é a cota por minuto:
+# 8000 no tier gratuito. Uma reunião de 60 min tem ~15.700 tokens de
+# transcrição e nunca cabe numa chamada. Por isso o caminho pelas notas por
+# trecho é o NORMAL aqui, não a exceção — e é o que justifica calculá-las
+# durante a reunião, quando o trecho ainda está na mão.
+ATA_MAX_CHARS = int(os.environ.get("REUNIAO_ATA_MAX_CHARS", "16000"))
 AUDIO_DIAS = int(os.environ.get("REUNIAO_AUDIO_DIAS", "30"))
 
 # Uma ação é "recorrente" quando voltou à mesa em pelo menos duas
@@ -209,7 +214,7 @@ def estado(reuniao_id, reuniao=None):
 
 
 # ------------------------------------------------------------------ ata
-def _markdown(dados, reuniao, interrompida=False):
+def _markdown(dados, reuniao, interrompida=False, parcial=False):
     """Estrutura -> Markdown. Determinístico, e é de propósito.
 
     O modelo devolve dados; a formatação é nossa. Assim toda ata sai com a
@@ -221,6 +226,11 @@ def _markdown(dados, reuniao, interrompida=False):
     if interrompida:
         L += ["> ⚠️ **Gravação interrompida.** Esta ata cobre apenas o áudio que "
               "chegou até o servidor. Pode faltar o final da reunião.", ""]
+
+    if parcial:
+        L += ["> ⚠️ **Reunião longa.** Não coube tudo no limite de tokens por "
+              "minuto da conta, e parte do material ficou de fora desta ata. A "
+              "transcrição completa continua guardada.", ""]
 
     if dados.get("resumo"):
         L += ["## Resumo", dados["resumo"], ""]
@@ -266,17 +276,27 @@ def _mapa_codigos():
 
 
 def _texto_para_ata(lista):
-    """Transcrição inteira quando cabe; notas por trecho quando não cabe.
+    """Escolhe o que mandar ao modelo: transcrição crua, notas, ou notas cortadas.
 
-    O corte é por tamanho e não por duração porque o que estoura é o
-    contexto do modelo, medido em caracteres — reunião de 40 min com
-    pouca fala cabe; 20 min de discussão densa pode não caber.
+    Três degraus, do melhor para o pior, e o critério é sempre "cabe na cota do
+    minuto" — não a duração da reunião. Vinte minutos de discussão densa
+    ocupam mais que quarenta de conversa arrastada.
+
+    O terceiro degrau existe para reunião muito longa, e devolve `parcial=True`
+    para que a ata saia CARIMBADA. Cortar em silêncio produziria uma ata que
+    parece completa e ignora a segunda metade da reunião.
     """
     inteiro = "\n\n".join(t["texto"] for t in lista if t.get("texto"))
-    if len(inteiro) <= ATA_MAX_CHARS:
-        return inteiro, "transcricao"
+    if len(inteiro) <= ATA_MAX_CHARS and ia.cabe(inteiro, ia.MAX_TOKENS_ATA):
+        return inteiro, "transcricao", False
+
     notas = "\n\n".join(t["notas"] for t in lista if t.get("notas"))
-    return (notas or inteiro[:ATA_MAX_CHARS]), "notas"
+    if notas and ia.cabe(notas, ia.MAX_TOKENS_ATA):
+        return notas, "notas", False
+
+    base = notas or inteiro
+    limite = int((ia.ORCAMENTO - ia.MAX_TOKENS_ATA) * ia.CHARS_POR_TOKEN)
+    return base[:limite], ("notas" if notas else "transcricao"), len(base) > limite
 
 
 def montar_ata(reuniao, usuario, interrompida=False):
@@ -292,7 +312,7 @@ def montar_ata(reuniao, usuario, interrompida=False):
         raise ValueError(
             "Nenhum trecho foi transcrito ainda — não há texto de onde tirar a ata.")
 
-    texto, origem = _texto_para_ata(lista)
+    texto, origem, parcial = _texto_para_ata(lista)
 
     pauta = [(a["codigo"], a["titulo"]) for a in acoes.pauta(reuniao, usuario)]
     nomes = _nomes(reuniao.get("participantes") or [])
@@ -306,7 +326,7 @@ def montar_ata(reuniao, usuario, interrompida=False):
             "gravacao_status": "erro", "gravacao_erro": str(e)[:500]})
         raise
 
-    markdown = _markdown(dados, reuniao, interrompida)
+    markdown = _markdown(dados, reuniao, interrompida, parcial=parcial)
     transcricao = "\n\n".join(t["texto"] for t in lista if t.get("texto"))
 
     supa.update("reunioes", {"id": reuniao_id}, {
