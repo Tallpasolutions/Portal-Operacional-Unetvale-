@@ -361,9 +361,18 @@ Não existe suíte de testes. O padrão é:
    o que deve ser recusado.
 4. **Permissão** — `app.test_client()` com sessão forjada, conferindo o **HTML
    servido**, não a tela.
-5. **Navegador** — `preview_start` em `localhost:5001`, exercitar o fluxo real,
+5. **Rota** — **toda rota nova respondida de verdade pelo `test_client`**,
+   inclusive com entrada ruim. `4xx` é resposta; `5xx` é bug.
+
+   Isto é passo próprio porque template que compila **não** prova que a rota
+   roda: a rota do PDF das reuniões compilava, renderizava no preview e
+   quebrava em produção num `datetime` que não estava importado no topo do
+   arquivo — havia um `from datetime import` dentro de outra função, que
+   enganou até a checagem. Renderizar o template isolado não passa pela
+   função da rota.
+6. **Navegador** — `preview_start` em `localhost:5001`, exercitar o fluxo real,
    `read_console_messages` limpo. **Mudança de layout exige screenshot.**
-6. **Celular** — `resize_window` no preset mobile e refazer o fluxo.
+7. **Celular** — `resize_window` no preset mobile e refazer o fluxo.
 
 Subir local:
 

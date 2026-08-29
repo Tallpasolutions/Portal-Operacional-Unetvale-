@@ -5,6 +5,7 @@ o cross-filter e os gráficos rodam no cliente (sem round-trip por clique).
 """
 import os
 import re
+from datetime import datetime, timezone
 
 from flask import (
     Blueprint, abort, flash, jsonify, redirect, render_template, request,
@@ -509,7 +510,6 @@ def ingest():
     status = body.get("status", "ok")
     if modulo not in dados.MODULOS or payload is None:
         return jsonify({"erro": "modulo/payload inválidos"}), 400
-    from datetime import datetime, timezone
     supa.upsert("dados_modulo", {
         "modulo": modulo,
         "payload": payload,
