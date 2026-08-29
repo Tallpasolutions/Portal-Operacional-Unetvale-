@@ -2,6 +2,11 @@
  *
  * IIFE, sem framework e sem build, como todo JS deste projeto.
  *
+ * A TELA: um controle só. O botão da esquerda cicla Gravar → Pausar →
+ * Retomar; Concluir aparece na mesma pílula depois que a captura começa e
+ * gera a ata sozinho. Não há botão de "gerar ata" no fluxo normal — o que
+ * existe no template é resgate para quando a geração automática falhar.
+ *
  * O QUE ESTE ARQUIVO RESOLVE, E QUE NÃO É ÓBVIO:
  *
  * 1. MediaRecorder.start(timeslice) NÃO serve para cortar.
@@ -24,22 +29,20 @@
   var cfg = window.__REUNIAO__;
   if (!cfg || !cfg.podeGravar) return;
 
-  var painel = document.getElementById("gravador");
-  if (!painel) return;
+  var pill = document.getElementById("g-pill");
+  if (!pill) return;
 
-  var btnIniciar = document.getElementById("g-iniciar");
-  var btnParar = document.getElementById("g-parar");
+  var btnPrimario = document.getElementById("g-primario");
+  var btnConcluir = document.getElementById("g-concluir");
+  var elRotulo = document.getElementById("g-rotulo");
   var elRelogio = document.getElementById("g-relogio");
   var elEstado = document.getElementById("g-estado");
-  var elNivel = document.getElementById("g-nivel");
   var elAviso = document.getElementById("g-aviso");
+  var barras = document.querySelectorAll("#g-onda i");
   var formEncerrar = document.getElementById("form-encerrar");
 
   var TRECHO_MS = (cfg.trechoSegundos || 120) * 1000;
 
-  // Ordem de preferência: opus é o mais leve com fala inteligível; mp4 é o
-  // que o Safari aceita. O último item é a rede de segurança para navegador
-  // que não implementa isTypeSupported.
   var CANDIDATOS = [
     "audio/webm;codecs=opus",
     "audio/webm",
@@ -47,35 +50,59 @@
     "audio/mp4",
   ];
 
+  // parado · gravando · pausado · finalizando · gerando
+  var estado = "parado";
   var stream = null, rec = null, audioCtx = null, analisador = null;
-  var gravando = false, encerrandoDepois = false;
   var mime = "", mimeBase = "audio/webm";
-  var indice = 0, inicio = 0;
-  var timerRodada = null, timerRelogio = null, timerNivel = null;
+  var indice = 0;
+  var decorrido = 0, marcaInicio = 0;   // cronômetro que sobrevive à pausa
+  var restanteDoTrecho = TRECHO_MS;     // quanto falta para rotacionar
+  var timerRodada = null, timerRelogio = null, timerOnda = null;
   var fila = [], enviando = false, falhas = 0;
+  var viaFormEncerrar = false;
 
-  function texto(el, t) { if (el) el.textContent = t; }
-  function avisar(msg, erro) {
+  function avisar(msg) {
     if (!elAviso) return;
     elAviso.textContent = msg || "";
     elAviso.style.display = msg ? "block" : "none";
-    elAviso.className = erro ? "aviso-erro" : "aviso-ok";
   }
 
   function doisDig(n) { return (n < 10 ? "0" : "") + n; }
-  function relogio() {
-    var s = Math.floor((Date.now() - inicio) / 1000);
-    texto(elRelogio, doisDig(Math.floor(s / 60)) + ":" + doisDig(s % 60));
+
+  function msDecorridos() {
+    return decorrido + (estado === "gravando" ? Date.now() - marcaInicio : 0);
   }
 
-  function escolherMime() {
-    if (!window.MediaRecorder) return null;
-    for (var i = 0; i < CANDIDATOS.length; i++) {
-      try {
-        if (MediaRecorder.isTypeSupported(CANDIDATOS[i])) return CANDIDATOS[i];
-      } catch (e) { /* navegador antigo: cai no null abaixo */ }
+  function pintarRelogio() {
+    var s = Math.floor(msDecorridos() / 1000);
+    elRelogio.textContent = doisDig(Math.floor(s / 60)) + ":" + doisDig(s % 60);
+  }
+
+  var ROTULOS = { parado: "Gravar", gravando: "Pausar", pausado: "Retomar",
+                  finalizando: "Finalizando", gerando: "Gerando ata" };
+
+  var cartao = document.getElementById("gravador");
+
+  function render() {
+    pill.dataset.estado = estado;
+    // Classe no cartão além do `:has()` do CSS: o aviso de microfone aberto é
+    // importante demais para depender de um seletor que navegador antigo ignora.
+    if (cartao) cartao.classList.toggle("gravando", estado === "gravando");
+    elRotulo.textContent = ROTULOS[estado] || "";
+    btnPrimario.disabled = (estado === "finalizando" || estado === "gerando");
+    btnConcluir.disabled = btnPrimario.disabled;
+    pintarRelogio();
+
+    var pend = fila.length;
+    if (estado === "gravando" || estado === "pausado") {
+      elEstado.textContent = pend ? pend + " trecho(s) na fila" : "Transcrevendo em dia";
+    } else if (estado === "finalizando") {
+      elEstado.textContent = pend ? "Enviando " + pend + " trecho(s)…" : "Fechando o último trecho…";
+    } else if (estado === "gerando") {
+      elEstado.textContent = "Gerando a ata…";
+    } else {
+      elEstado.textContent = indice ? indice + " trecho(s) transcritos." : "";
     }
-    return null;
   }
 
   function json(url, corpo) {
@@ -94,8 +121,9 @@
   // ---------------------------------------------------------------- fila
   // Um trecho por vez. Enviar em paralelo estoura o limite de requisições
   // por minuto do plano gratuito justamente quando a reunião é longa.
-  function enfileirar(blob, n) {
-    fila.push({ blob: blob, indice: n });
+  function enfileirar(blob) {
+    fila.push({ blob: blob, indice: indice++ });
+    render();
     bombear();
   }
 
@@ -116,110 +144,83 @@
       })
       .then(function () {
         return json(cfg.urlTranscrever.replace("__N__", item.indice), {
-          bytes: item.blob.size,
-          duracao_ms: TRECHO_MS,
+          bytes: item.blob.size, duracao_ms: TRECHO_MS,
         });
       })
       .then(function () {
-        fila.shift();
-        falhas = 0;
-        enviando = false;
-        atualizarEstado();
-        bombear();
-        talvezConcluir();
+        fila.shift(); falhas = 0; enviando = false;
+        render(); bombear(); talvezConcluir();
       })
       .catch(function (e) {
-        enviando = false;
-        falhas++;
+        enviando = false; falhas++;
         // Três tentativas e o trecho sai da fila para não travar os
         // seguintes. Ele continua no banco com status de erro, e o áudio
         // fica no Storage por 30 dias — dá para tentar de novo depois.
         if (falhas >= 3) {
-          fila.shift();
-          falhas = 0;
+          fila.shift(); falhas = 0;
           avisar("Um trecho não pôde ser transcrito: " + e.message +
-                 " Ele fica guardado; dá para tentar de novo na tela.", true);
+                 " Ele fica guardado; dá para tentar de novo na tela.");
         }
         setTimeout(bombear, 4000);
-        atualizarEstado();
-        // Também aqui: se o trecho foi descartado após 3 tentativas, a fila
-        // pode ter esvaziado e a reunião precisa ser fechada assim mesmo.
-        talvezConcluir();
+        render(); talvezConcluir();
       });
   }
 
-  function atualizarEstado() {
-    // `fila[0]` continua na fila enquanto é enviado, então `fila.length` já
-    // conta o que está em trânsito.
-    var pend = fila.length;
-    if (gravando) {
-      texto(elEstado, "Trecho " + (indice + 1) +
-            (pend ? " · " + pend + " na fila" : " · em dia"));
-    } else if (pend) {
-      texto(elEstado, "Enviando os últimos " + pend + " trecho(s)…");
-    } else {
-      // O ramo que faltava. Sem ele o texto congelava em "Enviando os últimos
-      // 1 trecho(s)…" mesmo depois de tudo terminar, e parecia travado.
-      texto(elEstado, indice
-        ? "Gravação encerrada · " + indice + " trecho(s) transcritos."
-        : "Parado");
-    }
-  }
-
-  /** Só termina quando a captura parou E a fila esvaziou. */
-  function talvezConcluir() {
-    if (gravando || fila.length || enviando) return;
-    if (encerrandoDepois) { gerarAta(); return; }
-    atualizarEstado();
-    // Avisa o servidor: sem isto a reunião fica com status "gravando" para
-    // sempre e a lista mostra o selo vermelho de gravação em andamento.
-    json(cfg.urlParar, {})
-      .then(function () { window.location.reload(); })
-      .catch(function () { /* a tela já diz o que aconteceu; recarregar é luxo */ });
-  }
-
   // ------------------------------------------------------------ rotação
-  function iniciarRodada() {
+  function iniciarRodada(ms) {
     var pedacos = [];
     rec = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 32000 });
-
-    rec.ondataavailable = function (e) {
-      if (e.data && e.data.size) pedacos.push(e.data);
-    };
+    rec.ondataavailable = function (e) { if (e.data && e.data.size) pedacos.push(e.data); };
     rec.onstop = function () {
       var blob = new Blob(pedacos, { type: mimeBase });
-      if (blob.size > 1000) enfileirar(blob, indice++);
-      if (gravando) iniciarRodada();   // rotaciona e segue gravando
-      else concluir();
+      if (blob.size > 1000) enfileirar(blob);
+      if (estado === "gravando") iniciarRodada(TRECHO_MS);  // rotaciona e segue
+      else concluirCaptura();
     };
-
     rec.start();
+    restanteDoTrecho = ms;
+    marcaTrecho = Date.now();
     timerRodada = setTimeout(function () {
       if (rec && rec.state === "recording") rec.stop();
-    }, TRECHO_MS);
+    }, ms);
   }
 
-  function medirNivel() {
-    if (!analisador) return;
+  var marcaTrecho = 0;
+
+  function medirOnda() {
+    if (!analisador || !barras.length) return;
     var dados = new Uint8Array(analisador.frequencyBinCount);
-    analisador.getByteTimeDomainData(dados);
-    var pico = 0;
-    for (var i = 0; i < dados.length; i++) {
-      pico = Math.max(pico, Math.abs(dados[i] - 128));
+    analisador.getByteFrequencyData(dados);
+    var passo = Math.floor(dados.length / barras.length);
+    for (var i = 0; i < barras.length; i++) {
+      var v = dados[i * passo] / 255;
+      barras[i].style.height = Math.max(12, Math.min(100, v * 140)) + "%";
     }
-    if (elNivel) elNivel.style.width = Math.min(100, (pico / 90) * 100) + "%";
+  }
+
+  function zerarOnda() {
+    for (var i = 0; i < barras.length; i++) barras[i].style.height = "12%";
   }
 
   // -------------------------------------------------------------- início
+  function escolherMime() {
+    if (!window.MediaRecorder) return null;
+    for (var i = 0; i < CANDIDATOS.length; i++) {
+      try {
+        if (MediaRecorder.isTypeSupported(CANDIDATOS[i])) return CANDIDATOS[i];
+      } catch (e) { /* navegador antigo */ }
+    }
+    return null;
+  }
+
   function iniciar() {
     mime = escolherMime();
     if (!mime || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      avisar("Este navegador não grava áudio. Use Chrome, Edge ou Safari " +
-             "recente, e acesse por HTTPS.", true);
+      avisar("Este navegador não grava áudio. Use Chrome, Edge ou Safari recente, por HTTPS.");
       return;
     }
     mimeBase = mime.split(";")[0];
-    btnIniciar.disabled = true;
+    btnPrimario.disabled = true;
 
     navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
@@ -227,92 +228,139 @@
       stream = s;
       return json(cfg.urlIniciar, {});
     }).then(function () {
-      gravando = true;
-      inicio = Date.now();
-      painel.classList.add("gravando");
-      btnParar.disabled = false;
+      estado = "gravando";
+      decorrido = 0;
+      marcaInicio = Date.now();
       avisar("");
 
       try {
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         analisador = audioCtx.createAnalyser();
-        analisador.fftSize = 512;
+        analisador.fftSize = 128;
         audioCtx.createMediaStreamSource(stream).connect(analisador);
-        timerNivel = setInterval(medirNivel, 120);
-      } catch (e) { /* medidor é enfeite: sem ele a gravação segue */ }
+        timerOnda = setInterval(medirOnda, 90);
+      } catch (e) { /* a onda é enfeite: sem ela a gravação segue */ }
 
-      timerRelogio = setInterval(relogio, 500);
-      relogio();
-      atualizarEstado();
-      iniciarRodada();
+      timerRelogio = setInterval(pintarRelogio, 500);
+      iniciarRodada(TRECHO_MS);
+      render();
     }).catch(function (e) {
-      btnIniciar.disabled = false;
+      btnPrimario.disabled = false;
       if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; }
       avisar("Não foi possível iniciar: " + (e && e.message ? e.message : e) +
-             " Verifique a permissão do microfone.", true);
+             " Verifique a permissão do microfone.");
     });
   }
 
-  // ---------------------------------------------------------------- parar
-  function parar(comAta) {
-    if (!gravando) return;
-    encerrandoDepois = !!comAta;
-    gravando = false;
+  // -------------------------------------------------------- pausa/retoma
+  function pausar() {
+    if (estado !== "gravando" || !rec) return;
+    // O relógio e a rotação param junto: sem isso um intervalo de pausa longo
+    // fecharia trechos vazios e a contagem mediria tempo que não foi gravado.
+    decorrido += Date.now() - marcaInicio;
+    restanteDoTrecho = Math.max(3000, restanteDoTrecho - (Date.now() - marcaTrecho));
     clearTimeout(timerRodada);
-    clearInterval(timerRelogio);
-    clearInterval(timerNivel);
-    btnParar.disabled = true;
-    texto(elEstado, "Finalizando o último trecho…");
-    if (rec && rec.state === "recording") rec.stop();
-    else concluir();
+    clearInterval(timerOnda);
+    try { rec.pause(); } catch (e) { /* navegador sem pause: segue gravando */ }
+    estado = "pausado";
+    zerarOnda();
+    render();
   }
 
+  function retomar() {
+    if (estado !== "pausado" || !rec) return;
+    marcaInicio = Date.now();
+    marcaTrecho = Date.now();
+    try { rec.resume(); } catch (e) { /* idem */ }
+    estado = "gravando";
+    timerOnda = setInterval(medirOnda, 90);
+    timerRodada = setTimeout(function () {
+      if (rec && rec.state === "recording") rec.stop();
+    }, restanteDoTrecho);
+    render();
+  }
+
+  // ------------------------------------------------------------ concluir
   function concluir() {
+    if (estado !== "gravando" && estado !== "pausado") return;
+    decorrido = msDecorridos();
+    estado = "finalizando";
+    clearTimeout(timerRodada);
+    clearInterval(timerRelogio);
+    clearInterval(timerOnda);
+    zerarOnda();
+    render();
+    if (rec && rec.state !== "inactive") {
+      if (rec.state === "paused") { try { rec.resume(); } catch (e) {} }
+      rec.stop();                        // o onstop chama concluirCaptura()
+    } else {
+      concluirCaptura();
+    }
+  }
+
+  function concluirCaptura() {
     if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; }
     if (audioCtx) { try { audioCtx.close(); } catch (e) {} audioCtx = null; }
-    painel.classList.remove("gravando");
-    if (elNivel) elNivel.style.width = "0%";
-    atualizarEstado();
-    // Isto roda no `onstop`, quando a fila quase sempre AINDA tem trecho.
-    // Quem realmente fecha é o `talvezConcluir` chamado ao fim de cada envio.
+    render();
     talvezConcluir();
   }
 
+  /** Só fecha quando a captura parou E a fila esvaziou. */
+  function talvezConcluir() {
+    if (estado !== "finalizando" || fila.length || enviando) return;
+    if (!indice) {                       // nada foi gravado
+      estado = "parado"; render();
+      json(cfg.urlParar, {}).then(function () { window.location.reload(); })
+                            .catch(function () {});
+      return;
+    }
+    gerarAta();
+  }
+
   function gerarAta() {
-    encerrandoDepois = false;
-    texto(elEstado, "Gerando a ata…");
+    estado = "gerando";
+    render();
     json(cfg.urlAta, {})
       .then(function () {
-        if (formEncerrar) formEncerrar.submit();   // congela e recarrega
+        if (viaFormEncerrar && formEncerrar) formEncerrar.submit();
         else window.location.reload();
       })
       .catch(function (e) {
-        avisar("A gravação foi salva, mas a ata não pôde ser gerada: " +
-               e.message + " Use 'Gerar ata' para tentar de novo.", true);
-        texto(elEstado, "Transcrição salva; ata pendente.");
+        estado = "parado";
+        render();
+        avisar("A gravação foi salva, mas a ata não pôde ser gerada: " + e.message +
+               " Use o botão abaixo para tentar de novo.");
+        json(cfg.urlParar, {}).catch(function () {});
       });
   }
 
-  // Sair no meio perde o trecho que ainda não fechou. O aviso do navegador
-  // é a única defesa possível — não dá para impedir o fechamento da aba.
+  // Sair no meio perde o trecho que ainda não fechou. O aviso do navegador é
+  // a única defesa possível — não dá para impedir o fechamento da aba.
   window.addEventListener("beforeunload", function (e) {
-    if (!gravando && !fila.length) return;
+    if (estado === "parado" && !fila.length) return;
     e.preventDefault();
     e.returnValue = "";
     return "";
   });
 
-  if (btnIniciar) btnIniciar.addEventListener("click", iniciar);
-  if (btnParar) btnParar.addEventListener("click", function () { parar(false); });
+  btnPrimario.addEventListener("click", function () {
+    if (estado === "parado") iniciar();
+    else if (estado === "gravando") pausar();
+    else if (estado === "pausado") retomar();
+  });
+  btnConcluir.addEventListener("click", function () { concluir(); });
 
-  // "Encerrar e gerar ata": para a gravação, espera a fila esvaziar, gera a
-  // ata e só então envia o formulário que congela a reunião. Enviar o form
-  // primeiro descartaria o trecho que ainda estava no ar.
+  // "Encerrar reunião" com gravação em andamento: para, gera a ata e só então
+  // envia o formulário que congela. Enviar o form primeiro descartaria o
+  // trecho que ainda estava no ar.
   if (formEncerrar) {
     formEncerrar.addEventListener("submit", function (e) {
-      if (!gravando && !fila.length) return;   // sem gravação, fluxo normal
+      if (estado === "parado" && !fila.length) return;
       e.preventDefault();
-      parar(true);
+      viaFormEncerrar = true;
+      concluir();
     });
   }
+
+  render();
 })();

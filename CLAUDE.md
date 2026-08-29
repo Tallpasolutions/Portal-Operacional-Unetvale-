@@ -156,6 +156,30 @@ existe, e códigos como `AC-001` são fáceis de adivinhar.
 SQL Editor do Supabase (ou por `psycopg` com a `DATABASE_URL`). São **aditivas**:
 nada de `drop`/`alter` destrutivo em tabela com dado de produção.
 
+### Git: confira se o commit chegou na main
+
+**Antes de dizer que algo está corrigido, rode:**
+
+```bash
+git fetch origin && git log --oneline origin/main..HEAD
+```
+
+Se listar alguma coisa, **não está na main** — e portanto não está em produção.
+
+Isto virou regra porque aconteceu duas vezes seguidas no módulo Reuniões: o PR
+foi mergeado enquanto a correção seguinte ainda estava sendo escrita. O commit
+ficou órfão na branch, o PR fechou, e a `main` saiu com o defeito que todo mundo
+achava resolvido. Nos dois casos o erro só apareceu porque alguém foi usar a
+tela — não porque o Git avisou.
+
+Duas consequências práticas:
+
+* Depois de mergear, **confira se a branch ainda está à frente**
+  (`gh pr view <n> --json state,mergedAt` e o `log` acima). Se estiver, abra
+  outro PR: a mesma branch serve, ela fica zerada depois do merge.
+* Enquanto uma correção estiver sendo escrita, **segure o merge**. Push não
+  reabre PR fechado.
+
 ### Comentários
 
 Explique **por quê**, não o quê. Registre a decisão e o que aconteceria se fosse
@@ -258,6 +282,21 @@ deixa o expurgo travado para sempre no mesmo registro.
 **GET no Storage serve do cache depois do expurgo.** Apagar funciona, mas a
 leitura autenticada ainda devolve o arquivo por um tempo. Para conferir se um
 objeto sumiu, use o endpoint de listagem, não o GET.
+
+**O limite que morde na Groq é TPM, e a tabela do site mente sobre ele.** A
+página de modelos mostra os limites do *Developer Plan*; a conta gratuita
+(`on_demand`) tem **8.000 tokens por minuto**, 31x menos. O número verdadeiro
+está no header `x-ratelimit-limit-tokens` de qualquer resposta — **meça, não
+leia**. Pior: o `max_tokens` reservado para a RESPOSTA conta nesse teto, então
+reservar 8.000 estoura a cota sozinho, antes de mandar uma linha (HTTP 413
+"Request too large"). Vive em `GROQ_TPM` no `.env`, e `ia.cabe()` recusa cedo
+com mensagem explicando, em vez de deixar o 413 aparecer no meio da ata.
+
+**Com 8.000 TPM, a ata NÃO sai da transcrição crua.** Uma reunião de 60 min tem
+~15.700 tokens e nunca cabe numa chamada. O caminho normal é pelas notas por
+trecho — que é justamente por que elas são calculadas durante a reunião, com o
+trecho ainda na mão. Reunião muito longa nem com notas cabe: aí a ata sai
+**carimbada como parcial**, nunca cortada em silêncio.
 
 **Ids de modelo da Groq mudam.** Ficam em `GROQ_MODELO_*` no ambiente. Cravados
 no código, viram um HTTP 400 sem explicação no dia em que a Groq aposentar o id.

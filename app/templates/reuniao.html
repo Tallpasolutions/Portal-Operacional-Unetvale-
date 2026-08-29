@@ -62,50 +62,35 @@
    O recorte é do servidor: para os demais este bloco não existe no HTML. #}
 {% if conduz and not reuniao.encerrada_em %}
 <div class="card gravador" id="gravador" style="margin-top:16px;">
-  <div class="card-h">
-    <span>Gravação</span>
-    {# Subtítulo curto de propósito: `.card-h` é flex sem gap, e título curto
-       com subtítulo longo se encostam no celular. A explicação inteira mora
-       no corpo do card, logo abaixo. #}
-    <span class="subnote" style="margin:0;">trechos de {{ trecho_segundos // 60 }} min</span>
-  </div>
+  <div class="card-h"><span>Gravação</span></div>
   <div class="card-b">
-    <p class="subnote" style="margin-top:0;">
-      A gravação só começa por este botão. Avise os participantes: o áudio é
-      transcrito para gerar a ata e fica guardado por 30 dias — depois disso
-      some, e a ata permanece.
-    </p>
 
-    <div class="gravador-linha">
-      <button class="btn" type="button" id="g-iniciar">● Iniciar gravação</button>
-      <button class="btn sec" type="button" id="g-parar" disabled>■ Parar</button>
-      <span class="gravador-relogio" id="g-relogio">00:00</span>
-      <span class="gravador-estado" id="g-estado">
-        {% if estado.total %}{{ estado.ok }} de {{ estado.total }} trechos transcritos{% else %}Parado{% endif %}
-      </span>
+    {# Um controle só: o botão da esquerda cicla Gravar / Pausar / Retomar, e
+       Concluir aparece dentro da mesma pílula depois que a captura começa.
+       Concluir gera a ata sozinho — não existe botão de "gerar ata" no fluxo
+       normal. O que sobrou embaixo é resgate, para quando a geração falhar. #}
+    <div class="grav-pill" id="g-pill" data-estado="parado">
+      <button class="grav-primario" type="button" id="g-primario">
+        <span class="grav-icone" id="g-icone"></span>
+        <span id="g-rotulo">Gravar</span>
+      </button>
+      <span class="grav-tempo" id="g-relogio">00:00</span>
+      <div class="grav-onda" id="g-onda" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <button class="grav-fim" type="button" id="g-concluir">Concluir</button>
     </div>
 
-    <div class="gravador-medidor"><i id="g-nivel"></i></div>
+    <div class="grav-status" id="g-estado"></div>
     <div id="g-aviso" class="aviso-erro" style="display:none;"></div>
 
-    {# Sem este botão, quem parasse a gravação sem encerrar a reunião ficava
-       com os trechos transcritos e nenhum caminho para gerar a ata. #}
+    {# Resgate: só aparece quando há trecho transcrito e a ata não saiu — que é
+       o caso em que a geração automática falhou. #}
     {% if estado.ok and not estado.tem_ata %}
     <form method="post" action="{{ url_for('dash.reuniao_ata', reuniao_id=reuniao.id) }}"
-          style="margin-top:14px;">
-      <button class="btn" type="submit">Gerar ata dos {{ estado.ok }} trecho(s) transcritos</button>
+          style="margin-top:12px;">
+      <button class="btn sec" type="submit">Gerar ata dos {{ estado.ok }} trecho(s) já transcritos</button>
     </form>
     {% endif %}
-
-    {% if estado.erro %}
-    <p class="subnote" style="margin-bottom:0;">
-      {{ estado.erro }} trecho(s) falharam na transcrição. O áudio deles está
-      guardado — use <b>Gerar ata</b> depois de tentar de novo.
-    </p>
-    {% endif %}
-    {% if estado.erro_msg %}
-    <div class="aviso-erro">{{ estado.erro_msg }}</div>
-    {% endif %}
+    {% if estado.erro_msg %}<div class="aviso-erro">{{ estado.erro_msg }}</div>{% endif %}
   </div>
 </div>
 {% endif %}
