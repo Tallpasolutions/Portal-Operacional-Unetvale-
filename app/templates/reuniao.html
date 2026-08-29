@@ -21,7 +21,7 @@
     <div class="reuniao-linha">
       <div><span class="l">Tipo</span><b>{{ 'Individual' if reuniao.tipo == 'individual' else 'Em grupo' }}</b></div>
       <div><span class="l">Data</span><b>{{ reuniao.data|replace('-', '/') }}</b></div>
-      <div><span class="l">Participantes</span><b>{% for uid in reuniao.participantes %}{{ nome_usuario(uid) }}{{ ', ' if not loop.last }}{% endfor %}</b></div>
+      <div><span class="l">Participantes</span><b>{% for uid in reuniao.participantes %}{{ nome_usuario(uid) }}{{ ', ' if not loop.last or reuniao.convidados }}{% endfor %}{% for c in reuniao.convidados or [] %}{{ c }} <span class="subnote" style="margin:0;">(convidado)</span>{{ ', ' if not loop.last }}{% endfor %}</b></div>
 
       <div class="reuniao-estado">
         {% if reuniao.encerrada_em %}<span class="badge badge-cinza">Encerrada</span>

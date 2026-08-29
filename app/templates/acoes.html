@@ -234,12 +234,25 @@
           <div class="field"><label>Data</label>
             <input type="date" name="data" style="width:100%;"></div>
         </div>
-        <div class="field">
-          <label>Participantes</label>
-          <div class="lista-marcar" style="max-height:170px;">
-            {% for u in usuarios %}
-            <label class="linha-marcar"><input type="checkbox" name="participantes" value="{{ u.id }}"> {{ u.nome or u.email }}</label>
-            {% endfor %}
+        <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(240px,1fr));">
+          <div class="field">
+            <label>Participantes</label>
+            {# Dropdown em vez da lista aberta: a lista inteira de nomes ficava
+               na tela o tempo todo, e ela cresce com a empresa. #}
+            <details class="dropdown" id="dd-participantes">
+              <summary><span data-resumo>Escolher participantes</span></summary>
+              <div class="lista-marcar" style="max-height:220px;">
+                {% for u in usuarios %}
+                <label class="linha-marcar"><input type="checkbox" name="participantes" value="{{ u.id }}"> {{ u.nome or u.email }}</label>
+                {% endfor %}
+              </div>
+            </details>
+          </div>
+
+          <div class="field">
+            <label>Convidados <span class="subnote" style="margin:0;font-weight:400;">quem não tem conta no portal</span></label>
+            <input type="text" name="convidados" style="width:100%;"
+                   placeholder="Separe por vírgula: Ana Souza, Carlos Lima">
           </div>
         </div>
         <button class="btn" type="submit">Abrir reunião</button>
@@ -263,7 +276,7 @@
             </td>
             <td>{{ 'Individual' if r.tipo == 'individual' else 'Em grupo' }}</td>
             <td>{{ r.data|replace('-', '/') }}</td>
-            <td>{{ r.participantes|length }}</td>
+            <td>{{ r.participantes|length + (r.convidados|length if r.convidados else 0) }}</td>
             <td>{% if r.encerrada_em %}<span class="badge badge-cinza">Finalizada</span>
                 {% else %}<span class="badge badge-verde">Em andamento</span>{% endif %}</td>
             {# Com ata pronta a coluna deixa de informar e passa a AGIR: o PDF

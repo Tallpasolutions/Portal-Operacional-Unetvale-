@@ -683,7 +683,8 @@ def reuniao_nova():
     f = request.form
     try:
         r = acoes.criar_reuniao(f.get("titulo"), f.get("tipo"), f.get("data"),
-                                f.getlist("participantes"), u["id"])
+                                f.getlist("participantes"), u["id"],
+                                convidados=f.get("convidados"))
         return redirect(url_for("dash.reuniao_detalhe", reuniao_id=r["id"]))
     except Exception as e:
         flash(str(e), "erro")

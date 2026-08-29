@@ -133,6 +133,11 @@ abrir: não estende `base.html` porque o PDF não leva sidebar nem topbar, e
 escondê-las com `@media print` seria carregar o que se pretende esconder. Quem
 gera o arquivo é o navegador — sem biblioteca de PDF na função serverless.
 
+**Convidado** é quem participou e não tem conta: nome em
+`reunioes.convidados` (text[]), não linha em `reuniao_participantes`. Aquela
+tabela é de quem tem login — é dela que sai a pauta, e pauta exige ação, que
+exige usuário. Convidado só aparece na lista de quem estava, na ata e no PDF.
+
 ### Papéis
 
 Três, independentes — a pessoa pode ser um, vários ou nenhum:

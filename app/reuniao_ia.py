@@ -336,7 +336,9 @@ def montar_ata(reuniao, usuario, interrompida=False):
         f_antigos = pool.submit(_itens_soltos, reuniao_id)
         lista = [t for t in f_trechos.result() if t["status"] == "ok"]
         da_pauta = f_pauta.result()
-        nomes = f_nomes.result()
+        # Convidado entra na lista que vai ao modelo: sem isso a ata trata um
+        # nome falado como desconhecido e evita atribuir a fala a ele.
+        nomes = f_nomes.result() + list(reuniao.get("convidados") or [])
         soltos = f_antigos.result()
 
     if not lista:
