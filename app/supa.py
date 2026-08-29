@@ -99,7 +99,17 @@ def delete(tabela, match):
     if not match:
         raise ValueError("delete sem filtro não é permitido")
     url, _ = _cfg()
-    params = {k: f"eq.{v}" for k, v in match.items()}
+    # Valor em lista vira `in.(...)`: apagar 10 linhas em UMA requisição em vez
+    # de dez. Cada ida ao PostgREST custa ~0,27s, então dez viram 2,7s de
+    # espera que o usuário sente e que não tem motivo para existir.
+    params = {}
+    for k, v in match.items():
+        if isinstance(v, (list, tuple, set)):
+            if not v:
+                return
+            params[k] = f"in.({','.join(str(x) for x in v)})"
+        else:
+            params[k] = f"eq.{v}"
     r = requests.delete(
         f"{url}/rest/v1/{tabela}",
         headers=_headers(),

@@ -563,7 +563,7 @@ def criar_reuniao(titulo, tipo, data_reuniao, participantes, criada_por):
     return r
 
 
-def pauta(reuniao, usuario):
+def pauta(reuniao, usuario, marcar_comentadas=True):
     """Ações dos participantes, na ordem em que precisam ser discutidas.
 
     A ordem não é cosmética: a regra da planilha é que ação crítica é revisada
@@ -578,7 +578,11 @@ def pauta(reuniao, usuario):
              if (a["responsavel_id"] in alvo or alvo & set(a.get("apoio_ids") or []))
              and a["status"] not in TERMINAIS]
 
-    # Já comentadas nesta reunião, para a tela marcar o que foi visto.
+    # Já comentadas nesta reunião, para a tela marcar o que foi visto. Quem só
+    # quer os códigos da pauta (a geração da ata) passa `marcar_comentadas=False`
+    # e economiza uma ida ao banco que não muda nada no resultado dele.
+    if not marcar_comentadas:
+        return itens
     try:
         vistos = {e["acao_id"] for e in supa.select("acao_eventos", {
             "select": "acao_id", "reuniao_id": f"eq.{reuniao['id']}"})}
