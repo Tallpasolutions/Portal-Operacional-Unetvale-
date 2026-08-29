@@ -50,7 +50,7 @@
   <p class="sub">{{ reuniao.data|replace('-', '/') }} · {{ 'Reunião individual' if reuniao.tipo == 'individual' else 'Reunião em grupo' }}</p>
 
   <div class="ficha">
-    <div><span class="l">Participantes</span>{% for uid in reuniao.participantes %}{{ nome_usuario(uid) }}{{ ', ' if not loop.last }}{% endfor %}</div>
+    <div><span class="l">Participantes</span>{% for uid in reuniao.participantes %}{{ nome_usuario(uid) }}{{ ', ' if not loop.last or reuniao.convidados }}{% endfor %}{% for c in reuniao.convidados or [] %}{{ c }} (convidado){{ ', ' if not loop.last }}{% endfor %}</div>
     <div><span class="l">Situação</span>{{ 'Finalizada' if reuniao.encerrada_em else 'Em andamento' }}</div>
     {% if duracao %}<div><span class="l">Duração gravada</span>{{ duracao }}</div>{% endif %}
   </div>

@@ -93,8 +93,18 @@ body.collapsed .brand-text, body.collapsed .menu a span:not(.ic){ display:none; 
 /* ===== Toolbar / filtros ===== */
 .toolbar{ display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-bottom:16px; }
 .toolbar label{ font-size:12.5px; font-weight:600; color:var(--muted); display:flex; align-items:center; gap:6px; }
-select,input[type=number],input[type=text],input[type=password],input[type=email]{
-  font-size:13.5px; padding:8px 10px; border:1px solid var(--borda-2); border-radius:8px; background:#fff; color:var(--ink); }
+/* `date`, `time` e `search` estavam de fora desta lista, e por isso caíam no
+   visual nativo do navegador — borda quadrada, fonte do sistema, altura
+   diferente — no meio de campos arredondados. Aparecia no filtro das Reuniões
+   e no De/Até da Troca de Poste. */
+select,input[type=number],input[type=text],input[type=password],input[type=email],
+input[type=date],input[type=time],input[type=datetime-local],input[type=search]{
+  font-size:13.5px; padding:8px 10px; border:1px solid var(--borda-2); border-radius:8px;
+  background:#fff; color:var(--ink); font-family:inherit; line-height:1.35; }
+/* Altura cravada: o editor interno do campo de data traz a linha de base
+   dele, e o campo saía 2px mais alto que o vizinho de texto — o suficiente
+   para a fileira de filtros parecer desalinhada. */
+input[type=date],input[type=time],input[type=datetime-local]{ height:36px; }
 input:focus,select:focus{ outline:2px solid var(--brand-l); border-color:var(--brand); }
 .btn{ background:var(--brand); color:#fff; border:none; border-radius:8px; padding:9px 16px; font-size:13.5px;
   font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:8px; }
@@ -460,3 +470,19 @@ tr.clicavel{ cursor:pointer; }
   color:var(--brand-d); border-radius:8px; padding:5px 12px; font-size:12px;
   font-weight:700; text-decoration:none; }
 .btn-pdf:hover{ background:var(--brand); border-color:var(--brand); color:#fff; }
+
+/* ---------- Dropdown de seleção múltipla ---------------------------------
+   `<details>` em vez de um `<select multiple>`: o multiple nativo é feio,
+   não mostra o que foi escolhido sem rolar, e no celular vira uma tela
+   inteira do sistema. Aqui o resumo diz quantos, e o painel só abre quando
+   se pede. Sem JS para abrir — o JS só escreve o resumo. */
+.dropdown{ position:relative; }
+.dropdown > summary{ list-style:none; cursor:pointer; font-size:13.5px;
+  padding:8px 10px; border:1px solid var(--borda-2); border-radius:8px;
+  background:#fff; color:var(--ink); display:flex; align-items:center; }
+.dropdown > summary::-webkit-details-marker{ display:none; }
+.dropdown > summary::after{ content:"▾"; margin-left:auto; color:var(--muted); font-size:11px; }
+.dropdown[open] > summary{ border-color:var(--brand); }
+.dropdown[open] > summary::after{ content:"▴"; }
+.dropdown > .lista-marcar{ position:absolute; z-index:30; left:0; right:0; margin-top:4px;
+  box-shadow:0 10px 28px rgba(11,23,39,.14); }

@@ -13,6 +13,7 @@ Papéis:
   * gestor   — cria ações e conduz reuniões nas áreas vinculadas a ele;
   * usuário  — vê e atualiza as ações onde é responsável ou apoio.
 """
+import re
 import sys
 from datetime import date, datetime, timezone
 
@@ -484,7 +485,7 @@ def resumo(acoes_visiveis):
 _COLS_REUNIAO = "id,titulo,tipo,data,notas,criada_por,encerrada_em,criado_em"
 _COLS_GRAVACAO = ("gravacao_status,gravacao_iniciada_em,consentimento_em,"
                   "transcricao,ata_markdown,ata_gerada_em,ata_modelo,"
-                  "gravacao_interrompida,gravacao_erro")
+                  "gravacao_interrompida,gravacao_erro,convidados")
 
 # None = ainda não sabemos. Fica em memória do processo; na Vercel cada cold
 # start reavalia, então depois da migration o selo volta sozinho.
@@ -513,7 +514,7 @@ def listar_reunioes(usuario, limite=30):
         # o selo e as primeiras linhas do resumo sem abrir a reunião.
         linhas = _select_reunioes(
             {"order": "data.desc", "limit": str(limite)},
-            "gravacao_status,ata_markdown,ata_gerada_em")
+            "gravacao_status,ata_markdown,ata_gerada_em,convidados")
         if not linhas:
             return []
         ids = [l["id"] for l in linhas]
@@ -551,27 +552,61 @@ def obter_reuniao(reuniao_id):
         return None
 
 
-def criar_reuniao(titulo, tipo, data_reuniao, participantes, criada_por):
+def criar_reuniao(titulo, tipo, data_reuniao, participantes, criada_por,
+                  convidados=None):
     if not (titulo or "").strip():
         raise ValueError("Dê um título à reunião.")
     if tipo not in ("individual", "grupo"):
         raise ValueError("Tipo de reunião inválido.")
     participantes = [p for p in (participantes or []) if p]
-    if not participantes:
-        raise ValueError("Escolha ao menos um participante.")
-    if tipo == "individual" and len(participantes) > 1:
+    convidados = _limpar_convidados(convidados)
+    if not participantes and not convidados:
+        raise ValueError("Escolha ao menos um participante ou convidado.")
+    if tipo == "individual" and len(participantes) + len(convidados) > 1:
         raise ValueError("Reunião individual tem um participante só.")
 
-    criada = supa.insert("reunioes", {
+    registro = {
         "titulo": titulo.strip(), "tipo": tipo,
         "data": data_reuniao or date.today().isoformat(),
-        "criada_por": criada_por})
+        "criada_por": criada_por}
+    if convidados:
+        registro["convidados"] = convidados
+    try:
+        criada = supa.insert("reunioes", registro)
+    except Exception:
+        # Migration 0008 ainda não aplicada: cria a reunião sem os convidados
+        # em vez de recusar. Perder os nomes é ruim; perder a reunião é pior.
+        if "convidados" not in registro:
+            raise
+        _falhou("criar_reuniao (migration 0008 aplicada?)", "coluna convidados")
+        registro.pop("convidados")
+        criada = supa.insert("reunioes", registro)
     r = criada[0] if isinstance(criada, list) else criada
     for uid in participantes:
         supa.upsert("reuniao_participantes",
                     {"reuniao_id": r["id"], "usuario_id": uid},
                     on_conflict="reuniao_id,usuario_id")
     return r
+
+
+def _limpar_convidados(bruto):
+    """Texto livre -> lista de nomes, sem repetido e sem vazio.
+
+    Aceita vírgula, ponto-e-vírgula ou uma linha por nome: quem digita às
+    pressas usa os três, e recusar por causa do separador seria implicância.
+    """
+    if not bruto:
+        return []
+    if isinstance(bruto, str):
+        bruto = re.split(r"[,;\n]", bruto)
+    vistos, saida = set(), []
+    for nome in bruto:
+        nome = " ".join((nome or "").split())
+        chave = nome.casefold()
+        if nome and chave not in vistos:
+            vistos.add(chave)
+            saida.append(nome[:80])
+    return saida
 
 
 def pauta(reuniao, usuario, marcar_comentadas=True):

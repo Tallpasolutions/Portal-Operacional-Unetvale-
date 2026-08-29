@@ -146,4 +146,33 @@
   // Desenha ao carregar só se o Painel já estiver visível.
   const painel = document.querySelector('[data-painel="painel"]');
   if (painel && !painel.hidden) desenhar();
+
+  // ---- Dropdown de participantes ----------------------------------------
+  // O <details> abre e fecha sozinho; o JS só escreve quantos foram marcados
+  // no resumo. Sem isso o dropdown fechado não diria nada sobre a escolha.
+  const dd = document.getElementById("dd-participantes");
+  if (dd) {
+    const resumo = dd.querySelector("[data-resumo]");
+    const caixas = dd.querySelectorAll('input[type="checkbox"]');
+
+    function escrever() {
+      const marcados = [...caixas].filter((c) => c.checked);
+      if (!marcados.length) { resumo.textContent = "Escolher participantes"; return; }
+      if (marcados.length <= 2) {
+        resumo.textContent = marcados
+          .map((c) => c.closest("label").textContent.trim())
+          .join(", ");
+        return;
+      }
+      resumo.textContent = marcados.length + " participantes";
+    }
+
+    dd.addEventListener("change", escrever);
+    // Clique fora fecha — senão o painel fica aberto por cima do resto do
+    // formulário e esconde os campos de baixo.
+    document.addEventListener("click", (e) => {
+      if (dd.open && !dd.contains(e.target)) dd.open = false;
+    });
+    escrever();
+  }
 })();
