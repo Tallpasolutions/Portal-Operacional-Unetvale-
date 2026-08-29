@@ -122,3 +122,95 @@ def upsert(tabela, registro, on_conflict):
     r.raise_for_status()
     data = r.json()
     return data[0] if isinstance(data, list) and data else data
+
+
+# =====================================================================
+# Storage — arquivos de áudio das reuniões.
+#
+# Por que o navegador sobe DIRETO para o Storage, com URL assinada, em
+# vez de mandar o arquivo para o Flask: a função serverless da Vercel tem
+# limite de corpo de requisição (~4,5 MB) e um áudio de reunião passa
+# disso com folga. A URL assinada tira o Flask do caminho do upload — ele
+# só autoriza. De quebra, o áudio não trafega duas vezes.
+#
+# O bucket é PRIVADO. Todo acesso aqui usa a service_role, que ignora
+# RLS; o browser nunca recebe a chave, só um token de escrita para UM
+# caminho específico, com validade curta.
+# =====================================================================
+
+# Arquivo é mais lento que JSON: 15s derruba upload de trecho em 4G ruim.
+TIMEOUT_ARQUIVO = 45
+
+
+def storage_assinar_upload(bucket, caminho):
+    """Autoriza o browser a gravar UM objeto. Devolve a URL completa do PUT.
+
+    A resposta do Supabase traz um caminho relativo (`/object/upload/...`);
+    devolvemos já absoluto porque quem consome é o JS, e montar URL no
+    front é onde barra duplicada e host errado aparecem.
+    """
+    url, _ = _cfg()
+    r = requests.post(
+        f"{url}/storage/v1/object/upload/sign/{bucket}/{caminho}",
+        # Duas exigências da API de Storage, ambas descobertas na marra:
+        #
+        # 1. `x-upsert: true` no CABEÇALHO. Sem ele, assinar um caminho que já
+        #    tem objeto devolve 409 "resource already exists" — e é exatamente
+        #    o que acontece quando a rede oscila e o navegador reenvia o mesmo
+        #    trecho. Pôr `upsert` no corpo NÃO resolve; só o cabeçalho vale.
+        # 2. Corpo presente, mesmo trivial. `_headers()` manda
+        #    `Content-Type: application/json`, e a API responde 400 "Body
+        #    cannot be empty when content-type is set to application/json".
+        headers=_headers({"x-upsert": "true"}),
+        json={},
+        timeout=TIMEOUT,
+    )
+    r.raise_for_status()
+    relativo = r.json().get("url") or ""
+    return f"{url}/storage/v1{relativo}"
+
+
+def storage_baixar(bucket, caminho):
+    """Lê o objeto de volta, em bytes. É o que alimenta a transcrição."""
+    url, _ = _cfg()
+    r = requests.get(
+        f"{url}/storage/v1/object/{bucket}/{caminho}",
+        headers=_headers(),
+        timeout=TIMEOUT_ARQUIVO,
+    )
+    r.raise_for_status()
+    return r.content
+
+
+def storage_apagar(bucket, caminho):
+    """Apaga o objeto. Usado pelo expurgo dos 30 dias.
+
+    404 é tratado como sucesso: o objetivo é 'não existe mais'. Levantar
+    erro porque já tinha sumido faria o expurgo travar para sempre no
+    mesmo registro.
+    """
+    url, _ = _cfg()
+    # Sem `Content-Type`: a API de Storage recusa DELETE com corpo vazio quando
+    # o cabeçalho diz application/json (o mesmo 400 do `storage_assinar_upload`,
+    # que lá se resolve mandando um corpo — aqui não há corpo para mandar).
+    cabecalhos = _headers()
+    cabecalhos.pop("Content-Type", None)
+
+    r = requests.delete(
+        f"{url}/storage/v1/object/{bucket}/{caminho}",
+        headers=cabecalhos,
+        timeout=TIMEOUT,
+    )
+    # "Já não existe" é sucesso — o objetivo do expurgo é a ausência do
+    # arquivo, não o ato de apagar. Mas a API não diz isso com 404: devolve
+    # HTTP 400 com `"statusCode":"404","code":"NoSuchKey"` NO CORPO. Conferir
+    # só o status deixaria o expurgo travado para sempre no mesmo registro,
+    # tentando apagar o que já sumiu.
+    if r.status_code >= 400:
+        try:
+            corpo = r.json()
+        except ValueError:
+            corpo = {}
+        if str(corpo.get("statusCode")) == "404" or corpo.get("code") == "NoSuchKey":
+            return
+    r.raise_for_status()

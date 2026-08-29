@@ -181,6 +181,34 @@
   </div>
 </div>
 {% endif %}
+
+{# Em reuniões — a mesma ação vista de fora, ao longo do tempo. Alimentado
+   pelas atas geradas da transcrição (app/reuniao_ia.py). #}
+{% if itens_reuniao %}
+<div class="card" style="margin-top:16px;">
+  <div class="card-h">
+    <span>Em reuniões ({{ itens_reuniao|length }})</span>
+    <span class="subnote" style="margin:0;">o que as atas registraram sobre esta ação</span>
+  </div>
+  <div class="card-b">
+    <div class="linha-tempo">
+      {% for i in itens_reuniao %}
+      <div class="item-pauta">
+        <div class="item-pauta-topo">
+          <span class="badge badge-cinza">{{ i.tipo }}</span>
+          <span>{{ i.texto }}</span>
+        </div>
+        <div class="item-pauta-meta">
+          {% if i.reunioes %}<a href="{{ url_for('dash.reuniao_detalhe', reuniao_id=i.reunioes.id) }}">{{ i.reunioes.titulo }}</a> · {{ i.reunioes.data|replace('-', '/') }}{% endif %}
+          {% if i.prazo %} · prazo {{ i.prazo|replace('-', '/') }}{% endif %}
+          {% if i.aplicado_em %} · <b>registrado na linha do tempo</b>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}

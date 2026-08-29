@@ -14,6 +14,9 @@
     <span>{{ reuniao.titulo }}</span>
     {% if reuniao.encerrada_em %}<span class="badge badge-cinza">Ata congelada</span>
     {% else %}<span class="badge badge-verde">Em andamento</span>{% endif %}
+    {% if estado.status == 'gravando' %}<span class="badge badge-vermelho">● Gravando</span>
+    {% elif estado.status == 'transcrevendo' %}<span class="badge badge-ambar">Transcrevendo</span>
+    {% elif estado.tem_ata %}<span class="badge badge-verde">Ata pronta</span>{% endif %}
   </div>
   <div class="card-b">
     <div class="ficha">
@@ -24,6 +27,79 @@
     {% if reuniao.notas %}<p style="margin:14px 0 0;"><span class="l">Notas gerais</span><br>{{ reuniao.notas }}</p>{% endif %}
   </div>
 </div>
+
+{# Contexto anterior — o que estas mesmas ações já ocuparam em reuniões
+   passadas. A contagem vem do banco, não do modelo (app/reuniao_ia.py). #}
+{% if contexto %}
+<div class="card" style="margin-top:16px;">
+  <div class="card-h">
+    <span>Contexto anterior ({{ contexto|length }})</span>
+    <span class="subnote" style="margin:0;">já discutido antes e ainda em aberto</span>
+  </div>
+  <div class="card-b">
+    <p class="subnote" style="margin-top:0;">
+      Estas ações voltaram à mesa em mais de uma reunião e continuam sem conclusão.
+      O número de reuniões é contagem do histórico — não é estimativa.
+    </p>
+    {% for a in contexto %}
+    <div class="item-pauta">
+      <div class="item-pauta-topo">
+        <a href="{{ url_for('dash.acao_detalhe', acao_id=a.id) }}"><b>{{ a.codigo }}</b> {{ a.titulo }}</a>
+        <span class="badge badge-ambar">{{ a.reunioes }} reuniões</span>
+        <span class="badge badge-cinza">{{ a.status }}</span>
+      </div>
+      <div class="item-pauta-meta">
+        {{ nome_usuario(a.responsavel_id) }} · {{ a.progresso }}%
+        {% if a.prazo %} · prazo {{ a.prazo|replace('-', '/') }}{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{# Gravação — só para quem conduz e só enquanto a reunião está aberta.
+   O recorte é do servidor: para os demais este bloco não existe no HTML. #}
+{% if conduz and not reuniao.encerrada_em %}
+<div class="card gravador" id="gravador" style="margin-top:16px;">
+  <div class="card-h">
+    <span>Gravação</span>
+    {# Subtítulo curto de propósito: `.card-h` é flex sem gap, e título curto
+       com subtítulo longo se encostam no celular. A explicação inteira mora
+       no corpo do card, logo abaixo. #}
+    <span class="subnote" style="margin:0;">trechos de {{ trecho_segundos // 60 }} min</span>
+  </div>
+  <div class="card-b">
+    <p class="subnote" style="margin-top:0;">
+      A gravação só começa por este botão. Avise os participantes: o áudio é
+      transcrito para gerar a ata e fica guardado por 30 dias — depois disso
+      some, e a ata permanece.
+    </p>
+
+    <div class="gravador-linha">
+      <button class="btn" type="button" id="g-iniciar">● Iniciar gravação</button>
+      <button class="btn sec" type="button" id="g-parar" disabled>■ Parar</button>
+      <span class="gravador-relogio" id="g-relogio">00:00</span>
+      <span class="gravador-estado" id="g-estado">
+        {% if estado.total %}{{ estado.ok }} de {{ estado.total }} trechos transcritos{% else %}Parado{% endif %}
+      </span>
+    </div>
+
+    <div class="gravador-medidor"><i id="g-nivel"></i></div>
+    <div id="g-aviso" class="aviso-erro" style="display:none;"></div>
+
+    {% if estado.erro %}
+    <p class="subnote" style="margin-bottom:0;">
+      {{ estado.erro }} trecho(s) falharam na transcrição. O áudio deles está
+      guardado — use <b>Gerar ata</b> depois de tentar de novo.
+    </p>
+    {% endif %}
+    {% if estado.erro_msg %}
+    <div class="aviso-erro">{{ estado.erro_msg }}</div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
 
 <div class="card" style="margin-top:16px;">
   <div class="card-h">
@@ -69,6 +145,87 @@
   </div>
 </div>
 
+{# Ata gerada da transcrição. Existe independente da ata congelada: os
+   comentários do dia não mudam nunca; esta pode ser refeita enquanto o
+   áudio existir (30 dias). #}
+{% if reuniao.ata_markdown %}
+<div class="card" style="margin-top:16px;">
+  <div class="card-h">
+    <span>Ata</span>
+    <span class="subnote" style="margin:0;">
+      gerada por IA{% if reuniao.ata_gerada_em %} em {{ reuniao.ata_gerada_em[:16]|replace('T', ' ') }}{% endif %} — confira antes de usar
+    </span>
+  </div>
+  <div class="card-b">
+    {% if reuniao.gravacao_interrompida %}
+    <div class="aviso-erro">
+      A gravação foi interrompida. Esta ata cobre só o áudio que chegou ao servidor.
+    </div>
+    {% endif %}
+
+    <div class="ata" id="ata-corpo">{{ ata_html|safe }}</div>
+
+    <div class="gravador-linha" style="margin-top:14px;">
+      <button class="btn sec" type="button" id="ata-copiar">Copiar Markdown</button>
+      <a class="btn sec" download="ata-{{ reuniao.data }}.md"
+         href="data:text/markdown;charset=utf-8,{{ reuniao.ata_markdown|urlencode }}">Baixar .md</a>
+      {% if conduz %}
+      <form method="post" action="{{ url_for('dash.reuniao_ata', reuniao_id=reuniao.id) }}" style="display:inline;">
+        <button class="btn sec" type="submit">Gerar de novo</button>
+      </form>
+      {% endif %}
+    </div>
+    {# O Markdown vai num <script type="application/json">, não num textarea
+       fora da tela: `position:absolute; left:-9999px` inflava a área rolável
+       da página e deixava um vazio enorme abaixo da ata. #}
+    <script id="ata-fonte" type="application/json">{{ reuniao.ata_markdown|tojson }}</script>
+  </div>
+</div>
+
+{% if itens_ata %}
+<div class="card" style="margin-top:16px;">
+  <div class="card-h">
+    <span>Itens da ata ({{ itens_ata|length }})</span>
+    <span class="subnote" style="margin:0;">registrar na ação é decisão sua</span>
+  </div>
+  <div class="card-b">
+    <p class="subnote" style="margin-top:0;">
+      Registrar grava o item como comentário na linha do tempo da ação. A linha do
+      tempo é <b>permanente</b> — não há como desfazer depois, por isso nada entra
+      lá sozinho.
+    </p>
+    {% for i in itens_ata %}
+    <div class="item-pauta">
+      <div class="item-pauta-topo">
+        <span class="badge badge-cinza">{{ i.tipo }}</span>
+        <span>{{ i.texto }}</span>
+      </div>
+      <div class="item-pauta-meta">
+        {% if i.prazo %}prazo {{ i.prazo|replace('-', '/') }} · {% endif %}
+        {% if i.acoes %}
+          {{ i.acoes.codigo }} — {{ i.acoes.titulo }}
+        {% else %}
+          sem ação vinculada
+        {% endif %}
+      </div>
+      {% if conduz and i.acao_id %}
+        {% if i.aplicado_em %}
+        <span class="badge badge-verde">✓ registrado na ação</span>
+        {% else %}
+        <form method="post" class="form-comentar"
+              action="{{ url_for('dash.reuniao_item_aplicar', reuniao_id=reuniao.id, item_id=i.id) }}"
+              onsubmit="return confirm('Registrar este item na {{ i.acoes.codigo if i.acoes }}? A linha do tempo da ação é permanente.');">
+          <button class="btn sec" type="submit">Registrar na {{ i.acoes.codigo if i.acoes else 'ação' }}</button>
+        </form>
+        {% endif %}
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+{% endif %}
+
 {% if conduz and not reuniao.encerrada_em %}
 <div class="card" style="margin-top:16px;">
   <div class="card-h">Encerrar reunião</div>
@@ -76,9 +233,11 @@
     <p class="subnote" style="margin-top:0;">
       Encerrar congela a ata: os comentários ficam como foram ditos no dia e a reunião não
       aceita mais registros. Cada comentário continua aparecendo na linha do tempo da ação,
-      marcado com a reunião de origem.
+      marcado com a reunião de origem. Se houver gravação em andamento, o último trecho é
+      transcrito e a ata é gerada antes de congelar.
     </p>
-    <form method="post" action="{{ url_for('dash.reuniao_encerrar', reuniao_id=reuniao.id) }}"
+    <form method="post" id="form-encerrar"
+          action="{{ url_for('dash.reuniao_encerrar', reuniao_id=reuniao.id) }}"
           onsubmit="return confirm('Encerrar a reunião? Depois disso não é possível comentar nela.');">
       <div class="field">
         <label>Notas gerais da reunião</label>
@@ -90,4 +249,51 @@
   </div>
 </div>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+{# O gravador só é servido a quem pode gravar. O servidor já recusaria as
+   rotas, mas dado que a pessoa não pode usar não deve chegar ao browser —
+   CLAUDE.md §5. De quebra, ninguém baixa um JS que não vai rodar. #}
+{% if conduz and not reuniao.encerrada_em %}
+<script>
+  window.__REUNIAO__ = {
+    podeGravar: true,
+    trechoSegundos: {{ trecho_segundos }},
+    urlIniciar: "{{ url_for('dash.reuniao_detalhe', reuniao_id=reuniao.id) }}/gravacao/iniciar",
+    urlAudio: "{{ url_for('dash.reuniao_detalhe', reuniao_id=reuniao.id) }}/audio/url",
+    urlTranscrever: "{{ url_for('dash.reuniao_detalhe', reuniao_id=reuniao.id) }}/audio/__N__/transcrever",
+    urlAta: "{{ url_for('dash.reuniao_detalhe', reuniao_id=reuniao.id) }}/ata"
+  };
+</script>
+<script src="{{ url_for('static', filename='js/reuniao.js') }}"></script>
+{% endif %}
+
+<script>
+  // Copiar a ata em Markdown (e não o HTML renderizado): é o formato que
+  // cola inteiro no WhatsApp, no e-mail e no Notion sem virar sopa de tag.
+  document.addEventListener("click", function (e) {
+    var alvo = e.target;
+    if (!alvo || alvo.id !== "ata-copiar") return;
+    var fonte = document.getElementById("ata-fonte");
+    if (!fonte) return;
+
+    var md;
+    try { md = JSON.parse(fonte.textContent); } catch (err) { return; }
+
+    function avisar(txt) {
+      alvo.textContent = txt;
+      setTimeout(function () { alvo.textContent = "Copiar Markdown"; }, 2000);
+    }
+    // `navigator.clipboard` exige contexto seguro — existe em HTTPS e em
+    // localhost, que são os dois lugares onde este portal roda.
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(md)
+        .then(function () { avisar("Copiado!"); })
+        .catch(function () { avisar("Não foi possível copiar"); });
+    } else {
+      avisar("Copie pelo botão Baixar .md");
+    }
+  });
+</script>
 {% endblock %}

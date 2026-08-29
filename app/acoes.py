@@ -463,13 +463,46 @@ def resumo(acoes_visiveis):
 # precisa recuperar depois é "o que combinamos na terça" — e isso exige saber
 # quem estava, quais ações foram olhadas e o que se decidiu em cada uma.
 # --------------------------------------------------------------------------
+# Colunas que a migration 0006 acrescentou. O código sobe para a Vercel por
+# deploy e a migration é aplicada à mão no SQL Editor — as duas coisas não
+# acontecem no mesmo segundo. Se o código chegar primeiro, o PostgREST devolve
+# 400 para o `select` com as colunas novas, e a lista de reuniões viraria
+# "nenhuma reunião ainda": vazio apresentado como resultado, que é exatamente
+# o que este projeto não faz. Então cai para o conjunto antigo e segue
+# mostrando as reuniões — só sem o selo de ata, até a migration rodar.
+_COLS_REUNIAO = "id,titulo,tipo,data,notas,criada_por,encerrada_em,criado_em"
+_COLS_GRAVACAO = ("gravacao_status,gravacao_iniciada_em,consentimento_em,"
+                  "transcricao,ata_markdown,ata_gerada_em,ata_modelo,"
+                  "gravacao_interrompida,gravacao_erro")
+
+# None = ainda não sabemos. Fica em memória do processo; na Vercel cada cold
+# start reavalia, então depois da migration o selo volta sozinho.
+_tem_colunas_gravacao = None
+
+
+def _select_reunioes(filtro, extras):
+    global _tem_colunas_gravacao
+    if _tem_colunas_gravacao is not False:
+        try:
+            linhas = supa.select("reunioes", dict(
+                filtro, select=f"{_COLS_REUNIAO},{extras}"))
+            _tem_colunas_gravacao = True
+            return linhas
+        except Exception as e:
+            _falhou("_select_reunioes (migration 0006 ainda não aplicada?)", e)
+            _tem_colunas_gravacao = False
+    return supa.select("reunioes", dict(filtro, select=_COLS_REUNIAO))
+
+
 def listar_reunioes(usuario, limite=30):
     """Reuniões que a pessoa pode ver: gestor vê as que conduz, participante
     vê aquelas de que participou."""
     try:
-        linhas = supa.select("reunioes", {
-            "select": "id,titulo,tipo,data,notas,criada_por,encerrada_em,criado_em",
-            "order": "data.desc", "limit": str(limite)})
+        # `gravacao_status` e `ata_markdown` entram para a lista poder mostrar
+        # o selo e as primeiras linhas do resumo sem abrir a reunião.
+        linhas = _select_reunioes(
+            {"order": "data.desc", "limit": str(limite)},
+            "gravacao_status,ata_markdown,ata_gerada_em")
         if not linhas:
             return []
         ids = [l["id"] for l in linhas]
@@ -494,11 +527,10 @@ def listar_reunioes(usuario, limite=30):
 
 def obter_reuniao(reuniao_id):
     try:
-        r = supa.select_one("reunioes", {
-            "select": "id,titulo,tipo,data,notas,criada_por,encerrada_em",
-            "id": f"eq.{reuniao_id}"})
-        if not r:
+        achadas = _select_reunioes({"id": f"eq.{reuniao_id}"}, _COLS_GRAVACAO)
+        if not achadas:
             return None
+        r = achadas[0]
         r["participantes"] = [p["usuario_id"] for p in supa.select(
             "reuniao_participantes", {"select": "usuario_id",
                                       "reuniao_id": f"eq.{reuniao_id}"})]

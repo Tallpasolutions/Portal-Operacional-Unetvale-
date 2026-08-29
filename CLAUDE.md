@@ -82,6 +82,32 @@ servidor, e cuidado redobrado com migration destrutiva.
 
 Mais `/usuarios`, `/monitoramento` (admin) e `/configuracoes` (todos).
 
+### Reuniões (dentro de Ações, aba `?aba=reunioes`)
+
+A reunião grava áudio pelo navegador, transcreve durante a própria reunião e
+gera a ata. **Não é módulo à parte**: mora em `/acoes?aba=reunioes` e
+`/reunioes/<id>`; a camada de dados é `app/reuniao_ia.py` e o cliente da Groq é
+`app/ia.py`.
+
+Quem orquestra é o **navegador**, e isso não é escolha estética: a Vercel é
+serverless, não tem processo em background e limita o corpo da requisição. Então
+o JS corta o áudio em trechos de ~2 min, sobe cada um direto para o Storage com
+URL assinada e chama o Flask uma vez por trecho. Cada requisição fecha em
+segundos, e ao clicar em "Encerrar" só falta o último trecho.
+
+O que expira e o que fica: **o áudio some em 30 dias**; `transcricao`,
+`ata_markdown` e `reuniao_ata_itens` ficam para sempre. Depois dos 30 dias a ata
+não pode mais ser regerada — a fonte foi apagada.
+
+O que **não** é feito por IA, de propósito: contar em quantas reuniões uma ação
+apareceu, decidir o que é recorrente e formatar a ata. Os três são código em
+`reuniao_ia.py`. O modelo transcreve e redige; todo número na tela veio do
+Postgres.
+
+Item de ata só vira comentário na ação por **clique humano** — `acao_eventos` é
+append-only por trigger, e texto de IA que entrasse lá sozinho seria
+irreversível.
+
 ### Papéis
 
 Três, independentes — a pessoa pode ser um, vários ou nenhum:
@@ -193,6 +219,49 @@ legitimamente vê zero no IQI (a tela explica).
 `supervisores.APELIDOS_EMPRESA` e é servido ao JS pelo template. **Uma
 definição só** — duas cópias divergem e o filtro perde técnico sem erro na tela.
 
+**`MediaRecorder.start(timeslice)` não serve para cortar áudio.** Só o primeiro
+pedaço carrega o cabeçalho do container; os seguintes não são arquivo válido
+sozinhos e o Whisper os recusa. `app/static/js/reuniao.js` **rotaciona** o
+gravador (`stop()` + `start()`) para que cada trecho seja um arquivo completo.
+
+**Safari grava `audio/mp4`, não `webm`.** Sem escolher o formato por
+`MediaRecorder.isTypeSupported`, a gravação no iPhone falha calada — e é do
+celular que a reunião costuma ser gravada.
+
+**A Vercel limita o corpo da requisição (~4,5 MB).** Por isso o áudio sobe
+direto para o Storage com URL assinada (`supa.storage_assinar_upload`) e nunca
+passa pelo Flask. Mandar o arquivo para uma rota funciona no teste com 30
+segundos e quebra na reunião de verdade.
+
+**Tokens de raciocínio saem do `max_tokens`.** O `gpt-oss` é modelo de
+raciocínio: com `max_tokens=400` ele gastou 398 pensando e devolveu `content`
+**vazio**, com `finish_reason="length"` e HTTP 200 — nenhum erro. `app/ia.py`
+manda `reasoning_effort` (env `GROQ_REASONING_EFFORT=low`, que derruba o
+raciocínio de ~400 para ~14 tokens) e **levanta** quando a resposta vem vazia.
+Devolver `""` em silêncio produzia ata com seção em branco.
+
+**O modelo inventa o ano de uma data sem ano.** "dia dez de setembro" virou
+`2023-09-10` — prazo três anos no passado, que entra numa coluna `date` sem
+ninguém reclamar. `ia.gerar_ata` recebe a **data da reunião** como âncora (e não
+"hoje", para regerar a ata meses depois não mudar prazos), e `_data_iso` descarta
+o que cai fora da janela de 1 ano atrás a 3 à frente.
+
+**Storage do Supabase: três recusas com a mesma cara.** Todas dão 400 e nenhuma
+diz o motivo óbvio. (a) Assinar upload para um caminho que **já tem objeto**
+exige `x-upsert: true` no **cabeçalho** — no corpo não vale, e sem isso o
+reenvio de um trecho após queda de rede volta 409. (b) `POST`/`DELETE` com
+`Content-Type: application/json` e corpo vazio são recusados: o sign manda
+`json={}`, e o delete **remove** o cabeçalho. (c) `DELETE` de objeto inexistente
+devolve **HTTP 400 com `"statusCode":"404"` no corpo** — conferir só o status
+deixa o expurgo travado para sempre no mesmo registro.
+
+**GET no Storage serve do cache depois do expurgo.** Apagar funciona, mas a
+leitura autenticada ainda devolve o arquivo por um tempo. Para conferir se um
+objeto sumiu, use o endpoint de listagem, não o GET.
+
+**Ids de modelo da Groq mudam.** Ficam em `GROQ_MODELO_*` no ambiente. Cravados
+no código, viram um HTTP 400 sem explicação no dia em que a Groq aposentar o id.
+
 **Pooler do Supabase: `aws-1-us-west-2`.** A região está no hostname; a errada
 dá "tenant not found".
 
@@ -244,5 +313,12 @@ a.run(port=5001, use_reloader=False)"
   `OS_ENVIO_HABILITADO=false` e **nunca rodou ponta a ponta**.
 - **Tela de revisão com inserção de localização** (Troca de Poste) nunca foi
   feita — é o item mais antigo em aberto.
+- **Reuniões com gravação**: migration `0006` aplicada, bucket privado
+  `reuniao-audio` criado, chave e modelos no `.env`
+  (`whisper-large-v3-turbo` + `openai/gpt-oss-120b`). O ciclo do servidor foi
+  verificado ponta a ponta em 28/08/2026 — URL assinada, upload direto,
+  transcrição, ata e expurgo. **Falta exercitar a captura pelo navegador**
+  (`MediaRecorder`) numa reunião de verdade, e o `aplicar_item`, que escreve em
+  `acao_eventos` e por isso não foi testado contra produção.
 - **Backup do Supabase não foi confirmado.** Ações e Troca de Poste não têm de
   onde ser recoletados. Confirme antes de qualquer operação destrutiva.
