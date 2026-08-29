@@ -267,7 +267,7 @@
             <td>{% if r.encerrada_em %}<span class="badge badge-cinza">Ata congelada</span>
                 {% else %}<span class="badge badge-verde">Em andamento</span>{% endif %}</td>
             <td>{% if r.gravacao_status == 'gravando' %}<span class="badge badge-vermelho">● Gravando</span>
-                {% elif r.gravacao_status == 'transcrevendo' %}<span class="badge badge-ambar">Transcrevendo</span>
+                {% elif r.gravacao_status == 'transcrevendo' %}<span class="badge badge-ambar">Ata pendente</span>
                 {% elif r.gravacao_status == 'erro' %}<span class="badge badge-vermelho">Falhou</span>
                 {% elif r.ata_markdown %}<span class="badge badge-verde">Ata pronta</span>
                 {% else %}<span class="badge badge-cinza">Sem gravação</span>{% endif %}</td>
