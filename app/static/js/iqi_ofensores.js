@@ -1,7 +1,10 @@
-// IQI/IQM — visualização "Ofensores": técnicos com % ACIMA DA MÉDIA do mês
-// (entre os avaliados, i.e., com ao menos minOS OSs), do pior para o melhor.
-// Componente independente; segue o indicador do seletor compartilhado e usa a
-// meta oficial do indicador. Meses parciais entram (acompanhamento do mês).
+// IQI/IQM — bloco "Ofensores": técnicos com % ACIMA DA MÉDIA do mês (entre os
+// avaliados, i.e., com ao menos minOS OSs), do pior para o melhor.
+//
+// Fica DENTRO da visualização Gráfico, abaixo dela, e não tem filtro próprio:
+// mês, supervisor e indicador vêm do evento `iqifiltro`, que o iqi.js dispara.
+// Ter dois seletores de mês na mesma tela deixaria alguém comparar o ofensor
+// de julho com o gráfico de agosto sem perceber.
 (function () {
   const PACOTE = window.__PACOTE__ || {};
   if (!document.getElementById("view-ofensores") || !Object.keys(PACOTE).length) return;
@@ -19,16 +22,6 @@
     lim.setDate(lim.getDate() + 30);
     return new Date() > lim;
   };
-
-  function montarMeses() {
-    const d = dados();
-    const sel = document.getElementById("of-mes");
-    sel.innerHTML = d.meses.map((m, i) =>
-      `<option value="${i}">${m}${mesFechado(m) ? "" : " (Parcial)"}</option>`).join("");
-    // padrão = mês mais recente (o objetivo é acompanhar o andamento)
-    mesIdx = d.meses.length - 1;
-    sel.value = mesIdx;
-  }
 
   // Recorte por supervisor: null = todos. Ver iqi_supervisor.js.
   let alcanceSup = null; // equipes + tecnicos avulsos do supervisor
@@ -49,7 +42,9 @@
 
   function render() {
     const d = dados();
-    if (mesIdx === null || mesIdx >= d.meses.length) montarMeses();
+    if (mesIdx === null || mesIdx >= d.meses.length) mesIdx = d.meses.length - 1;
+    const rot = document.getElementById("of-mes-rotulo");
+    if (rot) rot.textContent = d.meses[mesIdx] + (mesFechado(d.meses[mesIdx]) ? "" : " (Parcial)");
     document.querySelectorAll(".tm-ind-nome").forEach((e) => (e.textContent = d.label || indAtual));
     const { avaliados, media, ofensores, meta } = calcular();
 
@@ -110,24 +105,14 @@
       : `<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px;">Nenhum ofensor no mês (todos na média ou abaixo).</td></tr>`;
   }
 
-  document.getElementById("of-mes").addEventListener("change", (e) => { mesIdx = +e.target.value; render(); });
-
-  // segue o indicador compartilhado (IQI/IQM)
-  document.getElementById("indToggle").addEventListener("click", (e) => {
-    const btn = e.target.closest("button[data-id]");
-    if (!btn || btn.dataset.id === indAtual) return;
-    indAtual = btn.dataset.id; mesIdx = null;
-    if (!document.getElementById("view-ofensores").hidden) render();
+  // Mês, indicador e supervisor vêm do filtro único da página (iqi.js).
+  document.addEventListener("iqifiltro", (e) => {
+    indAtual = e.detail.ind || indAtual;
+    mesIdx = e.detail.mesIdx;
+    alcanceSup = e.detail.alcanceSup;
+    render();
   });
 
-  // renderiza quando a visualização é ativada
-  document.addEventListener("iqiview", (e) => { if (e.detail === "ofensores") render(); });
-
-  if (window.__iqiSupervisor) {
-    window.__iqiSupervisor.popular("sup-ofensores", (alcance) => {
-      alcanceSup = alcance;
-      render();
-    }, () => dados().tecnicos);
-  }
-
+  // A visualização Gráfico é a que contém este bloco.
+  document.addEventListener("iqiview", (e) => { if (e.detail === "grafico") render(); });
 })();

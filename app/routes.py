@@ -12,8 +12,8 @@ from flask import (
     session, url_for
 )
 
-from . import (acoes, supa, dados, reuniao_ia, solicitacao, supervisores,
-               troca_poste as tp)
+from . import (acoes, supa, dados, gerencial, reuniao_ia, solicitacao,
+               supervisores, troca_poste as tp)
 from .auth import login_obrigatorio, admin_obrigatorio, usuario_atual
 
 bp = Blueprint("dash", __name__)
@@ -34,6 +34,19 @@ def injeta_status():
 def home():
     # Sem tela inicial: cai direto na Produtividade.
     return redirect(url_for("dash.produtividade"))
+
+
+@bp.route("/dashboard")
+@login_obrigatorio
+def dashboard():
+    """Visão gerencial: qualidade, causa raiz, churn, esteira e atendimento.
+
+    Página única, sem sub-abas: a leitura gerencial é a soma dos blocos, e
+    separá-los obrigaria a trocar de tela para relacionar reincidência com
+    cancelamento — que é justamente a relação que interessa.
+    """
+    return render_template("dashboard.html", ativo="dashboard",
+                           pacote=gerencial.pacote())
 
 
 @bp.route("/produtividade")
@@ -65,9 +78,6 @@ def produtividade():
                            apelidos_empresa=supervisores.APELIDOS_EMPRESA)
 
 
-# Equipes de infraestrutura NÃO participam do IQI/IQM (só time operacional).
-_INFRA = re.compile(r"\binfra\b|fandaruff", re.I)
-
 def _agrupar_empresa(rotulo):
     """Reescreve só a empresa do rótulo "EMPRESA - Nome"; o nome é preservado.
 
@@ -89,7 +99,7 @@ def _so_operacional(payload):
     p["tecnicos"] = [
         {**t, "nome": _agrupar_empresa(t.get("nome", ""))}
         for t in payload["tecnicos"]
-        if not _INFRA.search(t.get("nome", ""))
+        if not supervisores.eh_infra(t.get("nome", ""))
     ]
     return p
 
@@ -105,6 +115,7 @@ def iqi():
     if iqm_row and iqm_row.get("payload"):
         pacote["IQM"] = _so_operacional(iqm_row["payload"])
     return render_template("iqi.html", ativo="iqi", pacote=pacote,
+                           causa_raiz=gerencial.causa_raiz(),
                            meta=_meta(iqi_row or iqm_row),
                            supervisores=_supervisores_para_filtro(usuario_atual()),
                            apelidos_empresa=supervisores.APELIDOS_EMPRESA)
@@ -307,12 +318,86 @@ def configuracoes():
         contexto["areas"] = acoes.areas()
         contexto["areas_todas"] = acoes.areas(incluir_inativas=True)
         contexto["gestores"] = acoes.gestores()
+        # Metas do Dashboard: mesma tela por decisão de projeto — configuração
+        # espalhada é onde as pessoas param de achar.
+        contexto["metas_dashboard"] = gerencial.metas()
+        contexto["metas_conhecidas"] = METAS_DASHBOARD
+        contexto["meses_visiveis"] = gerencial.meses_visiveis()
         try:
             contexto["usuarios"] = supa.select(
                 "usuarios", {"select": "id,nome,email", "order": "nome.asc"})
         except Exception:
             contexto["usuarios"] = []
     return render_template("configuracoes.html", **contexto)
+
+
+# As metas que a tela oferece, com a direção de cada uma. Ficam aqui e não no
+# banco porque a LISTA é do código (é ela que diz quais cards existem); o VALOR
+# é que é do usuário, e mora em `dashboard_metas`. Meta sem valor é estado
+# legítimo: o card mostra o número e omite a comparação, em vez de inventar
+# um alvo que ninguém combinou.
+METAS_DASHBOARD = [
+    {"chave": "iqi", "rotulo": "IQI — instalação (%)", "direcao": "menor"},
+    {"chave": "iqm", "rotulo": "IQM — manutenção (%)", "direcao": "menor"},
+    {"chave": "cmt", "rotulo": "CMT — cancelamento por motivo técnico (%)", "direcao": "menor"},
+    {"chave": "esteira_util", "rotulo": "Esteira útil (OSs na fila)", "direcao": "menor"},
+    {"chave": "retiradas", "rotulo": "Fila de retirada (OSs)", "direcao": "menor"},
+    {"chave": "disk", "rotulo": "Salas Disk abertas", "direcao": "menor"},
+    # "GPON apagado" aqui é a CAUSA de reincidência (Categoria 2 do AII: o N1
+    # encerrou o protocolo assim) — quanto menos, melhor. Não confundir com a
+    # razão "GPON realizadas ÷ abertas", que seria quanto maior melhor: essa
+    # não existe em nenhum dos cinco relatórios que o coletor lê.
+    {"chave": "gpon", "rotulo": "GPON apagado como causa (reincidências)", "direcao": "menor"},
+    {"chave": "idf_ligacoes", "rotulo": "IDF — ligações (nota)", "direcao": "maior"},
+    {"chave": "idf_chats", "rotulo": "IDF — chats (nota)", "direcao": "maior"},
+    {"chave": "idf_os", "rotulo": "IDF — OS (nota)", "direcao": "maior"},
+]
+
+
+@bp.route("/dashboard/metas", methods=["POST"])
+@admin_obrigatorio
+def dashboard_metas():
+    """Grava as metas enviadas. Campo em branco volta a "não definida"."""
+    direcoes = {m["chave"]: m["direcao"] for m in METAS_DASHBOARD}
+    rotulos = {m["chave"]: m["rotulo"] for m in METAS_DASHBOARD}
+    salvas, erro = 0, None
+    for chave in direcoes:
+        if f"meta-{chave}" not in request.form:
+            continue
+        bruto = (request.form.get(f"meta-{chave}") or "").strip().replace(",", ".")
+        try:
+            gerencial.salvar_meta(chave, bruto or None,
+                                  direcoes[chave], rotulos[chave])
+            salvas += 1
+        except ValueError:
+            erro = f"«{bruto}» não é um número (meta {rotulos[chave]})."
+        except Exception as e:
+            erro = f"Erro ao gravar a meta {rotulos[chave]}: {e}"
+    if erro:
+        flash(erro, "erro")
+    elif salvas:
+        flash(f"{salvas} meta(s) do Dashboard atualizada(s).", "ok")
+    return redirect(url_for("dash.configuracoes") + "#metas-dashboard")
+
+
+@bp.route("/dashboard/config", methods=["POST"])
+@admin_obrigatorio
+def dashboard_config():
+    """Preferências de exibição do Dashboard (hoje: quantos meses comparar)."""
+    bruto = (request.form.get("meses_visiveis") or "").strip()
+    try:
+        n = int(bruto)
+        if n < 1 or n > 24:
+            raise ValueError
+    except ValueError:
+        flash("Informe um número de meses entre 1 e 24.", "erro")
+        return redirect(url_for("dash.configuracoes") + "#metas-dashboard")
+    try:
+        gerencial.salvar_config("meses_visiveis", n)
+        flash(f"O Dashboard passa a comparar {n} mês(es).", "ok")
+    except Exception as e:
+        flash(f"Erro ao salvar: {e}", "erro")
+    return redirect(url_for("dash.configuracoes") + "#metas-dashboard")
 
 
 @bp.route("/supervisores/marcar", methods=["POST"])

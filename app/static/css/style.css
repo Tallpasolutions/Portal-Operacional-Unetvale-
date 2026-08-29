@@ -79,7 +79,10 @@ body.collapsed .brand-text, body.collapsed .menu a span:not(.ic){ display:none; 
 .kpi .v{ font-size:26px; font-weight:800; color:var(--ink-d); line-height:1.1; }
 .kpi .l{ font-size:12.5px; color:var(--muted); margin-top:4px; }
 
-.charts-2{ grid-template-columns:repeat(auto-fit,minmax(380px,1fr)); }
+/* `min(380px, 100%)` e não `380px` cravado: num iPhone de 375px o mínimo era
+   maior que a tela e a coluna estourava a página em ~27px, fazendo o corpo
+   inteiro rolar de lado. Abaixo de 380px a coluna passa a valer 100%. */
+.charts-2{ grid-template-columns:repeat(auto-fit,minmax(min(380px,100%),1fr)); }
 .chart-box{ position:relative; height:340px; }
 .chart-box.tall{ height:460px; }
 .chart-box.full{ height:380px; }
@@ -96,7 +99,7 @@ body.collapsed .brand-text, body.collapsed .menu a span:not(.ic){ display:none; 
 /* `date`, `time` e `search` estavam de fora desta lista, e por isso caíam no
    visual nativo do navegador — borda quadrada, fonte do sistema, altura
    diferente — no meio de campos arredondados. Aparecia no filtro das Reuniões
-   e no De/Até da Troca de Poste. */
+   e no De/Até da Troca de Poste. Ao usar um tipo novo, acrescente-o aqui. */
 select,input[type=number],input[type=text],input[type=password],input[type=email],
 input[type=date],input[type=time],input[type=datetime-local],input[type=search]{
   font-size:13.5px; padding:8px 10px; border:1px solid var(--borda-2); border-radius:8px;
@@ -178,7 +181,15 @@ table.tbl tr.total td{ font-weight:800; background:var(--fundo); }
 
 /* ===== IQI/IQM — alternador de visualização + tabela mensal ===== */
 .view-bar{ display:flex; align-items:center; gap:18px; flex-wrap:wrap; margin-bottom:16px; }
-.view-switch{ display:inline-flex; background:#fff; border:1px solid var(--borda-2); border-radius:9px; overflow:hidden; }
+/* `overflow:hidden` arredonda os cantos dos botões das pontas. Com quatro
+   abas cabia na tela; com cinco (Dashboard, e /iqi depois da "Causa raiz")
+   as últimas ficavam cortadas e inalcançáveis no celular — escondidas, não
+   roladas. `auto` mantém o recorte e devolve a rolagem. */
+.view-switch{ display:inline-flex; background:#fff; border:1px solid var(--borda-2);
+  border-radius:9px; overflow-x:auto; overflow-y:hidden; max-width:100%;
+  scrollbar-width:none; }
+.view-switch::-webkit-scrollbar{ display:none; }
+.view-switch button{ flex:0 0 auto; }
 .view-switch button{ border:none; background:#fff; color:var(--muted); font-weight:600; font-size:13.5px; padding:8px 18px; cursor:pointer; }
 .view-switch button+button{ border-left:1px solid var(--borda-2); }
 .view-switch button.active{ background:var(--brand); color:#fff; }
@@ -486,3 +497,59 @@ tr.clicavel{ cursor:pointer; }
 .dropdown[open] > summary::after{ content:"▴"; }
 .dropdown > .lista-marcar{ position:absolute; z-index:30; left:0; right:0; margin-top:4px;
   box-shadow:0 10px 28px rgba(11,23,39,.14); }
+
+
+/* ===== Módulo Dashboard ===== */
+
+/* Ranking horizontal: rótulo · barra · valor.
+   Não dava para reaproveitar `.barra` — aquela é uma barra de progresso de
+   70px, sem rótulo e sem número, feita para caber dentro de uma célula. Aqui
+   a lista inteira é o gráfico, e a comparação entre as linhas é o que se lê. */
+.rank{ display:flex; flex-direction:column; gap:7px; }
+.rank-linha{ display:grid; grid-template-columns:minmax(150px,1.6fr) 1fr 52px;
+  gap:12px; align-items:center; font-size:13px; }
+.rank-linha .rl{ color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rank-linha .rt{ height:9px; background:var(--fundo); border-radius:4px; overflow:hidden; }
+.rank-linha .rf{ display:block; height:100%; background:var(--brand); border-radius:4px; }
+.rank-linha .rv{ font-weight:700; text-align:right; font-variant-numeric:tabular-nums; color:var(--ink-d); }
+/* A maior barra é a leitura principal da lista: fica em destaque para não
+   depender de comparar comprimentos parecidos. */
+.rank-linha.topo .rl{ color:var(--ink-d); font-weight:700; }
+.rank-linha.topo .rf{ background:var(--danger); }
+.rank-linha.suave .rf{ background:var(--muted-l); }
+
+/* Par "mês fechado × mês corrente": dois blocos numa moldura só, porque o que
+   se lê é a diferença entre eles, não cada um isolado. */
+/* `auto-fit` e não duas colunas fixas: o gestor escolhe em Configurações
+   quantos meses a tela compara (2 por padrão, mas pode pedir seis). */
+.par-mes{ display:grid; grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr));
+  border:1px solid var(--borda-2); border-radius:10px; overflow:hidden; }
+.par-mes > div{ padding:13px 15px; display:flex; flex-direction:column; gap:5px; }
+.par-mes > div + div{ border-left:1px solid var(--borda-2); }
+.par-mes .n{ overflow-wrap:anywhere; }
+.par-mes .foco{ background:var(--fundo); }
+.par-mes .q{ font-size:11.5px; font-weight:700; color:var(--muted); text-transform:uppercase;
+  letter-spacing:.04em; display:flex; align-items:center; gap:6px; }
+.par-mes .n{ font-size:27px; font-weight:800; color:var(--ink-d); line-height:1.05;
+  font-variant-numeric:tabular-nums; }
+.par-mes .d{ font-size:12px; font-weight:700; }
+.par-mes .d.ok{ color:var(--success); } .par-mes .d.fora{ color:var(--danger); }
+.par-mes .b{ font-size:11.5px; color:var(--muted); }
+
+/* Contraste resolvido × não resolvido do IDF: uma régua por canal. */
+.regua{ display:grid; grid-template-columns:70px 1fr auto; gap:10px; align-items:center;
+  font-size:13px; margin-bottom:9px; }
+.regua .rc{ font-weight:700; color:var(--muted); }
+.regua .rr{ position:relative; height:22px; background:var(--fundo); border-radius:6px; overflow:hidden; }
+.regua .rs{ position:absolute; top:0; bottom:0; }
+.regua .rs.ok{ background:var(--success); left:0; }
+.regua .rs.no{ background:var(--danger); right:0; }
+.regua .rr b{ position:absolute; top:50%; transform:translateY(-50%); left:9px;
+  font-size:11.5px; color:#fff; font-variant-numeric:tabular-nums; }
+.regua .rd{ font-size:12px; font-weight:700; color:var(--danger); white-space:nowrap; }
+
+@media (max-width:640px){
+  .par-mes{ grid-template-columns:1fr; }
+  .par-mes > div + div{ border-left:0; border-top:1px solid var(--borda-2); }
+  .rank-linha{ grid-template-columns:minmax(90px,1fr) 1fr 44px; font-size:12.5px; }
+}

@@ -8,8 +8,22 @@ from . import supa
 BR_TZ = timezone(timedelta(hours=-3))
 HORARIOS = [8, 10, 12, 14, 16, 18]  # grade fixa de atualização (horário de Brasília)
 
-MODULOS = ("produtividade", "iqi", "iqm", "massivas")
-NOMES = {"produtividade": "Produtividade", "iqi": "IQI", "iqm": "IQM", "massivas": "Massivas"}
+# Os `ger_*` são as cinco coletas do Dashboard. Entram aqui, e não numa lista
+# própria, para que o ponto verde/vermelho do cabeçalho e a tela de
+# Monitoramento cubram o módulo novo pelo mesmo caminho dos antigos — uma
+# coleta do Dashboard que falhe precisa aparecer no mesmo lugar.
+MODULOS = ("produtividade", "iqi", "iqm", "massivas",
+           "ger_categorias", "ger_cancelamentos", "ger_esteira",
+           "ger_idf", "ger_salas")
+NOMES = {
+    "produtividade": "Produtividade", "iqi": "IQI", "iqm": "IQM",
+    "massivas": "Massivas",
+    "ger_categorias": "Dashboard · Causa raiz",
+    "ger_cancelamentos": "Dashboard · Cancelamentos",
+    "ger_esteira": "Dashboard · Esteira",
+    "ger_idf": "Dashboard · IDF",
+    "ger_salas": "Dashboard · Salas",
+}
 
 
 def _idade_texto(minutos):

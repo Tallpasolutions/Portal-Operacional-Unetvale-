@@ -70,10 +70,11 @@ servidor, e cuidado redobrado com migration destrutiva.
 
 ---
 
-## 4. Os cinco módulos
+## 4. Os seis módulos
 
 | Rota | Módulo | Origem do dado | Quem vê |
 |---|---|---|---|
+| `/dashboard` | **Dashboard** | `dados_modulo` (5 coletas `ger_*`) | todos |
 | `/produtividade` | Produtividade | `dados_modulo` (coletor) | todos; supervisor só o time dele |
 | `/iqi` | IQI / IQM | `dados_modulo` (coletor) | todos |
 | `/massivas` | Massivas | `dados_modulo` (coletor) | todos |
@@ -81,6 +82,89 @@ servidor, e cuidado redobrado com migration destrutiva.
 | `/acoes` | **Ações** | `public.acoes` e cia. | cada um as suas; gestor a área dele |
 
 Mais `/usuarios`, `/monitoramento` (admin) e `/configuracoes` (todos).
+
+### Dashboard (visão gerencial)
+
+Responde "como o negócio está indo", não "como o time está executando": por que
+o cliente reincide, por que ele cancela, o que a fila de agendamento acumula e
+como o cliente avalia o atendimento.
+
+**Página única, sem sub-abas** — ao contrário de Ações e Troca de Poste. A
+leitura gerencial é a soma dos blocos; separá-los obrigaria a trocar de tela
+para relacionar reincidência com cancelamento, que é justamente a relação que
+interessa. A ordem desce do indicador para a causa: qualidade → causa raiz →
+churn → fila → atendimento.
+
+Cinco coletas novas, todas no coletor (`coletor/gerencial.py`), gravando em
+`dados_modulo` como os módulos antigos:
+
+| Módulo | Relatório do WVSA | Sessão |
+|---|---|---|
+| `ger_categorias` | `operacional31` — causa raiz (Cat 1..5) | padrão |
+| `ger_cancelamentos` | `indicadores13` — churn válido | padrão |
+| `ger_esteira` | `/operacional/os/query` — fila de agendamento | padrão |
+| `ger_idf` | `indicadores9` — nota dos feedbacks | **gestor** |
+| `ger_salas` | `operacional15` — Rocketchat | **gestor** |
+
+**Duas sessões do WVSA, uma rodada.** O relatório é recortado por usuário:
+`w8_client.login()` usa `W8_USER`, `login_gestor()` usa `W8_USER_GESTOR`. As
+duas vivem na mesma execução do `enviar.py`, então tudo atualiza junto.
+
+**As categorias vêm registro a registro, não somadas.** `ger_categorias` guarda
+uma linha por reincidência — com o **técnico** dentro —, no mesmo formato
+compacto da Produtividade (índices para listas de texto). Não é economia de
+espaço: é que a visualização "Causa raiz" do `/iqi` cruza empresa, supervisor e
+mês ao mesmo tempo, e contagem já agregada não se recorta depois. O Dashboard,
+que mostra o consolidado, agrega na hora em `gerencial.agregar_categorias`.
+
+⚠️ As listas de texto (`tec`, `c1`…`c5`, `cid`) são **carregadas do payload
+anterior e só crescem**. Os meses que não foram recoletados na rodada guardam
+índices que apontam para elas; reconstruí-las do zero deslocaria todo índice
+antigo e trocaria em silêncio a categoria de cada registro do histórico.
+
+**O período coletado é o ANO, a exibição são 2 meses.** `--full` vai de janeiro
+do ano corrente até hoje (`DASH_BACKFILL_DESDE` puxa mais para trás); a rodada
+normal refaz só o mês corrente e o anterior, porque a janela de reincidência de
+30 dias ainda fecha depois da virada. Quantos meses os cards comparam é
+preferência do gestor, em `dashboard_config.meses_visiveis` (Configurações).
+
+**A esteira tem tabela própria** (`dashboard_esteira_snapshot`), e não é
+capricho: `dados_modulo` tem `modulo` como chave primária e guarda só a foto
+mais recente. "Quantas OS entraram e quantas saíram desde a abertura do dia" é
+diferença entre DUAS fotos. O snapshot guarda o **conjunto de números de OS**,
+não o total — "5 entraram e 5 saíram" e "nada aconteceu" deixam o total igual,
+e é o primeiro caso que a operação quer ver. Uma abertura por dia é garantida
+por índice único parcial, para que um retry às 08h não vire segunda base de
+comparação.
+
+**As metas são configuráveis** (`dashboard_metas`, editadas em Configurações).
+Meta sem valor é estado legítimo: o card mostra o número e **omite** a
+comparação, em vez de medir contra um alvo que ninguém combinou. Cada meta tem
+`direcao` (`menor`/`maior`) porque as duas famílias convivem — IQI, IQM, CMT,
+esteira e salas Disk são "quanto menor, melhor".
+
+⚠️ **"GPON apagado" no Dashboard é CAUSA, não produção.** O que os cinco
+relatórios entregam é a Categoria 2 do AII: o N1 encerrou o protocolo de
+reincidência como "ONU - Gpon apagado". Quanto menos, melhor. A razão
+"GPON realizadas ÷ abertas" — essa sim, quanto maior melhor — **não existe em
+nenhuma das fontes coletadas**; se for pedida, precisa de relatório novo.
+
+**A causa raiz aparece em duas telas, com propósitos diferentes.** No
+`/dashboard` é o consolidado do mês, em ranking. No `/iqi` é uma tabela mensal
+(Cat 4 e Cat 5 nas linhas, meses nas colunas), dentro da visualização Tabela
+mensal. As duas leem `gerencial.causa_raiz()` e compartilham
+`dashboard_rank.js`; Categorias 1 e 2 só aparecem no Dashboard, porque dizem
+como o cliente pediu e como o N1 encerrou, não a causa.
+
+⚠️ A visualização do `/iqi` conta **todo protocolo de reincidência, inclusive
+de equipes de infra**, que não entram no cálculo do `%`. O total dela não fecha
+com o das outras visualizações da mesma tela — é intencional, está escrito na
+tela, e o filtro de empresa separa.
+
+O que o módulo **não** faz, de propósito: o card "Massivas em aberto" do
+material de referência (a lista de `#7403` com previsão) ficou de fora. Falha
+Massiva como *causa de reincidência* está dentro, nas Categorias 4 e 5 — e é a
+segunda maior.
 
 ### Reuniões (dentro de Ações, aba `?aba=reunioes`)
 
@@ -137,6 +221,42 @@ gera o arquivo é o navegador — sem biblioteca de PDF na função serverless.
 `reunioes.convidados` (text[]), não linha em `reuniao_participantes`. Aquela
 tabela é de quem tem login — é dela que sai a pauta, e pauta exige ação, que
 exige usuário. Convidado só aparece na lista de quem estava, na ata e no PDF.
+
+### IQI/IQM: duas visualizações, um filtro cada
+
+O `.view-switch` do `/iqi` tem **duas** entradas, e cada uma empilha os blocos
+que respondem à mesma pergunta com o mesmo recorte:
+
+| Visualização | Blocos, nesta ordem | Filtro |
+|---|---|---|
+| **Gráfico** | gráfico por técnico → Ofensores → Por empresa | a `.toolbar` do topo: mês, meta, supervisor, ordenação |
+| **Tabela mensal** | tabela mensal por técnico → Causa raiz (Cat 4 e Cat 5) | os `.filtros-multi`: supervisor, empresa, período |
+
+Antes eram cinco visualizações, cada uma com seletor de mês e de supervisor
+próprios. O problema não era o número de abas: era ler o ofensor de julho ao
+lado do gráfico de agosto sem perceber.
+
+**Como o filtro chega aos blocos de baixo.** Quem é dono do estado publica um
+evento no `document`, e os blocos escutam:
+
+* `iqi.js` → **`iqifiltro`** `{ind, mesIdx, mes, alcanceSup}` — consumido por
+  `iqi_ofensores.js` e `iqi_empresas.js`;
+* `iqi_tabela.js` → **`iqifiltrotabela`** `{ind, alcanceSup, empresas, meses,
+  fechados}` — consumido por `iqi_causaraiz.js`.
+
+`fechados` viaja junto de propósito: sem ele a Causa raiz marcaria só o último
+mês como parcial, e **julho apareceria fechado no dia 29 de agosto** — quando
+ainda faltavam dois dias da janela de auditoria. A regra é uma só (fim do mês +
+30 dias) e mora em `iqi_tabela.mesFechado`.
+
+⚠️ **Publique no `DOMContentLoaded`, não em `setTimeout(…, 0)`.** Os blocos de
+baixo são `<script>` que carregam DEPOIS do dono do estado, então a primeira
+publicação cai no vazio e as tabelas nascem vazias até o primeiro clique. O
+timer de 0 ms **não** resolve: ele pode ser atendido entre dois `<script>` da
+mesma página, que foi exatamente o que aconteceu aqui.
+
+O único filtro que sobrou dentro de um bloco são os chips de empresa do
+"Por empresa" — refinam só aquele bloco e não têm equivalente no topo.
 
 ### Papéis
 
@@ -232,6 +352,14 @@ Os que nasceram nas Reuniões e servem em qualquer tela:
 | `.ata` | corpo de texto para leitura, com medida limitada |
 | `.grav-pill` | controle único de gravação (Gravar/Pausar/Concluir) |
 | `.btn-pdf` | ação discreta dentro de célula de tabela |
+
+Os que nasceram no Dashboard:
+
+| Classe | O que é |
+|---|---|
+| `.rank` / `.rank-linha` | ranking horizontal: rótulo · barra · valor. **Não** confundir com `.barra`, que é progresso de 70px dentro de célula |
+| `.par-mes` | par "mês fechado × mês corrente" numa moldura só |
+| `.regua` | contraste de duas partes numa barra (resolvido × não resolvido) |
 
 **Nada de `confirm()` do navegador.** Ele abre uma caixa do sistema, com o
 domínio no topo, que não pertence à tela — use `.modal` com `<dialog>`. As
@@ -366,12 +494,63 @@ porque o deploy e a migration não acontecem no mesmo segundo. Pôr a coluna nov
 no conjunto **base** quebra o recuo junto — e aí, sem a migration, a reunião não
 abre. Já aconteceu com `convidados`.
 
+**`ignorarMassivas=S` é o padrão do `operacional31` e apaga a segunda maior
+causa.** Medido em 29/08/2026, IQI de 07/2026: com `S` vêm 156 linhas e 2 de
+Falha Massiva; com `N`, **212 linhas e 58**. Os 56 da diferença são exatamente
+os de Falha Massiva. Com `S` o ranking de causa raiz sai com a segunda causa
+zerada e o total continua parecendo plausível — ninguém repara. Mesma família
+do `empresa=todas`. `apenas_pendentes` é irmã dela: vem **marcada** no
+formulário e reduz a resposta às OS ainda não classificadas (13 linhas em vez
+de 212). Não envie o campo.
+
+**A aba "Indicadores" do `operacional31` ignora o filtro `tipo`.** `tipo=iqi` e
+`tipo=iqm` devolvem Cat 4/Cat 5 idênticos (Total 3548 nos dois, medido em
+29/08/2026). A aba é agregada e tentadora, mas o split IQI/IQM que a tela
+precisa só existe na **tabela de detalhe**, que respeita o filtro — daí a
+agregação ser feita em `gerencial.parse_categorias`, e não lida pronta.
+
+**O IDF (`indicadores9`) devolve HTTP 200 com tudo ZERADO para quem não tem o
+recorte** — não 403. Medido em 29/08/2026, mesmo endpoint e mesmo período:
+`jhoni.santos` recebeu "Sem dados" nos três canais; `matheus.vieira`, 211
+ligações (4,58), 1087 chats (4,48) e 297 OS (4,51). Um coletor com a
+credencial errada gravaria zeros e reportaria sucesso.
+`gerencial.conferir_idf_vazio` recusa gravar zero por cima de número bom.
+(`operacional15`, esse, dá 403 limpo.)
+
+**Cat 4 tem rótulos duplicados no cadastro do WVSA.** Convivem
+`OS de Suporte em aberto` (38) e `OS de suporte em aberto` (27), e
+`Cancelou visita` aparece duas vezes. Sem juntar, a mesma causa vira duas
+barras e nenhuma alcança o topo. O mapa `_CAT4_SINONIMOS` é **explícito** de
+propósito: um `.lower()` cego esconderia que o cadastro tem duplicata.
+
+**Filtrar motivo de cancelamento por texto traz o que não é do grupo.**
+"PROBLEMA TECNICO" casa com seis motivos, mas o grupo PROBLEMA TECNICO tem
+quatro — `PROBLEMA TECNICO/MASSIVA` e
+`INADIMPLENTE SEM USO / PROBLEMA TECNICO/...` ficam de fora dele. Os quatro
+somam 66 (o total do grupo); os seis somam 70, e a soma da lista deixaria de
+bater com o percentual do CMT logo acima, na mesma tela. Peça o recorte AO
+relatório (`motivos_grupos : problema tecnico`), como faz
+`_motivos_do_grupo_tecnico`.
+
+**`.charts-2` tinha mínimo de 380px, maior que um iPhone de 375.** A coluna
+estourava a página em ~27px e o corpo inteiro rolava de lado, em todos os
+módulos que usam a classe. Agora é `minmax(min(380px,100%),1fr)`. E
+`.view-switch` era `overflow:hidden`: com quatro abas cabia, com cinco as
+últimas ficavam **escondidas e inalcançáveis** no celular. Ao acrescentar aba,
+confira no preset mobile.
+
 **Pooler do Supabase: `aws-1-us-west-2`.** A região está no hostname; a errada
 dá "tenant not found".
 
 ---
 
 ## 7. Ambiente
+
+O coletor precisa de **duas** credenciais do WVSA: `W8_USER`/`W8_PASS` e
+`W8_USER_GESTOR`/`W8_PASS_GESTOR` (esta com acesso a Intranet > IDF e a
+Rocketchat > Solicitações em aberto). Sem a segunda, `ger_idf` e `ger_salas`
+falham — e o `ger_idf` falha *de propósito*, pela trava do §6, em vez de
+gravar zero.
 
 Variáveis em `.env.example` — todas as que o código lê estão lá. As do app
 também precisam estar na Vercel; as do coletor, só na máquina dele.
@@ -441,5 +620,27 @@ a.run(port=5001, use_reloader=False)"
   * **`aplicar_item` e `criar_acao_do_item`** — escrevem em `acao_eventos`, que
     é append-only, e por isso não foram testados contra produção;
   * **o expurgo dos 30 dias** — nenhum áudio venceu ainda.
+- **Dashboard (visão gerencial)** entrou em 29/08/2026, migrations `0009`
+  (`dashboard_esteira_snapshot`, `dashboard_metas`) e `0010`
+  (`dashboard_config`).
+
+  Exercitado contra o WVSA de verdade, com os números conferidos:
+  IQI 07/2026 = **212** reincidências (58 de Falha Massiva) e IQM = **219**;
+  cancelamentos 07/2026 = **475** válidos com **52** do grupo técnico
+  (**10,95%**, R$ 63.170,82); a diferença de conjuntos da esteira provada com
+  fila de total constante (4 → 4) e 2 entradas / 2 saídas.
+
+  Histórico de janeiro a agosto/2026 coletado (payload de 88 KB, 71 técnicos).
+
+  Os cinco módulos coletaram contra o WVSA de verdade, incluindo os dois que
+  dependem da sessão do gestor: IDF de 08/2026 (ligações 212 nota 4,58; chats
+  1096 nota 4,49; OS 297 nota 4,51) e salas do Rocketchat (1121 solicitações,
+  35 em aberto).
+
+  **Ainda não exercitado:**
+  * **a trava do IDF zerado** — agora existe payload bom, então ela passa a
+    valer de verdade na próxima rodada com credencial errada. Nunca disparou.
+  * **o expurgo dos snapshots** da esteira (90 dias) — nenhum venceu ainda.
+
 - **Backup do Supabase não foi confirmado.** Ações e Troca de Poste não têm de
   onde ser recoletados. Confirme antes de qualquer operação destrutiva.
