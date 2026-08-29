@@ -710,6 +710,9 @@ def reuniao_detalhe(reuniao_id):
         itens_ata=reuniao_ia.itens(reuniao_id),
         ata_html=reuniao_ia.para_html(r.get("ata_markdown")),
         contexto=reuniao_ia.contexto_anterior(r, u),
+        areas=acoes.areas(),
+        acoes_abertas=reuniao_ia.acoes_para_vincular(u),
+        prioridades=acoes.PRIORIDADES,
         trecho_segundos=int(os.environ.get("REUNIAO_TRECHO_SEGUNDOS", "120")))
 
 
@@ -857,6 +860,51 @@ def reuniao_ata_status(reuniao_id):
     u = usuario_atual()
     r = _reuniao_ou_404(reuniao_id, u)
     return jsonify(reuniao_ia.estado(reuniao_id, r))
+
+
+@bp.route("/reunioes/<reuniao_id>/ata/editar", methods=["POST"])
+@login_obrigatorio
+def reuniao_ata_editar(reuniao_id):
+    """Corrige a ata à mão. A IA erra nome próprio e sigla."""
+    u = usuario_atual()
+    _reuniao_ou_404(reuniao_id, u, exigir_conduz=True)
+    try:
+        reuniao_ia.salvar_ata(reuniao_id, request.form.get("ata_markdown"), u["id"])
+        flash("Ata salva.", "ok")
+    except ValueError as e:
+        flash(str(e), "erro")
+    except Exception as e:
+        flash(f"Não foi possível salvar: {e}", "erro")
+    return redirect(url_for("dash.reuniao_detalhe", reuniao_id=reuniao_id))
+
+
+@bp.route("/reunioes/<reuniao_id>/ata/itens/<item_id>/acao", methods=["POST"])
+@login_obrigatorio
+def reuniao_item_acao(reuniao_id, item_id):
+    """Item da ata vira ação nova, ou entra numa que já existe.
+
+    Era o beco sem saída do módulo: o vínculo só acontecia quando a IA
+    reconhecia um código `AC-000` na fala, e assunto que ainda não é ação —
+    a maioria — não tinha para onde ir.
+    """
+    u = usuario_atual()
+    _reuniao_ou_404(reuniao_id, u, exigir_conduz=True)
+    f = request.form
+    try:
+        if f.get("modo") == "vincular":
+            if not f.get("acao_id"):
+                raise ValueError("Escolha a ação.")
+            reuniao_ia.vincular_item(item_id, f["acao_id"], u["id"])
+            flash("Item registrado na ação.", "ok")
+        else:
+            a = reuniao_ia.criar_acao_do_item(
+                item_id, f.to_dict(), u["id"], apoio_ids=f.getlist("apoio"))
+            flash(f"Ação {a['codigo']} criada a partir da ata.", "ok")
+    except ValueError as e:
+        flash(str(e), "erro")
+    except Exception as e:
+        flash(f"Não foi possível: {e}", "erro")
+    return redirect(url_for("dash.reuniao_detalhe", reuniao_id=reuniao_id))
 
 
 @bp.route("/reunioes/<reuniao_id>/ata/itens/<item_id>/aplicar", methods=["POST"])

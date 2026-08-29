@@ -386,3 +386,46 @@ tr.clicavel{ cursor:pointer; }
   background:#fdeede; border-radius:0 8px 8px 0; }
 .ata hr{ border:none; border-top:1px solid var(--borda-2); margin:18px 0 12px; }
 .ata em{ color:var(--muted); font-style:normal; font-size:12.5px; }
+
+/* ---------- Ata: ações, edição e impressão ------------------------------- */
+.grav-secundario{ background:transparent; border:1px solid var(--borda-2); color:var(--muted);
+  border-radius:999px; padding:8px 14px; font-size:12.5px; font-weight:600; cursor:pointer;
+  margin-left:10px; vertical-align:middle; }
+.grav-secundario:hover{ background:#fff; color:var(--brand-d); border-color:var(--brand); }
+
+/* Discretos de propósito: a ata é para ler, e três botões azuis competindo com
+   o texto era o que estava feio. */
+.ata-acoes{ display:flex; gap:8px; margin-top:16px; padding-top:14px;
+  border-top:1px solid var(--borda); }
+.ata-btn{ background:transparent; border:1px solid var(--borda-2); color:var(--muted);
+  border-radius:8px; padding:7px 14px; font-size:12.5px; font-weight:600; cursor:pointer; }
+.ata-btn:hover{ background:var(--fundo); color:var(--ink-d); }
+
+.ata-editar{ margin-top:14px; border-top:1px solid var(--borda); padding-top:12px; }
+.ata-editar > summary{ cursor:pointer; font-size:12.5px; font-weight:600; color:var(--muted); }
+.ata-editar > summary:hover{ color:var(--brand); }
+.ata-editar textarea{ width:100%; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:12.5px; line-height:1.55; border:1px solid var(--borda-2); border-radius:8px;
+  padding:12px; }
+
+.item-acao{ margin-top:10px; }
+.item-acao > summary{ cursor:pointer; font-size:12.5px; font-weight:600; color:var(--brand-d); }
+.item-acao > summary:hover{ text-decoration:underline; }
+.item-acao > form{ margin-top:12px; }
+.item-vincular{ margin-top:14px; padding-top:12px; border-top:1px dashed var(--borda-2); }
+.item-vincular label{ display:block; font-size:12px; font-weight:600; color:var(--muted);
+  margin-bottom:6px; }
+
+/* Impressão = o PDF. O navegador gera o arquivo, então nao entra dependencia
+   nova numa funcao serverless — e o resultado e PDF de verdade, nao HTML
+   renomeado. Some tudo que nao e a ata: sidebar, topbar, pauta, formularios. */
+@media print{
+  .sidebar, .topbar, .view-bar, .gravador, .ata-acoes, .ata-editar,
+  .item-acao, form, .flash, .subnote{ display:none !important; }
+  body, .main, .content{ background:#fff; margin:0; padding:0; }
+  .card{ border:none; box-shadow:none; page-break-inside:avoid; }
+  .card-h{ border-bottom:1px solid #ddd; padding-left:0; }
+  .card-b{ padding-left:0; }
+  .ata{ max-width:none; font-size:12pt; }
+  a{ color:#000; text-decoration:none; }
+}

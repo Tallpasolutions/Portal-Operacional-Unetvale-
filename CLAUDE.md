@@ -108,6 +108,17 @@ Item de ata só vira comentário na ação por **clique humano** — `acao_event
 append-only por trigger, e texto de IA que entrasse lá sozinho seria
 irreversível.
 
+O item da ata tem **duas** saídas, e as duas por clique humano: virar **ação
+nova** (formulário já preenchido com o texto e o prazo do item) ou **anexar a
+uma ação existente**. Antes o vínculo só acontecia quando a IA reconhecia um
+código `AC-000` na fala — e assunto que ainda não é ação, que é a maioria, não
+tinha para onde ir.
+
+A ata é **editável enquanto a reunião está aberta** (a IA erra nome próprio e
+sigla) e vira **PDF depois de encerrada**, pelo diálogo de impressão do
+navegador — o `@media print` do `style.css` é o recorte. Sem biblioteca de PDF
+na função serverless.
+
 ### Papéis
 
 Três, independentes — a pessoa pode ser um, vários ou nenhum:
