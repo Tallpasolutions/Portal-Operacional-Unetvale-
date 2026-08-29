@@ -395,18 +395,22 @@ tr.clicavel{ cursor:pointer; }
 
 /* Discretos de propósito: a ata é para ler, e três botões azuis competindo com
    o texto era o que estava feio. */
-.ata-acoes{ display:flex; gap:8px; margin-top:16px; padding-top:14px;
-  border-top:1px solid var(--borda); }
+.ata-rodape{ display:flex; align-items:center; gap:12px; margin-top:16px;
+  padding-top:12px; border-top:1px solid var(--borda); }
+.ata-estado{ font-size:12px; color:var(--muted-l); margin-right:auto; }
+
+/* Editar é o estado normal da ata, não um modo. Sem borda de caixa de texto:
+   o contorno só aparece ao focar, para não transformar o documento num
+   formulário. */
+.ata[contenteditable="true"]{ outline:none; border-radius:8px; padding:10px 12px;
+  margin:-10px -12px; transition:background .12s, box-shadow .12s; }
+.ata[contenteditable="true"]:hover{ background:var(--fundo); }
+.ata[contenteditable="true"]:focus{ background:#fff; box-shadow:0 0 0 2px var(--brand-l); }
+
+.encerrar-linha{ margin-top:16px; }
 .ata-btn{ background:transparent; border:1px solid var(--borda-2); color:var(--muted);
   border-radius:8px; padding:7px 14px; font-size:12.5px; font-weight:600; cursor:pointer; }
 .ata-btn:hover{ background:var(--fundo); color:var(--ink-d); }
-
-.ata-editar{ margin-top:14px; border-top:1px solid var(--borda); padding-top:12px; }
-.ata-editar > summary{ cursor:pointer; font-size:12.5px; font-weight:600; color:var(--muted); }
-.ata-editar > summary:hover{ color:var(--brand); }
-.ata-editar textarea{ width:100%; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-  font-size:12.5px; line-height:1.55; border:1px solid var(--borda-2); border-radius:8px;
-  padding:12px; }
 
 .item-acao{ margin-top:10px; }
 .item-acao > summary{ cursor:pointer; font-size:12.5px; font-weight:600; color:var(--brand-d); }

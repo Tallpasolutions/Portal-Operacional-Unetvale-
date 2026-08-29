@@ -723,6 +723,8 @@ def reuniao_encerrar(reuniao_id):
     if not acoes.pode_gerir(u):
         abort(403)
     try:
+        # `notas` não vem mais da tela (o campo saiu). Passar None apagaria a
+        # nota de reuniões antigas que tinham uma.
         acoes.encerrar_reuniao(reuniao_id, request.form.get("notas"))
         flash("Reunião encerrada. A ata está congelada.", "ok")
     except Exception as e:
@@ -868,13 +870,26 @@ def reuniao_ata_editar(reuniao_id):
     """Corrige a ata à mão. A IA erra nome próprio e sigla."""
     u = usuario_atual()
     _reuniao_ou_404(reuniao_id, u, exigir_conduz=True)
+    # Quem chama é o autosave da tela (fetch, quer JSON). O `form` fica como
+    # caminho de reserva para navegador sem JS.
+    corpo = request.get_json(silent=True) or {}
+    texto = corpo.get("ata_markdown", request.form.get("ata_markdown"))
     try:
-        reuniao_ia.salvar_ata(reuniao_id, request.form.get("ata_markdown"), u["id"])
-        flash("Ata salva.", "ok")
+        reuniao_ia.salvar_ata(reuniao_id, texto, u["id"])
     except ValueError as e:
+        if request.is_json:
+            return jsonify({"erro": str(e)}), 400
         flash(str(e), "erro")
+        return redirect(url_for("dash.reuniao_detalhe", reuniao_id=reuniao_id))
     except Exception as e:
+        if request.is_json:
+            return jsonify({"erro": str(e)}), 502
         flash(f"Não foi possível salvar: {e}", "erro")
+        return redirect(url_for("dash.reuniao_detalhe", reuniao_id=reuniao_id))
+
+    if request.is_json:
+        return jsonify({"ok": True})
+    flash("Ata salva.", "ok")
     return redirect(url_for("dash.reuniao_detalhe", reuniao_id=reuniao_id))
 
 

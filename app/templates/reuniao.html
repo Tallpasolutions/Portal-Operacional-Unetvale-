@@ -168,36 +168,28 @@
     </div>
     {% endif %}
 
-    <div class="ata" id="ata-corpo">{{ ata_html|safe }}</div>
+    {# Editável no próprio texto: clica e escreve. Sem botão para "abrir a
+       edição" e sem botão para salvar — sai sozinho quando você para de
+       digitar. A IA erra nome próprio e sigla, e corrigir não pode custar
+       três cliques. #}
+    <div class="ata" id="ata-corpo"
+         {% if conduz and not reuniao.encerrada_em %}contenteditable="true" spellcheck="true"{% endif %}>{{ ata_html|safe }}</div>
 
-    <div class="ata-acoes">
-      <button class="ata-btn" type="button" id="ata-copiar">Copiar</button>
+    <div class="ata-rodape">
+      <span class="ata-estado" id="ata-estado">
+        {%- if conduz and not reuniao.encerrada_em -%}
+          clique no texto para corrigir
+        {%- elif reuniao.ata_editada_em -%}
+          editada à mão
+        {%- endif -%}
+      </span>
       {% if reuniao.encerrada_em %}
-      {# PDF só depois de encerrada: enquanto a reunião está aberta a ata é
-         rascunho e se edita; fechada, ela é documento e se leva embora.
-         Sai pelo diálogo de impressão do navegador — zero dependência nova
-         numa função serverless, e o resultado é PDF de verdade. #}
+      {# PDF só depois de encerrada: enquanto aberta a ata é rascunho e se
+         edita; fechada, é documento e se leva embora. Sai pelo diálogo de
+         impressão do navegador — zero dependência nova na função serverless. #}
       <button class="ata-btn" type="button" id="ata-pdf">Baixar PDF</button>
       {% endif %}
     </div>
-
-    {% if conduz and not reuniao.encerrada_em %}
-    <details class="ata-editar">
-      <summary>Editar a ata</summary>
-      <p class="subnote" style="margin:10px 0;">
-        Corrija nomes, siglas e o que a transcrição entendeu errado. Ao salvar, a
-        ata deixa de ser marcada como gerada por IA — o texto passa a ser seu.
-      </p>
-      <form method="post" action="{{ url_for('dash.reuniao_ata_editar', reuniao_id=reuniao.id) }}">
-        <textarea name="ata_markdown" rows="18">{{ reuniao.ata_markdown }}</textarea>
-        <button class="btn" type="submit" style="margin-top:10px;">Salvar ata</button>
-      </form>
-    </details>
-    {% endif %}
-    {# O Markdown vai num <script type="application/json">, não num textarea
-       fora da tela: `position:absolute; left:-9999px` inflava a área rolável
-       da página e deixava um vazio enorme abaixo da ata. #}
-    <script id="ata-fonte" type="application/json">{{ reuniao.ata_markdown|tojson }}</script>
   </div>
 </div>
 
@@ -282,25 +274,15 @@
 {% endif %}
 
 {% if conduz and not reuniao.encerrada_em %}
-<div class="card" style="margin-top:16px;">
-  <div class="card-h">
-    <span>Encerrar reunião</span>
-    <span class="subnote" style="margin:0;">depois disso a ata não é mais editável</span>
-  </div>
-  <div class="card-b">
-    <form method="post" id="form-encerrar"
-          action="{{ url_for('dash.reuniao_encerrar', reuniao_id=reuniao.id) }}"
-          onsubmit="return confirm('Encerrar a reunião? Depois disso não é possível comentar nela.');">
-      <div class="field">
-        <label>Notas gerais da reunião</label>
-        <textarea name="notas" rows="3" style="width:100%;"
-                  placeholder="Decisões que não pertencem a uma ação específica.">{{ reuniao.notas or '' }}</textarea>
-      </div>
-      <button class="btn" type="submit">Encerrar reunião</button>
-    </form>
-  </div>
-</div>
+{# Sem cartão e sem campo de notas: encerrar é um ato, não um formulário. O que
+   congela é o registro dos comentários do dia; a ata já foi salva antes. #}
+<form method="post" id="form-encerrar" class="encerrar-linha"
+      action="{{ url_for('dash.reuniao_encerrar', reuniao_id=reuniao.id) }}"
+      onsubmit="return confirm('Encerrar a reunião? Depois disso a ata não é mais editável.');">
+  <button class="btn" type="submit">Encerrar reunião</button>
+</form>
 {% endif %}
+
 {% endblock %}
 
 {% block scripts %}
@@ -329,31 +311,113 @@
   document.addEventListener("click", function (e) {
     if (e.target && e.target.id === "ata-pdf") window.print();
   });
-
-  // Copiar a ata em Markdown (e não o HTML renderizado): é o formato que
-  // cola inteiro no WhatsApp, no e-mail e no Notion sem virar sopa de tag.
-  document.addEventListener("click", function (e) {
-    var alvo = e.target;
-    if (!alvo || alvo.id !== "ata-copiar") return;
-    var fonte = document.getElementById("ata-fonte");
-    if (!fonte) return;
-
-    var md;
-    try { md = JSON.parse(fonte.textContent); } catch (err) { return; }
-
-    function avisar(txt) {
-      alvo.textContent = txt;
-      setTimeout(function () { alvo.textContent = "Copiar"; }, 2000);
-    }
-    // `navigator.clipboard` exige contexto seguro — existe em HTTPS e em
-    // localhost, que são os dois lugares onde este portal roda.
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(md)
-        .then(function () { avisar("Copiado!"); })
-        .catch(function () { avisar("Não foi possível copiar"); });
-    } else {
-      avisar("Não foi possível copiar");
-    }
-  });
 </script>
+{% if conduz and not reuniao.encerrada_em %}
+<script>
+(function () {
+  "use strict";
+  var corpo = document.getElementById("ata-corpo");
+  var estado = document.getElementById("ata-estado");
+  if (!corpo || !corpo.isContentEditable) return;
+
+  var URL_SALVAR = "{{ url_for('dash.reuniao_ata_editar', reuniao_id=reuniao.id) }}";
+  var timer = null, salvando = false, base = null;
+
+  /* HTML -> Markdown, só o dialeto que `reuniao_ia.para_html` produz.
+     Escrever o inverso à mão é 40 linhas; trazer uma biblioteca de editor
+     seria a primeira dependência de front do projeto inteiro. O Markdown
+     continua sendo a verdade guardada no banco. */
+  function inline(no) {
+    var t = "";
+    no.childNodes.forEach(function (f) {
+      if (f.nodeType === 3) { t += f.nodeValue; return; }
+      var nome = f.nodeName;
+      if (nome === "BR") { t += " "; return; }
+      var dentro = inline(f);
+      if (nome === "STRONG" || nome === "B") t += "**" + dentro + "**";
+      else if (nome === "EM" || nome === "I") t += "_" + dentro + "_";
+      else t += dentro;
+    });
+    return t.replace(/\s+/g, " ").trim();
+  }
+
+  function paraMarkdown(raiz) {
+    var linhas = [];
+    raiz.childNodes.forEach(function (no) {
+      if (no.nodeType === 3) {
+        var solto = no.nodeValue.trim();
+        if (solto) linhas.push(solto, "");
+        return;
+      }
+      var nome = no.nodeName, txt = inline(no);
+      if (nome === "H1" || nome === "H3") linhas.push("# " + txt, "");
+      else if (nome === "H2" || nome === "H4") linhas.push("## " + txt, "");
+      else if (nome === "BLOCKQUOTE") linhas.push("> " + txt, "");
+      else if (nome === "HR") linhas.push("---", "");
+      else if (nome === "UL" || nome === "OL") {
+        no.querySelectorAll("li").forEach(function (li) {
+          var t = inline(li);
+          if (t) linhas.push("- " + t);
+        });
+        linhas.push("");
+      } else if (txt) linhas.push(txt, "");
+    });
+    return linhas.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  }
+
+  function dizer(msg) { if (estado) estado.textContent = msg; }
+
+  /* Compara com o texto do carregamento em vez de confiar no evento `input`.
+     O serializador põe linha em branco onde o gerador não punha: sem esta
+     comparação, um clique sem edição nenhuma reescreveria o documento inteiro
+     e a ata apareceria como "editada à mão" sem ninguém ter editado. */
+  base = paraMarkdown(corpo);
+
+  function sujo() { return paraMarkdown(corpo) !== base; }
+
+  function salvar() {
+    if (salvando) return;
+    var md = paraMarkdown(corpo);
+    if (md === base) { dizer("salvo"); return; }
+
+    salvando = true;
+    dizer("salvando…");
+    fetch(URL_SALVAR, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ata_markdown: md }),
+    }).then(function (r) {
+      salvando = false;
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      base = md;
+      dizer("salvo");
+    }).catch(function () {
+      salvando = false;
+      dizer("não foi possível salvar — sua correção continua na tela");
+    });
+  }
+
+  corpo.addEventListener("input", function () {
+    dizer("editando…");
+    clearTimeout(timer);
+    timer = setTimeout(salvar, 1200);   // para de digitar, salva
+  });
+  corpo.addEventListener("blur", function () { clearTimeout(timer); salvar(); });
+
+  // Colar de outro lugar traz <span style> e <div> que o serializador
+  // descartaria em silêncio, junto com o texto. Cola como texto puro.
+  corpo.addEventListener("paste", function (e) {
+    e.preventDefault();
+    var texto = (e.clipboardData || window.clipboardData).getData("text/plain");
+    document.execCommand("insertText", false, texto);
+  });
+
+  // Sair com correção não salva é perder o que a pessoa acabou de escrever.
+  window.addEventListener("beforeunload", function (e) {
+    if (!sujo()) return;
+    e.preventDefault(); e.returnValue = ""; return "";
+  });
+})();
+</script>
+{% endif %}
 {% endblock %}
