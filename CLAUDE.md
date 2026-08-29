@@ -114,10 +114,21 @@ uma ação existente**. Antes o vínculo só acontecia quando a IA reconhecia um
 código `AC-000` na fala — e assunto que ainda não é ação, que é a maioria, não
 tinha para onde ir.
 
-A ata é **editável enquanto a reunião está aberta** (a IA erra nome próprio e
-sigla) e vira **PDF depois de encerrada**, pelo diálogo de impressão do
-navegador — o `@media print` do `style.css` é o recorte. Sem biblioteca de PDF
-na função serverless.
+A ata é **editável no próprio texto** enquanto a reunião está aberta
+(`contenteditable`): clica e escreve, sem botão para abrir edição e sem botão
+para salvar — sai sozinha 1,2s depois de parar de digitar. A IA erra nome
+próprio e sigla, e corrigir não pode custar três cliques.
+
+O HTML volta para Markdown num serializador de ~40 linhas no template, que
+cobre exatamente o dialeto que `reuniao_ia.para_html` produz — o Markdown segue
+sendo a verdade no banco. Ele compara com o texto do carregamento antes de
+gravar: sem isso, um clique sem edição reescreveria o documento (o serializador
+põe linha em branco onde o gerador não punha) e a ata apareceria como "editada
+à mão" sem ninguém ter editado.
+
+Encerrada, a ata vira **PDF** pelo diálogo de impressão do navegador — o
+`@media print` do `style.css` é o recorte. Sem biblioteca de PDF na função
+serverless.
 
 ### Papéis
 

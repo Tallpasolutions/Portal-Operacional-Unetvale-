@@ -607,9 +607,12 @@ def pauta(reuniao, usuario, marcar_comentadas=True):
 def encerrar_reuniao(reuniao_id, notas=None):
     """Congela a ata. Depois disso não se comenta mais nela — o que ficou
     registrado é o que foi dito no dia, e não uma edição posterior."""
-    supa.update("reunioes", {"id": reuniao_id}, {
-        "encerrada_em": _agora(),
-        "notas": notas})
+    mudancas = {"encerrada_em": _agora()}
+    # Só grava `notas` se veio alguma: o campo saiu da tela, e escrever None
+    # aqui apagaria a nota de reuniões antigas que tinham uma.
+    if notas is not None:
+        mudancas["notas"] = notas
+    supa.update("reunioes", {"id": reuniao_id}, mudancas)
 
 
 def excluir(acao_id):
