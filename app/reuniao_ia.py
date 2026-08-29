@@ -500,6 +500,77 @@ def itens(reuniao_id):
         return []
 
 
+def salvar_ata(reuniao_id, markdown, usuario_id):
+    """Grava a ata corrigida à mão.
+
+    A IA erra nome próprio e sigla; sem poder corrigir, o erro vai junto para
+    a operação — ou alguém reescreve a ata por fora, e o portal deixa de ser
+    onde a ata mora.
+
+    Depois da edição o texto não é mais o que o modelo escreveu, e o rodapé
+    "gerada por IA" sai: manter o carimbo seria atribuir a máquina o que a
+    pessoa escreveu.
+    """
+    if not (markdown or "").strip():
+        raise ValueError("A ata não pode ficar vazia.")
+
+    mudancas = {"ata_markdown": markdown.strip(),
+                "ata_editada_em": _agora(), "ata_editada_por": usuario_id}
+    try:
+        supa.update("reunioes", {"id": reuniao_id}, mudancas)
+    except Exception as e:
+        # Migration 0007 ainda não aplicada: grava o texto sem a autoria em vez
+        # de recusar a edição. Perder a marca de quem editou é ruim; perder a
+        # correção que a pessoa acabou de escrever é pior.
+        _falhou("salvar_ata (migration 0007 aplicada?)", e)
+        supa.update("reunioes", {"id": reuniao_id}, {"ata_markdown": markdown.strip()})
+
+
+def vincular_item(item_id, acao_id, usuario_id):
+    """Aponta o item para uma ação que já existe e registra o comentário."""
+    supa.update("reuniao_ata_itens", {"id": item_id}, {"acao_id": acao_id})
+    aplicar_item(item_id, usuario_id)
+
+
+def criar_acao_do_item(item_id, dados, usuario_id, apoio_ids=()):
+    """Transforma o item da ata numa ação nova, já vinculada.
+
+    É a saída que faltava: enquanto o vínculo dependia de a IA reconhecer um
+    código `AC-000` na fala, item de reunião sobre assunto que ainda não é ação
+    não tinha para onde ir — e a maioria não é.
+
+    O comentário na linha do tempo continua sendo escrito: é ele que registra
+    de qual reunião a ação nasceu.
+    """
+    item = supa.select_one("reuniao_ata_itens", {
+        "select": "id,texto,prazo,reuniao_id,acao_id,aplicado_em", "id": f"eq.{item_id}"})
+    if not item:
+        raise ValueError("Item não encontrado.")
+    if item.get("aplicado_em"):
+        raise ValueError("Este item já virou registro numa ação.")
+
+    dados = dict(dados)
+    dados.setdefault("titulo", item["texto"])
+    if item.get("prazo"):
+        dados.setdefault("prazo", item["prazo"])
+    acao = acoes.criar(dados, usuario_id, apoio_ids=apoio_ids)
+
+    supa.update("reuniao_ata_itens", {"id": item_id}, {"acao_id": acao["id"]})
+    aplicar_item(item_id, usuario_id)
+    return acao
+
+
+def acoes_para_vincular(usuario, limite=100):
+    """Ações abertas que a pessoa pode ver, para o seletor de vínculo."""
+    try:
+        return [{"id": a["id"], "codigo": a["codigo"], "titulo": a["titulo"]}
+                for a in acoes.listar(usuario)
+                if a["status"] not in acoes.TERMINAIS][:limite]
+    except Exception as e:
+        _falhou("acoes_para_vincular", e)
+        return []
+
+
 def aplicar_item(item_id, usuario_id):
     """Item da ata -> comentário na linha do tempo da ação.
 

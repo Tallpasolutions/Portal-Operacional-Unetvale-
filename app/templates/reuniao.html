@@ -79,6 +79,17 @@
       <button class="grav-fim" type="button" id="g-concluir">Concluir</button>
     </div>
 
+      {% if estado.ok %}
+      {# Regera a ata a partir da transcrição que já existe. NÃO transcreve o
+         áudio de novo — depois de 30 dias o áudio nem existe mais. #}
+      <form method="post" action="{{ url_for('dash.reuniao_ata', reuniao_id=reuniao.id) }}"
+            style="display:inline;">
+        <button class="grav-secundario" type="submit" title="Reescreve a ata a partir da transcrição já existente">
+          Gerar ata novamente
+        </button>
+      </form>
+      {% endif %}
+
     <div class="grav-status" id="g-estado"></div>
     <div id="g-aviso" class="aviso-erro" style="display:none;"></div>
 
@@ -147,7 +158,7 @@
   <div class="card-h">
     <span>Ata</span>
     <span class="subnote" style="margin:0;">
-      gerada por IA{% if reuniao.ata_gerada_em %} em {{ reuniao.ata_gerada_em[:16]|replace('T', ' ') }}{% endif %} — confira antes de usar
+      {% if reuniao.ata_editada_em %}editada à mão{% else %}gerada por IA — confira antes de usar{% endif %}
     </span>
   </div>
   <div class="card-b">
@@ -159,16 +170,30 @@
 
     <div class="ata" id="ata-corpo">{{ ata_html|safe }}</div>
 
-    <div class="gravador-linha" style="margin-top:14px;">
-      <button class="btn sec" type="button" id="ata-copiar">Copiar Markdown</button>
-      <a class="btn sec" download="ata-{{ reuniao.data }}.md"
-         href="data:text/markdown;charset=utf-8,{{ reuniao.ata_markdown|urlencode }}">Baixar .md</a>
-      {% if conduz %}
-      <form method="post" action="{{ url_for('dash.reuniao_ata', reuniao_id=reuniao.id) }}" style="display:inline;">
-        <button class="btn sec" type="submit">Gerar de novo</button>
-      </form>
+    <div class="ata-acoes">
+      <button class="ata-btn" type="button" id="ata-copiar">Copiar</button>
+      {% if reuniao.encerrada_em %}
+      {# PDF só depois de encerrada: enquanto a reunião está aberta a ata é
+         rascunho e se edita; fechada, ela é documento e se leva embora.
+         Sai pelo diálogo de impressão do navegador — zero dependência nova
+         numa função serverless, e o resultado é PDF de verdade. #}
+      <button class="ata-btn" type="button" id="ata-pdf">Baixar PDF</button>
       {% endif %}
     </div>
+
+    {% if conduz and not reuniao.encerrada_em %}
+    <details class="ata-editar">
+      <summary>Editar a ata</summary>
+      <p class="subnote" style="margin:10px 0;">
+        Corrija nomes, siglas e o que a transcrição entendeu errado. Ao salvar, a
+        ata deixa de ser marcada como gerada por IA — o texto passa a ser seu.
+      </p>
+      <form method="post" action="{{ url_for('dash.reuniao_ata_editar', reuniao_id=reuniao.id) }}">
+        <textarea name="ata_markdown" rows="18">{{ reuniao.ata_markdown }}</textarea>
+        <button class="btn" type="submit" style="margin-top:10px;">Salvar ata</button>
+      </form>
+    </details>
+    {% endif %}
     {# O Markdown vai num <script type="application/json">, não num textarea
        fora da tela: `position:absolute; left:-9999px` inflava a área rolável
        da página e deixava um vazio enorme abaixo da ata. #}
@@ -180,13 +205,14 @@
 <div class="card" style="margin-top:16px;">
   <div class="card-h">
     <span>Itens da ata ({{ itens_ata|length }})</span>
-    <span class="subnote" style="margin:0;">registrar na ação é decisão sua</span>
+    <span class="subnote" style="margin:0;">vire ação, ou anexe a uma que já existe</span>
   </div>
   <div class="card-b">
     <p class="subnote" style="margin-top:0;">
-      Registrar grava o item como comentário na linha do tempo da ação. A linha do
-      tempo é <b>permanente</b> — não há como desfazer depois, por isso nada entra
-      lá sozinho.
+      Cada item pode virar uma <b>ação nova</b> ou entrar numa ação que já existe.
+      Nos dois casos ele é registrado na linha do tempo da ação, marcado com esta
+      reunião. Essa linha do tempo é permanente — por isso o registro é sempre por
+      clique, e nada da IA entra lá sozinho.
     </p>
     {% for i in itens_ata %}
     <div class="item-pauta">
@@ -195,23 +221,58 @@
         <span>{{ i.texto }}</span>
       </div>
       <div class="item-pauta-meta">
-        {% if i.prazo %}prazo {{ i.prazo|replace('-', '/') }} · {% endif %}
-        {% if i.acoes %}
-          {{ i.acoes.codigo }} — {{ i.acoes.titulo }}
-        {% else %}
-          sem ação vinculada
-        {% endif %}
+        {% if i.prazo %}prazo {{ i.prazo|replace('-', '/') }}{% else %}sem prazo{% endif %}
+        {% if i.acoes %} · {{ i.acoes.codigo }} — {{ i.acoes.titulo }}{% endif %}
       </div>
-      {% if conduz and i.acao_id %}
-        {% if i.aplicado_em %}
-        <span class="badge badge-verde">✓ registrado na ação</span>
-        {% else %}
-        <form method="post" class="form-comentar"
-              action="{{ url_for('dash.reuniao_item_aplicar', reuniao_id=reuniao.id, item_id=i.id) }}"
-              onsubmit="return confirm('Registrar este item na {{ i.acoes.codigo if i.acoes }}? A linha do tempo da ação é permanente.');">
-          <button class="btn sec" type="submit">Registrar na {{ i.acoes.codigo if i.acoes else 'ação' }}</button>
-        </form>
-        {% endif %}
+
+      {% if i.aplicado_em %}
+        <span class="badge badge-verde">✓ registrado em {{ i.acoes.codigo if i.acoes }}</span>
+      {% elif conduz %}
+        <details class="item-acao">
+          <summary>Virar ação</summary>
+
+          <form method="post" action="{{ url_for('dash.reuniao_item_acao', reuniao_id=reuniao.id, item_id=i.id) }}">
+            <input type="hidden" name="modo" value="criar">
+            <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));">
+              <div class="field" style="grid-column:1/-1;"><label>Título da ação</label>
+                <input type="text" name="titulo" required value="{{ i.texto }}"></div>
+              <div class="field"><label>Responsável</label>
+                <select name="responsavel_id" required>
+                  <option value="">Escolha…</option>
+                  {% for u in usuarios %}
+                  <option value="{{ u.id }}">{{ u.nome or u.email }}</option>
+                  {% endfor %}
+                </select></div>
+              <div class="field"><label>Área</label>
+                <select name="area_id">
+                  <option value="">—</option>
+                  {% for a in areas %}<option value="{{ a.id }}">{{ a.nome }}</option>{% endfor %}
+                </select></div>
+              <div class="field"><label>Prazo</label>
+                <input type="date" name="prazo" value="{{ i.prazo or '' }}"></div>
+              <div class="field"><label>Prioridade</label>
+                <select name="prioridade">
+                  {% for pr in prioridades %}<option value="{{ pr }}" {{ 'selected' if pr == 'Média' }}>{{ pr }}</option>{% endfor %}
+                </select></div>
+            </div>
+            <button class="btn" type="submit">Criar ação</button>
+          </form>
+
+          {% if acoes_abertas %}
+          <form method="post" class="item-vincular"
+                action="{{ url_for('dash.reuniao_item_acao', reuniao_id=reuniao.id, item_id=i.id) }}">
+            <input type="hidden" name="modo" value="vincular">
+            <label>ou anexe a uma ação existente</label>
+            <div class="gravador-linha">
+              <select name="acao_id" required>
+                <option value="">Escolha a ação…</option>
+                {% for a in acoes_abertas %}<option value="{{ a.id }}">{{ a.codigo }} — {{ a.titulo }}</option>{% endfor %}
+              </select>
+              <button class="btn sec" type="submit">Anexar</button>
+            </div>
+          </form>
+          {% endif %}
+        </details>
       {% endif %}
     </div>
     {% endfor %}
@@ -222,14 +283,11 @@
 
 {% if conduz and not reuniao.encerrada_em %}
 <div class="card" style="margin-top:16px;">
-  <div class="card-h">Encerrar reunião</div>
+  <div class="card-h">
+    <span>Encerrar reunião</span>
+    <span class="subnote" style="margin:0;">depois disso a ata não é mais editável</span>
+  </div>
   <div class="card-b">
-    <p class="subnote" style="margin-top:0;">
-      Encerrar congela a ata: os comentários ficam como foram ditos no dia e a reunião não
-      aceita mais registros. Cada comentário continua aparecendo na linha do tempo da ação,
-      marcado com a reunião de origem. Se houver gravação em andamento, o último trecho é
-      transcrito e a ata é gerada antes de congelar.
-    </p>
     <form method="post" id="form-encerrar"
           action="{{ url_for('dash.reuniao_encerrar', reuniao_id=reuniao.id) }}"
           onsubmit="return confirm('Encerrar a reunião? Depois disso não é possível comentar nela.');">
@@ -238,7 +296,7 @@
         <textarea name="notas" rows="3" style="width:100%;"
                   placeholder="Decisões que não pertencem a uma ação específica.">{{ reuniao.notas or '' }}</textarea>
       </div>
-      <button class="btn" type="submit">Encerrar e gerar ata</button>
+      <button class="btn" type="submit">Encerrar reunião</button>
     </form>
   </div>
 </div>
@@ -265,6 +323,13 @@
 {% endif %}
 
 <script>
+  // O botão de PDF abre o diálogo de impressão: o navegador é quem gera o
+  // arquivo. Evita uma biblioteca de PDF na função serverless e produz um PDF
+  // de verdade, não um HTML renomeado. O recorte é o `@media print` do CSS.
+  document.addEventListener("click", function (e) {
+    if (e.target && e.target.id === "ata-pdf") window.print();
+  });
+
   // Copiar a ata em Markdown (e não o HTML renderizado): é o formato que
   // cola inteiro no WhatsApp, no e-mail e no Notion sem virar sopa de tag.
   document.addEventListener("click", function (e) {
@@ -278,7 +343,7 @@
 
     function avisar(txt) {
       alvo.textContent = txt;
-      setTimeout(function () { alvo.textContent = "Copiar Markdown"; }, 2000);
+      setTimeout(function () { alvo.textContent = "Copiar"; }, 2000);
     }
     // `navigator.clipboard` exige contexto seguro — existe em HTTPS e em
     // localhost, que são os dois lugares onde este portal roda.
@@ -287,7 +352,7 @@
         .then(function () { avisar("Copiado!"); })
         .catch(function () { avisar("Não foi possível copiar"); });
     } else {
-      avisar("Copie pelo botão Baixar .md");
+      avisar("Não foi possível copiar");
     }
   });
 </script>
