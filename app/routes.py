@@ -864,6 +864,30 @@ def reuniao_ata_status(reuniao_id):
     return jsonify(reuniao_ia.estado(reuniao_id, r))
 
 
+@bp.route("/reunioes/<reuniao_id>/pdf")
+@login_obrigatorio
+def reuniao_pdf(reuniao_id):
+    """A reunião inteira num documento — ata, itens, registros e notas.
+
+    Sai pelo diálogo de impressão do navegador, que é quem gera o PDF. Assim
+    não entra biblioteca de PDF na função serverless, e o resultado é um PDF
+    de verdade e não um HTML renomeado.
+    """
+    u = usuario_atual()
+    r = _reuniao_ou_404(reuniao_id, u)
+    lista = reuniao_ia.trechos(reuniao_id)
+    ms = sum(t.get("duracao_ms") or 0 for t in lista if t["status"] == "ok")
+
+    return render_template(
+        "reuniao_pdf.html", reuniao=r,
+        usuarios=_usuarios_para_escolha(),
+        ata_html=reuniao_ia.para_html(r.get("ata_markdown"), so_corpo=True),
+        itens=reuniao_ia.itens(reuniao_id),
+        comentarios=reuniao_ia.comentarios_da_reuniao(reuniao_id),
+        duracao=f"{ms // 60000} min" if ms else None,
+        gerado_em=datetime.now(timezone.utc).astimezone().strftime("%d/%m/%Y %H:%M"))
+
+
 @bp.route("/reunioes/<reuniao_id>/ata/editar", methods=["POST"])
 @login_obrigatorio
 def reuniao_ata_editar(reuniao_id):

@@ -264,12 +264,17 @@
             <td>{{ 'Individual' if r.tipo == 'individual' else 'Em grupo' }}</td>
             <td>{{ r.data|replace('-', '/') }}</td>
             <td>{{ r.participantes|length }}</td>
-            <td>{% if r.encerrada_em %}<span class="badge badge-cinza">Ata congelada</span>
+            <td>{% if r.encerrada_em %}<span class="badge badge-cinza">Finalizada</span>
                 {% else %}<span class="badge badge-verde">Em andamento</span>{% endif %}</td>
+            {# Com ata pronta a coluna deixa de informar e passa a AGIR: o PDF
+               é da reunião inteira, e a lista é onde se procura por ele
+               depois — não dentro da reunião que já terminou. #}
             <td>{% if r.gravacao_status == 'gravando' %}<span class="badge badge-vermelho">● Gravando</span>
                 {% elif r.gravacao_status == 'transcrevendo' %}<span class="badge badge-ambar">Ata pendente</span>
                 {% elif r.gravacao_status == 'erro' %}<span class="badge badge-vermelho">Falhou</span>
-                {% elif r.ata_markdown %}<span class="badge badge-verde">Ata pronta</span>
+                {% elif r.ata_markdown %}<a class="btn-pdf" target="_blank" rel="noopener"
+                     href="{{ url_for('dash.reuniao_pdf', reuniao_id=r.id) }}"
+                     onclick="event.stopPropagation();">Gerar PDF</a>
                 {% else %}<span class="badge badge-cinza">Sem gravação</span>{% endif %}</td>
           </tr>
           {% endfor %}

@@ -571,6 +571,21 @@ def acoes_para_vincular(usuario, limite=100):
         return []
 
 
+def comentarios_da_reuniao(reuniao_id):
+    """Comentários que o gestor registrou nesta reunião, com a ação de origem.
+
+    Compõem o PDF junto com a ata: a ata é o que a IA escreveu do áudio; isto
+    é o que a pessoa digitou na pauta. As duas coisas são a reunião.
+    """
+    try:
+        return supa.select("acao_eventos", {
+            "select": "id,texto,autor_id,criado_em,acoes(codigo,titulo)",
+            "reuniao_id": f"eq.{reuniao_id}", "order": "criado_em.asc"})
+    except Exception as e:
+        _falhou("comentarios_da_reuniao", e)
+        return []
+
+
 def aplicar_item(item_id, usuario_id):
     """Item da ata -> comentário na linha do tempo da ação.
 
@@ -767,11 +782,31 @@ def expurgar_audio(limite=20):
 # O texto passa por escape ANTES de qualquer conversão. Ele vem de
 # transcrição, ou seja, de fala de terceiros: tratar como HTML confiável
 # seria abrir XSS pela porta da frente.
-def para_html(md):
+def para_html(md, so_corpo=False):
+    """Markdown -> HTML. `so_corpo` descarta o cabeçalho e o rodapé da ata.
+
+    É o que o PDF usa: lá o título, a data e o aviso de "gerada por IA" já
+    estão no documento, e repeti-los dentro da ata faz o leitor achar que
+    começou outro documento.
+    """
     from html import escape
 
     if not md:
         return ""
+
+    if so_corpo:
+        linhas = md.splitlines()
+        while linhas and (not linhas[0].strip()
+                          or linhas[0].startswith("# ")
+                          or re.fullmatch(r"_.*_", linhas[0].strip())):
+            linhas.pop(0)
+        # E o rodapé: a régua final e a linha em itálico depois dela.
+        while linhas and (not linhas[-1].strip()
+                          or re.fullmatch(r"_.*_", linhas[-1].strip())):
+            linhas.pop()
+        if linhas and linhas[-1].strip() == "---":
+            linhas.pop()
+        md = "\n".join(linhas)
 
     def inline(t):
         t = escape(t)
