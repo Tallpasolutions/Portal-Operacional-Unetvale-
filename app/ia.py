@@ -53,7 +53,7 @@ CHARS_POR_TOKEN = 3.5
 
 # Reserva para a resposta da ata. Exportada para que `reuniao_ia` decida o que
 # mandar usando o MESMO número — dois orçamentos separados divergem calados.
-MAX_TOKENS_ATA = 2000
+MAX_TOKENS_ATA = 2800
 
 
 def tokens_aprox(texto):
@@ -257,24 +257,52 @@ def notas_do_trecho(texto):
     if not (texto or "").strip():
         return ""
     return _conversar(
-        REGRA_COMUM + " Resuma o trecho em no máximo 5 marcadores curtos, "
-        "preservando números, prazos e nomes exatamente como aparecem.",
+        REGRA_COMUM +
+        " Registre o que foi dito neste trecho em até 8 marcadores. Preserve "
+        "números, datas, valores, nomes de pessoas e lugares exatamente como "
+        "aparecem, e o argumento de quem falou — estes marcadores podem ser a "
+        "única fonte da ata de uma reunião longa, e o áudio some em 30 dias.",
         texto,
-        # 5 marcadores curtos cabem de sobra em 600, e as notas de 30
-        # trechos precisam somar pouco para a ata final caber no minuto.
-        max_tokens=600,
+        # 8 marcadores cabem em 900; as notas de 30 trechos ainda somam
+        # ~4.000 tokens, dentro do que a ata final precisa consumir.
+        max_tokens=900,
     )
 
 
 ESQUEMA_ATA = """Responda SOMENTE com um objeto JSON com esta forma exata:
 {
-  "resumo": "2 a 4 frases sobre o que a reunião tratou",
+  "resumo": "3 a 6 frases sobre o que a reunião tratou",
+  "pontos":          [{"titulo": "", "detalhe": ""}],
   "decisoes":        [{"texto": "", "acao_codigo": null}],
   "encaminhamentos": [{"texto": "", "responsavel": null, "prazo": null, "acao_codigo": null}],
   "pendencias":      [{"texto": "", "acao_codigo": null}],
   "riscos":          [{"texto": "", "acao_codigo": null}]
 }
+
+"pontos" é a parte mais importante e vem primeiro no seu raciocínio: percorra
+a reunião NA ORDEM em que os assuntos apareceram e registre, em cada um, o que
+foi efetivamente dito — números, datas, valores, nomes de pessoas, cidades,
+equipamentos e o argumento de quem falou. Duas a quatro frases por ponto.
+Prefira pecar por detalhe a resumir até a informação sumir: quem lê a ata não
+ouviu o áudio, e o áudio some em 30 dias.
+
+Um assunto vira um ponto mesmo que ninguém tenha decidido nada — a maior parte
+de uma reunião é discussão, não decisão. Conversa fora do trabalho pode virar um
+ponto de uma linha, sem detalhar.
+
+As outras listas registram o que teve desfecho, e ficam vazias quando não houve.
+
+Um "encaminhamento" é algo que alguém VAI FAZER — vale mesmo sem responsável
+nomeado e mesmo dito de passagem: "na segunda a gente vê o projeto X",
+"preciso cobrar o fornecedor", "vamos levantar isso". Se uma data foi dita
+junto, ela é o prazo. Um assunto que combinou ação entra nos dois lugares: como
+ponto, com o que se discutiu, e como encaminhamento, com o que ficou de ser
+feito — não é repetição, é a diferença entre o que se falou e o que se combinou.
+
+Nunca invente decisão que ninguém tomou só para a lista não ficar vazia.
+
 Regras dos campos:
+- "titulo": 2 a 6 palavras nomeando o assunto.
 - "prazo": "AAAA-MM-DD" quando uma data for dita; caso contrário null.
 - "responsavel": o nome como foi falado; null se ninguém foi nomeado.
 - "acao_codigo": o código no formato AC-000 quando o trecho tratar de uma
@@ -310,7 +338,7 @@ def gerar_ata(texto, pauta=None, participantes=None, data_reuniao=None):
     contexto.append("Transcrição:\n" + texto)
 
     bruto = _conversar(REGRA_COMUM + "\n" + ESQUEMA_ATA,
-                       "\n\n".join(contexto), json_estrito=True, max_tokens=2000)
+                       "\n\n".join(contexto), json_estrito=True, max_tokens=MAX_TOKENS_ATA)
     try:
         dados = json.loads(bruto)
     except json.JSONDecodeError as e:

@@ -298,6 +298,13 @@ trecho — que é justamente por que elas são calculadas durante a reunião, co
 trecho ainda na mão. Reunião muito longa nem com notas cabe: aí a ata sai
 **carimbada como parcial**, nunca cortada em silêncio.
 
+**`datetime.now()` grava 3 horas no passado.** Ele devolve hora local
+ingênua; numa coluna `timestamptz` o Postgres lê o valor sem fuso como se já
+fosse UTC. `ata_gerada_em`, `encerrada_em` e `atualizado_em` nasciam antes do
+fato que registram. Use `datetime.now(timezone.utc)` — é o `_agora()` de
+`acoes.py` e de `reuniao_ia.py`. As colunas com `default now()` sempre
+estiveram certas: o erro só aparece no que o Python escreve.
+
 **Ids de modelo da Groq mudam.** Ficam em `GROQ_MODELO_*` no ambiente. Cravados
 no código, viram um HTTP 400 sem explicação no dia em que a Groq aposentar o id.
 

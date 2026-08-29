@@ -27,7 +27,7 @@ import os
 import re
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from . import acoes, ia, supa
 from .acoes import _data
@@ -43,7 +43,7 @@ BUCKET = os.environ.get("REUNIAO_BUCKET", "reuniao-audio")
 # transcrição e nunca cabe numa chamada. Por isso o caminho pelas notas por
 # trecho é o NORMAL aqui, não a exceção — e é o que justifica calculá-las
 # durante a reunião, quando o trecho ainda está na mão.
-ATA_MAX_CHARS = int(os.environ.get("REUNIAO_ATA_MAX_CHARS", "16000"))
+ATA_MAX_CHARS = int(os.environ.get("REUNIAO_ATA_MAX_CHARS", "14000"))
 AUDIO_DIAS = int(os.environ.get("REUNIAO_AUDIO_DIAS", "30"))
 
 # Uma ação é "recorrente" quando voltou à mesa em pelo menos duas
@@ -60,7 +60,15 @@ def _falhou(onde, erro):
 
 
 def _agora():
-    return datetime.now().isoformat(timespec="seconds")
+    """Instante atual, COM fuso.
+
+    🚨 `datetime.now()` devolve hora local ingênua (UTC-3 aqui). Numa coluna
+    `timestamptz` o Postgres lê o valor sem fuso como se já fosse UTC, então
+    todo carimbo do módulo ficava 3 horas no passado: a ata dizia ter sido
+    gerada antes de a reunião acabar. As colunas com `default now()` sempre
+    estiveram certas — o erro era só nos horários escritos pelo Python.
+    """
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 # ------------------------------------------------------------- gravação
@@ -126,7 +134,7 @@ def autorizar_trecho(reuniao_id, indice, formato):
         supa.insert("reuniao_audio", {
             "reuniao_id": reuniao_id, "indice": int(indice),
             "caminho": caminho, "formato": formato, "status": "pendente",
-            "audio_expira_em": (datetime.now() + timedelta(days=AUDIO_DIAS))
+            "audio_expira_em": (datetime.now(timezone.utc) + timedelta(days=AUDIO_DIAS))
                                .isoformat(timespec="seconds"),
         })
 
@@ -253,6 +261,14 @@ def _markdown(dados, reuniao, interrompida=False, parcial=False):
             if extras:
                 linha += f" _({' · '.join(extras)})_"
             L.append(linha)
+        L.append("")
+
+    pontos = [p for p in (dados.get("pontos") or []) if (p or {}).get("detalhe")]
+    if pontos:
+        L.append("## Pontos discutidos")
+        for p in pontos:
+            titulo = (p.get("titulo") or "").strip()
+            L.append(f"- **{titulo}** — {p['detalhe']}" if titulo else f"- {p['detalhe']}")
         L.append("")
 
     secao("Decisões", "decisoes")
