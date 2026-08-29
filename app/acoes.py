@@ -14,7 +14,7 @@ Papéis:
   * usuário  — vê e atualiza as ações onde é responsável ou apoio.
 """
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from . import supa
 
@@ -34,6 +34,17 @@ ORDEM_SITUACAO = {"Atrasada": 0, "Vence em breve": 1, "No prazo": 2,
 JANELA_VENCE_EM_BREVE = 7
 
 TERMINAIS = ("Concluída", "Cancelada")
+
+
+def _agora():
+    """Instante atual, COM fuso.
+
+    `datetime.now()` devolve hora local ingênua (UTC-3 aqui) e, numa coluna
+    `timestamptz`, o Postgres lê o valor sem fuso como se já fosse UTC — o
+    carimbo nascia 3 horas no passado. As colunas com `default now()` sempre
+    estiveram certas; o erro era só nos horários escritos pelo Python.
+    """
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def _falhou(onde, erro):
@@ -290,7 +301,7 @@ def editar(acao_id, dados, apoio_ids=None):
     mudancas = {k: dados.get(k) for k in (
         "titulo", "entrega_esperada", "area_id", "responsavel_id", "prazo",
         "prioridade", "observacoes") if k in dados}
-    mudancas["atualizado_em"] = datetime.now().isoformat(timespec="seconds")
+    mudancas["atualizado_em"] = _agora()
     supa.update("acoes", {"id": acao_id}, mudancas)
 
     if apoio_ids is not None:
@@ -340,7 +351,7 @@ def atualizar(acao_id, autor_id, texto, status=None, progresso=None,
         "proximo_passo": passo,
         "evidencia": evidencia_final,
         "data_conclusao": data_conclusao,
-        "atualizado_em": datetime.now().isoformat(timespec="seconds"),
+        "atualizado_em": _agora(),
     }
     if progresso is not None:
         mudancas["progresso"] = max(0, min(100, int(progresso)))
@@ -563,7 +574,7 @@ def criar_reuniao(titulo, tipo, data_reuniao, participantes, criada_por):
     return r
 
 
-def pauta(reuniao, usuario):
+def pauta(reuniao, usuario, marcar_comentadas=True):
     """Ações dos participantes, na ordem em que precisam ser discutidas.
 
     A ordem não é cosmética: a regra da planilha é que ação crítica é revisada
@@ -578,7 +589,11 @@ def pauta(reuniao, usuario):
              if (a["responsavel_id"] in alvo or alvo & set(a.get("apoio_ids") or []))
              and a["status"] not in TERMINAIS]
 
-    # Já comentadas nesta reunião, para a tela marcar o que foi visto.
+    # Já comentadas nesta reunião, para a tela marcar o que foi visto. Quem só
+    # quer os códigos da pauta (a geração da ata) passa `marcar_comentadas=False`
+    # e economiza uma ida ao banco que não muda nada no resultado dele.
+    if not marcar_comentadas:
+        return itens
     try:
         vistos = {e["acao_id"] for e in supa.select("acao_eventos", {
             "select": "acao_id", "reuniao_id": f"eq.{reuniao['id']}"})}
@@ -593,7 +608,7 @@ def encerrar_reuniao(reuniao_id, notas=None):
     """Congela a ata. Depois disso não se comenta mais nela — o que ficou
     registrado é o que foi dito no dia, e não uma edição posterior."""
     supa.update("reunioes", {"id": reuniao_id}, {
-        "encerrada_em": datetime.now().isoformat(timespec="seconds"),
+        "encerrada_em": _agora(),
         "notas": notas})
 
 

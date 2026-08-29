@@ -26,7 +26,8 @@ Postgres, e por isso não muda quando o modelo muda de humor.
 import os
 import re
 import sys
-from datetime import date, datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date, datetime, timedelta, timezone
 
 from . import acoes, ia, supa
 from .acoes import _data
@@ -42,7 +43,7 @@ BUCKET = os.environ.get("REUNIAO_BUCKET", "reuniao-audio")
 # transcrição e nunca cabe numa chamada. Por isso o caminho pelas notas por
 # trecho é o NORMAL aqui, não a exceção — e é o que justifica calculá-las
 # durante a reunião, quando o trecho ainda está na mão.
-ATA_MAX_CHARS = int(os.environ.get("REUNIAO_ATA_MAX_CHARS", "16000"))
+ATA_MAX_CHARS = int(os.environ.get("REUNIAO_ATA_MAX_CHARS", "14000"))
 AUDIO_DIAS = int(os.environ.get("REUNIAO_AUDIO_DIAS", "30"))
 
 # Uma ação é "recorrente" quando voltou à mesa em pelo menos duas
@@ -59,7 +60,15 @@ def _falhou(onde, erro):
 
 
 def _agora():
-    return datetime.now().isoformat(timespec="seconds")
+    """Instante atual, COM fuso.
+
+    🚨 `datetime.now()` devolve hora local ingênua (UTC-3 aqui). Numa coluna
+    `timestamptz` o Postgres lê o valor sem fuso como se já fosse UTC, então
+    todo carimbo do módulo ficava 3 horas no passado: a ata dizia ter sido
+    gerada antes de a reunião acabar. As colunas com `default now()` sempre
+    estiveram certas — o erro era só nos horários escritos pelo Python.
+    """
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 # ------------------------------------------------------------- gravação
@@ -125,7 +134,7 @@ def autorizar_trecho(reuniao_id, indice, formato):
         supa.insert("reuniao_audio", {
             "reuniao_id": reuniao_id, "indice": int(indice),
             "caminho": caminho, "formato": formato, "status": "pendente",
-            "audio_expira_em": (datetime.now() + timedelta(days=AUDIO_DIAS))
+            "audio_expira_em": (datetime.now(timezone.utc) + timedelta(days=AUDIO_DIAS))
                                .isoformat(timespec="seconds"),
         })
 
@@ -254,6 +263,14 @@ def _markdown(dados, reuniao, interrompida=False, parcial=False):
             L.append(linha)
         L.append("")
 
+    pontos = [p for p in (dados.get("pontos") or []) if (p or {}).get("detalhe")]
+    if pontos:
+        L.append("## Pontos discutidos")
+        for p in pontos:
+            titulo = (p.get("titulo") or "").strip()
+            L.append(f"- **{titulo}** — {p['detalhe']}" if titulo else f"- {p['detalhe']}")
+        L.append("")
+
     secao("Decisões", "decisoes")
     secao("Encaminhamentos", "encaminhamentos", com_prazo=True)
     secao("Pendências", "pendencias")
@@ -307,17 +324,37 @@ def montar_ata(reuniao, usuario, interrompida=False):
     truncada registrada como oficial é pior do que ata que faltou.
     """
     reuniao_id = reuniao["id"]
-    lista = [t for t in trechos(reuniao_id) if t["status"] == "ok"]
+
+    # As quatro leituras são independentes entre si e cada ida ao PostgREST
+    # custa ~0,3s de latência. Em série somavam mais que a chamada ao modelo:
+    # a ata parecia lenta por causa do banco, não da IA. `requests` solta o GIL
+    # no I/O, então threads resolvem sem async no projeto inteiro.
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        f_trechos = pool.submit(trechos, reuniao_id)
+        f_pauta = pool.submit(acoes.pauta, reuniao, usuario, False)
+        f_nomes = pool.submit(_nomes, reuniao.get("participantes") or [])
+        f_antigos = pool.submit(_itens_soltos, reuniao_id)
+        lista = [t for t in f_trechos.result() if t["status"] == "ok"]
+        da_pauta = f_pauta.result()
+        nomes = f_nomes.result()
+        soltos = f_antigos.result()
+
     if not lista:
         raise ValueError(
             "Nenhum trecho foi transcrito ainda — não há texto de onde tirar a ata.")
 
     texto, origem, parcial = _texto_para_ata(lista)
 
-    pauta = [(a["codigo"], a["titulo"]) for a in acoes.pauta(reuniao, usuario)]
-    nomes = _nomes(reuniao.get("participantes") or [])
+    # A pauta serve a dois fins: os códigos que vão no prompt e o mapa
+    # codigo->id que liga o item à ação. Buscar o mapa de novo com
+    # `_mapa_codigos()` seria uma ida ao banco para reobter o que já está aqui.
+    pauta = [(a["codigo"], a["titulo"]) for a in da_pauta]
+    codigos = {a["codigo"].upper(): a["id"] for a in da_pauta if a.get("codigo")}
 
-    supa.update("reunioes", {"id": reuniao_id}, {"gravacao_status": "transcrevendo"})
+    # Não existe mais um update só para marcar "transcrevendo": ninguém lê esse
+    # estado (o cliente fica esperando a resposta desta requisição), e ele
+    # custava uma ida ao banco. Se o processo morrer aqui, a reunião fica em
+    # `gravando` e o botão de resgate na tela resolve.
     try:
         dados = ia.gerar_ata(texto, pauta=pauta, participantes=nomes,
                              data_reuniao=reuniao.get("data"))
@@ -329,20 +366,42 @@ def montar_ata(reuniao, usuario, interrompida=False):
     markdown = _markdown(dados, reuniao, interrompida, parcial=parcial)
     transcricao = "\n\n".join(t["texto"] for t in lista if t.get("texto"))
 
-    supa.update("reunioes", {"id": reuniao_id}, {
-        "transcricao": transcricao,
-        "ata_markdown": markdown,
-        "ata_gerada_em": _agora(),
-        "ata_modelo": os.environ.get("GROQ_MODELO_TEXTO", ""),
-        "gravacao_status": "pronta",
-        "gravacao_interrompida": bool(interrompida),
-        "gravacao_erro": None,
-    })
-    _gravar_itens(reuniao_id, dados, _data(reuniao.get("data")))
+    # Gravar a ata e gravar os itens não dependem um do outro: em série somavam
+    # três idas ao banco esperando uma pela outra.
+    def salvar_reuniao():
+        supa.update("reunioes", {"id": reuniao_id}, {
+            "transcricao": transcricao,
+            "ata_markdown": markdown,
+            "ata_gerada_em": _agora(),
+            "ata_modelo": os.environ.get("GROQ_MODELO_TEXTO", ""),
+            "gravacao_status": "pronta",
+            "gravacao_interrompida": bool(interrompida),
+            "gravacao_erro": None,
+        })
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        f = pool.submit(salvar_reuniao)
+        _gravar_itens(reuniao_id, dados, _data(reuniao.get("data")), codigos, soltos)
+        f.result()   # propaga a falha de gravar a ata, que é a que importa
     return markdown
 
 
-def _gravar_itens(reuniao_id, dados, data_reuniao=None):
+def _itens_soltos(reuniao_id):
+    """Ids dos itens que uma regeração pode apagar — os que ninguém aplicou.
+
+    Item já aplicado virou comentário em `acao_eventos`, que é append-only:
+    apagar a linha aqui deixaria o comentário órfão.
+    """
+    try:
+        return [a["id"] for a in supa.select("reuniao_ata_itens", {
+            "select": "id,aplicado_em", "reuniao_id": f"eq.{reuniao_id}"})
+            if not a.get("aplicado_em")]
+    except Exception as e:
+        _falhou("_itens_soltos", e)
+        return []
+
+
+def _gravar_itens(reuniao_id, dados, data_reuniao=None, codigos=None, soltos=None):
     """Explode a estrutura em linhas — o que permite cruzar reuniões.
 
     Regerar a ata substitui os itens ANTES aplicados? Não: itens já
@@ -350,17 +409,19 @@ def _gravar_itens(reuniao_id, dados, data_reuniao=None):
     append-only. Apagar a linha aqui deixaria o comentário órfão, então
     só os não aplicados são trocados.
     """
-    try:
-        antigos = supa.select("reuniao_ata_itens", {
-            "select": "id,aplicado_em", "reuniao_id": f"eq.{reuniao_id}"})
-        for a in antigos:
-            if not a.get("aplicado_em"):
-                supa.delete("reuniao_ata_itens", {"id": a["id"]})
-    except Exception as e:
-        _falhou("_gravar_itens/limpeza", e)
+    # Uma requisição para limpar e uma para gravar, em vez de uma por item.
+    if soltos is None:
+        soltos = _itens_soltos(reuniao_id)
+    if soltos:
+        try:
+            supa.delete("reuniao_ata_itens", {"id": soltos})
+        except Exception as e:
+            _falhou("_gravar_itens/limpeza", e)
 
-    codigos = _mapa_codigos()
-    ordem = 0
+    if codigos is None:
+        codigos = _mapa_codigos()
+
+    linhas, ordem = [], 0
     for chave, tipo in (("decisoes", "decisao"),
                         ("encaminhamentos", "encaminhamento"),
                         ("pendencias", "pendencia"),
@@ -369,22 +430,33 @@ def _gravar_itens(reuniao_id, dados, data_reuniao=None):
             if not (item or {}).get("texto"):
                 continue
             codigo = (item.get("acao_codigo") or "").upper().strip()
+            linhas.append({
+                "reuniao_id": reuniao_id,
+                "tipo": tipo,
+                "texto": item["texto"],
+                "prazo": _data_iso(item.get("prazo"), data_reuniao),
+                # `responsavel_id` fica nulo de propósito: casar um nome vindo
+                # de transcrição com um usuário do banco é chute, e chute aqui
+                # atribui tarefa à pessoa errada. O nome falado continua
+                # visível dentro do texto do item.
+                "acao_id": codigos.get(codigo),
+                "ordem": ordem,
+            })
+            ordem += 1
+
+    if not linhas:
+        return
+    try:
+        supa.insert("reuniao_ata_itens", linhas)   # lista = um POST só
+    except Exception as e:
+        # Um item com FK invalida derrubaria o lote inteiro. Cai para um a um
+        # para nao perder os bons por causa de um ruim.
+        _falhou("_gravar_itens/lote", e)
+        for l in linhas:
             try:
-                supa.insert("reuniao_ata_itens", {
-                    "reuniao_id": reuniao_id,
-                    "tipo": tipo,
-                    "texto": item["texto"],
-                    "prazo": _data_iso(item.get("prazo"), data_reuniao),
-                    # `responsavel_id` fica nulo de propósito: casar um nome
-                    # vindo de transcrição com um usuário do banco é chute, e
-                    # chute aqui atribui tarefa à pessoa errada. O nome falado
-                    # continua visível dentro do texto do item.
-                    "acao_id": codigos.get(codigo),
-                    "ordem": ordem,
-                })
-                ordem += 1
-            except Exception as e:
-                _falhou("_gravar_itens/insert", e)
+                supa.insert("reuniao_ata_itens", l)
+            except Exception as e2:
+                _falhou("_gravar_itens/insert", e2)
 
 
 def _data_iso(v, referencia=None):
