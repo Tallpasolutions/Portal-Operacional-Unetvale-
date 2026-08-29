@@ -223,6 +223,20 @@ existem (`.kpi`, `.card`, `.tbl`, `.badge-*`, `.chip`, `.toolbar`, `.view-switch
 token (`--brand`, `--success`, `--danger`, `--warning`, `--ouro`).
 **Nunca invente um componente que já existe.**
 
+Os que nasceram nas Reuniões e servem em qualquer tela:
+
+| Classe | O que é |
+|---|---|
+| `.dropdown` | `<details>` que abre um painel; o resumo diz o que foi escolhido |
+| `.modal` | `<dialog>` de confirmação |
+| `.ata` | corpo de texto para leitura, com medida limitada |
+| `.grav-pill` | controle único de gravação (Gravar/Pausar/Concluir) |
+| `.btn-pdf` | ação discreta dentro de célula de tabela |
+
+**Nada de `confirm()` do navegador.** Ele abre uma caixa do sistema, com o
+domínio no topo, que não pertence à tela — use `.modal` com `<dialog>`. As
+telas antigas ainda usam `confirm()`; ao mexer numa delas, troque.
+
 ---
 
 ## 6. Armadilhas — cada uma custou tempo
@@ -338,6 +352,20 @@ estiveram certas: o erro só aparece no que o Python escreve.
 **Ids de modelo da Groq mudam.** Ficam em `GROQ_MODELO_*` no ambiente. Cravados
 no código, viram um HTTP 400 sem explicação no dia em que a Groq aposentar o id.
 
+**Campo novo de formulário sai sem estilo.** A regra do `style.css` lista os
+tipos um a um (`text`, `number`, `password`, `email`, `date`, `time`,
+`datetime-local`, `search`). Um tipo fora da lista cai no visual nativo do
+navegador — borda quadrada, fonte do sistema, altura diferente — no meio de
+campos arredondados. Foi o que deixou o filtro das Reuniões e o De/Até da Troca
+de Poste com cara de outro site. Ao usar um tipo novo, acrescente-o à regra.
+
+**Coluna nova vai no conjunto ESTENDIDO, nunca no base.** `acoes.py` lê as
+reuniões com `_select_reunioes(filtro, extras)`: tenta `_COLS_REUNIAO + extras`
+e, se o PostgREST recusar, recua para `_COLS_REUNIAO` sozinho. Esse recuo existe
+porque o deploy e a migration não acontecem no mesmo segundo. Pôr a coluna nova
+no conjunto **base** quebra o recuo junto — e aí, sem a migration, a reunião não
+abre. Já aconteceu com `convidados`.
+
 **Pooler do Supabase: `aws-1-us-west-2`.** A região está no hostname; a errada
 dá "tenant not found".
 
@@ -398,12 +426,20 @@ a.run(port=5001, use_reloader=False)"
   `OS_ENVIO_HABILITADO=false` e **nunca rodou ponta a ponta**.
 - **Tela de revisão com inserção de localização** (Troca de Poste) nunca foi
   feita — é o item mais antigo em aberto.
-- **Reuniões com gravação**: migration `0006` aplicada, bucket privado
-  `reuniao-audio` criado, chave e modelos no `.env`
-  (`whisper-large-v3-turbo` + `openai/gpt-oss-120b`). O ciclo do servidor foi
-  verificado ponta a ponta em 28/08/2026 — URL assinada, upload direto,
-  transcrição, ata e expurgo. **Falta exercitar a captura pelo navegador**
-  (`MediaRecorder`) numa reunião de verdade, e o `aplicar_item`, que escreve em
-  `acao_eventos` e por isso não foi testado contra produção.
+- **Reuniões com gravação** está em produção desde 29/08/2026. Migrations
+  `0006` (gravação e ata), `0007` (ata editável) e `0008` (convidados). Bucket
+  privado `reuniao-audio`; chave e modelos no `.env`
+  (`whisper-large-v3-turbo` + `openai/gpt-oss-120b`).
+
+  Exercitado numa reunião de verdade: gravar pelo navegador, transcrever,
+  gerar a ata, editar a ata e o PDF.
+
+  **Ainda não exercitado**, e são justamente os caminhos mais delicados:
+  * **a rotação de trecho** — as gravações de teste tiveram menos de 2 min, e
+    nenhuma passou pelo `stop()`/`start()` que fecha um trecho e abre o
+    seguinte. É a peça de que a ata de reunião longa depende;
+  * **`aplicar_item` e `criar_acao_do_item`** — escrevem em `acao_eventos`, que
+    é append-only, e por isso não foram testados contra produção;
+  * **o expurgo dos 30 dias** — nenhum áudio venceu ainda.
 - **Backup do Supabase não foi confirmado.** Ações e Troca de Poste não têm de
   onde ser recoletados. Confirme antes de qualquer operação destrutiva.
