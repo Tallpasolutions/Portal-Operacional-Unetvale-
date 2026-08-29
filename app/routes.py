@@ -11,7 +11,8 @@ from flask import (
     session, url_for
 )
 
-from . import acoes, supa, dados, solicitacao, supervisores, troca_poste as tp
+from . import (acoes, supa, dados, reuniao_ia, solicitacao, supervisores,
+               troca_poste as tp)
 from .auth import login_obrigatorio, admin_obrigatorio, usuario_atual
 
 bp = Blueprint("dash", __name__)
@@ -556,17 +557,40 @@ def acoes_view():
     filtros = {k: (request.args.get(k) or "").strip() or None
                for k in ("responsavel", "area", "status", "prioridade", "situacao")}
     lista = acoes.listar(u, filtros)
+    aba = request.args.get("aba", "painel")
+
+    # Só a aba Reuniões paga o custo do que é dela. As outras duas não podem
+    # ficar mais lentas por causa de um card que elas nem mostram.
+    reunioes = acoes.listar_reunioes(u)
+    for r in reunioes:
+        # Trecho do resumo na lista: reconhecer a reunião sem precisar abrir.
+        r["resumo"] = reuniao_ia.resumo_curto(r.get("ata_markdown"))
+
+    recorrentes, resumo_exec = [], None
+    if aba == "reunioes":
+        # O expurgo dos áudios vencidos pega carona aqui: a Vercel não tem
+        # processo residente, e um agendador seria infra nova para apagar meia
+        # dúzia de arquivos. Falhar em silêncio é deliberado — limpeza de
+        # arquivo velho não pode derrubar a tela de quem só quer ver a lista.
+        try:
+            reuniao_ia.expurgar_audio()
+        except Exception:
+            pass
+        recorrentes = reuniao_ia.recorrentes_pendentes()
+        resumo_exec = reuniao_ia.resumo_executivo(lista=recorrentes)
 
     # O Painel recebe a MESMA lista que a aba Ações, e não uma consulta
     # própria: painel que refaz a consulta é painel que discorda da tabela.
     return render_template(
-        "acoes.html", ativo="acoes", sem_sync=True,
-        aba=request.args.get("aba", "painel"),
+        "acoes.html", ativo="acoes", sem_sync=True, aba=aba,
         acoes=lista, resumo=acoes.resumo(lista), filtros=filtros,
         areas=acoes.areas(), usuarios=_usuarios_para_escolha(),
         status_opcoes=acoes.STATUS, prioridades=acoes.PRIORIDADES,
         pode_criar=acoes.pode_gerir(u), ultimos=acoes.ultimos_eventos(),
-        reunioes=acoes.listar_reunioes(u))
+        reunioes=reunioes,
+        recorrentes=recorrentes, resumo_exec=resumo_exec,
+        resumo_exec_html=reuniao_ia.para_html(
+            (resumo_exec or {}).get("markdown")))
 
 
 @bp.route("/acoes/<acao_id>")
@@ -577,6 +601,7 @@ def acao_detalhe(acao_id):
     return render_template(
         "acao_detalhe.html", ativo="acoes", sem_sync=True, acao=a,
         eventos=acoes.eventos(acao_id), areas=acoes.areas(),
+        itens_reuniao=reuniao_ia.itens_da_acao(acao_id),
         usuarios=_usuarios_para_escolha(),
         status_opcoes=acoes.STATUS, prioridades=acoes.PRIORIDADES,
         pode_gerir=acoes.pode_gerir(u, a), pode_atualizar=acoes.pode_atualizar(u, a))
@@ -676,10 +701,16 @@ def reuniao_detalhe(reuniao_id):
     if not (u["is_admin"] or r.get("criada_por") == u["id"]
             or u["id"] in r["participantes"]):
         abort(404)
+    conduz = acoes.pode_gerir(u)
     return render_template(
         "reuniao.html", ativo="acoes", sem_sync=True, reuniao=r,
         pauta=acoes.pauta(r, u), usuarios=_usuarios_para_escolha(),
-        conduz=acoes.pode_gerir(u))
+        conduz=conduz,
+        estado=reuniao_ia.estado(reuniao_id, r),
+        itens_ata=reuniao_ia.itens(reuniao_id),
+        ata_html=reuniao_ia.para_html(r.get("ata_markdown")),
+        contexto=reuniao_ia.contexto_anterior(r, u),
+        trecho_segundos=int(os.environ.get("REUNIAO_TRECHO_SEGUNDOS", "120")))
 
 
 @bp.route("/reunioes/<reuniao_id>/encerrar", methods=["POST"])
@@ -695,6 +726,161 @@ def reuniao_encerrar(reuniao_id):
         flash(str(e), "erro")
     return redirect(url_for("dash.reuniao_detalhe", reuniao_id=reuniao_id))
 
+
+
+# ---- Gravação e ata da reunião -------------------------------------------
+# Todas devolvem JSON: quem chama é o `reuniao.js`, não um <form>. O fluxo
+# inteiro está desenhado em app/reuniao_ia.py — em resumo, quem orquestra é o
+# navegador, porque a Vercel não tem processo em background.
+
+def _reuniao_ou_404(reuniao_id, u, exigir_conduz=False, exigir_aberta=False):
+    """Mesma lógica de `_acao_ou_404`: 404 para quem não pode ver.
+
+    404 e não 403 porque 403 confirmaria que a reunião existe — e reunião
+    tem participante, assunto e data que ninguém precisa poder sondar.
+    """
+    r = acoes.obter_reuniao(reuniao_id)
+    if not r:
+        abort(404)
+    if not (u["is_admin"] or r.get("criada_por") == u["id"]
+            or u["id"] in r["participantes"]):
+        abort(404)
+    if exigir_conduz and not acoes.pode_gerir(u):
+        abort(403)
+    if exigir_aberta and r.get("encerrada_em"):
+        abort(409)
+    return r
+
+
+@bp.route("/reunioes/<reuniao_id>/gravacao/iniciar", methods=["POST"])
+@login_obrigatorio
+def reuniao_gravacao_iniciar(reuniao_id):
+    u = usuario_atual()
+    _reuniao_ou_404(reuniao_id, u, exigir_conduz=True, exigir_aberta=True)
+    try:
+        reuniao_ia.iniciar_gravacao(reuniao_id)
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 502
+    return jsonify({"ok": True})
+
+
+@bp.route("/reunioes/<reuniao_id>/audio/url", methods=["POST"])
+@login_obrigatorio
+def reuniao_audio_url(reuniao_id):
+    """Autoriza o browser a gravar UM trecho direto no Storage.
+
+    O arquivo não passa pelo Flask de propósito: a função serverless tem
+    limite de corpo de requisição e o áudio estoura esse limite.
+    """
+    u = usuario_atual()
+    _reuniao_ou_404(reuniao_id, u, exigir_conduz=True, exigir_aberta=True)
+    corpo = request.get_json(silent=True) or {}
+    try:
+        indice = int(corpo.get("indice"))
+    except (TypeError, ValueError):
+        return jsonify({"erro": "indice ausente ou inválido"}), 400
+    try:
+        return jsonify(reuniao_ia.autorizar_trecho(
+            reuniao_id, indice, corpo.get("formato") or "audio/webm"))
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 502
+
+
+@bp.route("/reunioes/<reuniao_id>/audio/<int:indice>/transcrever", methods=["POST"])
+@login_obrigatorio
+def reuniao_audio_transcrever(reuniao_id, indice):
+    u = usuario_atual()
+    _reuniao_ou_404(reuniao_id, u, exigir_conduz=True)
+    corpo = request.get_json(silent=True) or {}
+    try:
+        texto = reuniao_ia.transcrever_trecho(
+            reuniao_id, indice, corpo.get("bytes"), corpo.get("duracao_ms"))
+    except Exception as e:
+        # 502 e não 500: a falha é do serviço externo, e a tela oferece
+        # "tentar de novo". O áudio continua no Storage por 30 dias.
+        return jsonify({"erro": str(e)}), 502
+    return jsonify({"ok": True, "indice": indice, "caracteres": len(texto)})
+
+
+@bp.route("/reunioes/<reuniao_id>/ata", methods=["POST"])
+@login_obrigatorio
+def reuniao_ata(reuniao_id):
+    """Junta os trechos e gera a ata. Também é o caminho de regerar.
+
+    Regerar continua permitido depois de encerrada: o que a regra de
+    'ata congelada' protege são os COMENTÁRIOS do dia, que não mudam. A
+    ata da transcrição é derivada do áudio e pode ser refeita enquanto o
+    áudio existir.
+    """
+    u = usuario_atual()
+    r = _reuniao_ou_404(reuniao_id, u, exigir_conduz=True)
+    corpo = request.get_json(silent=True) or {}
+    # Dois clientes para a mesma rota: o `reuniao.js` (fetch, quer JSON) e o
+    # botão "Gerar de novo" (<form>, quer voltar para a página). Devolver JSON
+    # para o form deixaria o gestor olhando um {"ok": true} numa tela branca.
+    via_form = not request.is_json
+
+    try:
+        reuniao_ia.montar_ata(r, u, interrompida=bool(corpo.get("interrompida")))
+    except ValueError as e:
+        if via_form:
+            flash(str(e), "erro")
+            return redirect(url_for("dash.reuniao_detalhe", reuniao_id=reuniao_id))
+        return jsonify({"erro": str(e)}), 400
+    except Exception as e:
+        if via_form:
+            flash(f"Não foi possível gerar a ata: {e}", "erro")
+            return redirect(url_for("dash.reuniao_detalhe", reuniao_id=reuniao_id))
+        return jsonify({"erro": str(e)}), 502
+
+    if via_form:
+        flash("Ata gerada.", "ok")
+        return redirect(url_for("dash.reuniao_detalhe", reuniao_id=reuniao_id))
+    return jsonify({"ok": True})
+
+
+@bp.route("/reunioes/<reuniao_id>/ata/status")
+@login_obrigatorio
+def reuniao_ata_status(reuniao_id):
+    u = usuario_atual()
+    r = _reuniao_ou_404(reuniao_id, u)
+    return jsonify(reuniao_ia.estado(reuniao_id, r))
+
+
+@bp.route("/reunioes/<reuniao_id>/ata/itens/<item_id>/aplicar", methods=["POST"])
+@login_obrigatorio
+def reuniao_item_aplicar(reuniao_id, item_id):
+    """Item da ata vira comentário na ação — só por clique humano.
+
+    `acao_eventos` é append-only por trigger: o que entra lá não sai nem
+    com a service_role. Por isso texto de IA precisa de alguém assinando.
+    """
+    u = usuario_atual()
+    _reuniao_ou_404(reuniao_id, u, exigir_conduz=True)
+    try:
+        reuniao_ia.aplicar_item(item_id, u["id"])
+        flash("Item registrado na linha do tempo da ação.", "ok")
+    except ValueError as e:
+        flash(str(e), "erro")
+    except Exception as e:
+        flash(f"Não foi possível registrar: {e}", "erro")
+    return redirect(url_for("dash.reuniao_detalhe", reuniao_id=reuniao_id))
+
+
+@bp.route("/acoes/resumo-executivo/gerar", methods=["POST"])
+@login_obrigatorio
+def acoes_resumo_executivo():
+    u = usuario_atual()
+    if not acoes.pode_gerir(u):
+        abort(403)
+    try:
+        reuniao_ia.gerar_resumo_executivo()
+        flash("Resumo executivo atualizado.", "ok")
+    except ValueError as e:
+        flash(str(e), "erro")
+    except Exception as e:
+        flash(f"Não foi possível gerar o resumo: {e}", "erro")
+    return redirect(url_for("dash.acoes_view", aba="reunioes"))
 
 # ---- Configurações do módulo (só admin) ----------------------------------
 @bp.route("/acoes/areas", methods=["POST"])

@@ -253,16 +253,24 @@
     <div class="card-b tabela-wrap">
       {% if reunioes %}
       <table class="tbl">
-        <thead><tr><th>Reunião</th><th>Tipo</th><th>Data</th><th>Participantes</th><th>Situação</th></tr></thead>
+        <thead><tr><th>Reunião</th><th>Tipo</th><th>Data</th><th>Participantes</th><th>Situação</th><th>Ata</th></tr></thead>
         <tbody>
           {% for r in reunioes %}
           <tr class="clicavel" data-href="{{ url_for('dash.reuniao_detalhe', reuniao_id=r.id) }}">
-            <td><b>{{ r.titulo }}</b></td>
+            <td>
+              <b>{{ r.titulo }}</b>
+              {% if r.resumo %}<div class="subnote" style="margin:2px 0 0;">{{ r.resumo }}</div>{% endif %}
+            </td>
             <td>{{ 'Individual' if r.tipo == 'individual' else 'Em grupo' }}</td>
             <td>{{ r.data|replace('-', '/') }}</td>
             <td>{{ r.participantes|length }}</td>
             <td>{% if r.encerrada_em %}<span class="badge badge-cinza">Ata congelada</span>
                 {% else %}<span class="badge badge-verde">Em andamento</span>{% endif %}</td>
+            <td>{% if r.gravacao_status == 'gravando' %}<span class="badge badge-vermelho">● Gravando</span>
+                {% elif r.gravacao_status == 'transcrevendo' %}<span class="badge badge-ambar">Transcrevendo</span>
+                {% elif r.gravacao_status == 'erro' %}<span class="badge badge-vermelho">Falhou</span>
+                {% elif r.ata_markdown %}<span class="badge badge-verde">Ata pronta</span>
+                {% else %}<span class="badge badge-cinza">Sem gravação</span>{% endif %}</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -272,6 +280,54 @@
       {% endif %}
     </div>
   </div>
+
+  {# Recorrentes: ação que voltou à mesa em 2+ reuniões e continua aberta.
+     A contagem é consulta ao banco (app/reuniao_ia.py); a IA só redige o
+     texto do resumo executivo, e só quando alguém pede. #}
+  {% if recorrentes %}
+  <div class="card" style="margin-top:16px;">
+    <div class="card-h">
+      <span>Recorrentes e pendentes ({{ recorrentes|length }})</span>
+      <span class="subnote" style="margin:0;">voltaram à pauta e não saíram do lugar</span>
+    </div>
+    <div class="card-b tabela-wrap">
+      <table class="tbl">
+        <thead><tr><th>Ação</th><th>Reuniões</th><th>Status</th><th>Progresso</th><th>Prazo</th></tr></thead>
+        <tbody>
+          {% for a in recorrentes %}
+          <tr class="clicavel" data-href="{{ url_for('dash.acao_detalhe', acao_id=a.id) }}">
+            <td><b>{{ a.codigo }}</b> {{ a.titulo }}</td>
+            <td><span class="badge badge-ambar">{{ a.reunioes }}</span></td>
+            <td>{{ a.status }}</td>
+            <td><span class="barra"><i style="width:{{ a.progresso }}%"></i></span> {{ a.progresso }}%</td>
+            <td>{% if a.prazo %}{{ a.prazo|replace('-', '/') }}{% else %}—{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      {% if resumo_exec %}
+      <div class="ata" style="margin-top:16px;">{{ resumo_exec_html|safe }}</div>
+      <p class="subnote" style="margin-bottom:0;">
+        Resumo gerado em {{ resumo_exec.gerado_em[:16]|replace('T', ' ') }} a partir dos
+        números acima. Os números vêm do banco; a IA só escreveu o texto.
+      </p>
+      {% else %}
+      <p class="subnote" style="margin-bottom:0;">
+        Ainda não há resumo executivo escrito para estas ações.
+      </p>
+      {% endif %}
+
+      {% if pode_criar %}
+      <form method="post" action="{{ url_for('dash.acoes_resumo_executivo') }}" style="margin-top:10px;">
+        <button class="btn sec" type="submit">
+          {{ 'Atualizar resumo executivo' if resumo_exec else 'Gerar resumo executivo' }}
+        </button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
 </section>
 
 {% endblock %}

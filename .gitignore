@@ -1,5 +1,8 @@
 # Segredos
 .env
+# Cópias do .env feitas antes de editá-lo. Têm a service_role dentro:
+# sem esta linha o `.env` fica protegido e a cópia dele não.
+.env.bak*
 coletor/.env
 coletor/config.json
 
