@@ -9,20 +9,24 @@
    desce do indicador para a causa: qualidade, causa raiz, churn, fila,
    atendimento. #}
 
-<h3 class="secao">Qualidade · reincidência</h3>
+{# Sem título aqui: este é o primeiro bloco da página, logo abaixo de
+   "Dashboard — Visão Gerencial" na topbar, e os dois cards já se identificam
+   ("IQI · instalação", "IQM · manutenção"). Um cabeçalho de seção nessa
+   posição só empurrava o conteúdo para baixo. Os demais blocos mantêm o
+   deles, porque aí a separação faz falta. #}
 <div class="grid charts-2" style="margin-bottom:8px;">
   <div class="card">
     <div class="card-h"><span>IQI · instalação</span><span class="subnote" style="margin:0" id="iqi-meta"></span></div>
     <div class="card-b">
       <div class="par-mes" id="iqi-par"></div>
-      <div class="chart-box" style="height:170px;margin-top:14px;"><canvas id="g-iqi-serie"></canvas></div>
+      <div class="chart-box" style="height:190px;margin-top:16px;"><canvas id="g-iqi-serie"></canvas></div>
     </div>
   </div>
   <div class="card">
     <div class="card-h"><span>IQM · manutenção</span><span class="subnote" style="margin:0" id="iqm-meta"></span></div>
     <div class="card-b">
       <div class="par-mes" id="iqm-par"></div>
-      <div class="chart-box" style="height:170px;margin-top:14px;"><canvas id="g-iqm-serie"></canvas></div>
+      <div class="chart-box" style="height:190px;margin-top:16px;"><canvas id="g-iqm-serie"></canvas></div>
     </div>
   </div>
 </div>

@@ -6,7 +6,7 @@
   --ink-d:#232e3c; --ink:#344050; --muted:#5e6e82; --muted-l:#9da9bb;
   --borda:#edf2f9; --borda-2:#d8e2ef; --fundo:#edf2f9; --branco:#fff;
   --success:#00b074; --info:#27bcfd; --warning:#f5803e; --ouro:#e5a000; --danger:#e63757;
-  --sidebar-w:230px; --sidebar-w-min:64px; --top-h:60px;
+  --sidebar-w:230px; --sidebar-w-min:64px; --top-h:52px;
   --sombra:0 7px 14px rgba(11,23,39,.06), 0 1px 3px rgba(11,23,39,.08);
 }
 *{ box-sizing:border-box; }
@@ -41,14 +41,28 @@ body.collapsed .brand-text, body.collapsed .menu a span:not(.ic){ display:none; 
 .menu-sep{ height:1px; background:rgba(255,255,255,.20); margin:10px 8px; }
 
 /* ===== Topbar ===== */
-.topbar{ height:var(--top-h); background:var(--branco); border-bottom:1px solid var(--borda-2);
-  display:flex; align-items:center; gap:16px; padding:0 20px; position:sticky; top:0; z-index:20; }
+/* 52px, e não 60: sem o botão "Atualizar" a barra não precisa da altura de
+   um controle, só do texto. `min-height` em vez de `height` para o conteúdo
+   nunca vazar por fora quando a fonte do sistema for maior. */
+.topbar{ min-height:var(--top-h); background:var(--branco);
+  border-bottom:1px solid var(--borda-2);
+  display:flex; align-items:center; gap:14px; padding:0 20px;
+  position:sticky; top:0; z-index:20; }
 .hamburguer{ background:none; border:none; cursor:pointer; color:var(--muted); line-height:0; padding:6px; border-radius:8px; }
 .hamburguer:hover{ background:var(--fundo); color:var(--ink-d); }
-.hamburguer svg{ width:22px; height:22px; }
-.page-title{ font-size:17px; font-weight:700; color:var(--ink-d); }
-.topbar-right{ margin-left:auto; display:flex; align-items:center; gap:18px; }
-.upd{ display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--muted); }
+.hamburguer svg{ width:20px; height:20px; }
+/* Uma linha só. O título quebrava em duas em telas estreitas e empurrava a
+   barra para ~90px de altura — era o que mais fazia ela parecer larga. */
+.page-title{ font-size:16px; font-weight:700; color:var(--ink-d);
+  letter-spacing:-.01em; white-space:nowrap; overflow:hidden;
+  text-overflow:ellipsis; min-width:0; }
+.topbar-right{ margin-left:auto; display:flex; align-items:center; gap:14px; flex:0 0 auto; }
+.upd{ display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--muted);
+  padding:5px 10px; border-radius:8px; white-space:nowrap; }
+/* Só a versão clicável reage ao cursor. Para quem não tem Monitoramento o
+   bloco é texto, e dar hover nele prometeria uma ação que não existe. */
+.upd-link{ transition:background .12s, color .12s; }
+.upd-link:hover{ background:var(--fundo); color:var(--ink); }
 .upd-sep{ color:var(--muted-l); }
 .dot{ width:9px; height:9px; border-radius:50%; display:inline-block; }
 .dot-green{ background:var(--success); } .dot-red{ background:var(--danger); } .dot-gray{ background:var(--muted-l); }
@@ -61,10 +75,10 @@ body.collapsed .brand-text, body.collapsed .menu a span:not(.ic){ display:none; 
 @keyframes girar{ to{ transform:rotate(360deg); } }
 .user{ display:flex; align-items:center; gap:10px; }
 .user-name{ font-weight:600; font-size:13px; color:var(--ink); }
-.icon-btn{ width:34px; height:34px; border-radius:9px; display:grid; place-items:center; background:var(--brand-l);
+.icon-btn{ width:30px; height:30px; border-radius:8px; display:grid; place-items:center; background:var(--brand-l);
   color:var(--brand-d); transition:background .12s,color .12s; }
 .icon-btn:hover{ background:var(--brand); color:#fff; }
-.icon-btn svg{ width:18px; height:18px; }
+.icon-btn svg{ width:16px; height:16px; }
 
 .content{ padding:22px; }
 

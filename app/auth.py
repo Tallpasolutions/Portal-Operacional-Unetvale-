@@ -112,7 +112,10 @@ def login():
         session["uid"] = u["id"]
         session["nome"] = u.get("nome") or email.split("@")[0]
         session["email"] = u["email"]
-        destino = request.args.get("next") or url_for("dash.produtividade")
+        # `next` continua ganhando: quem clicou num link direto e caiu no
+        # login volta para onde queria ir. Sem ele, o destino é o Dashboard —
+        # a visão gerencial é a primeira leitura do dia.
+        destino = request.args.get("next") or url_for("dash.dashboard")
         return redirect(destino)
     return render_template("login.html")
 

@@ -33,24 +33,64 @@
     if (!cv || !window.Chart || !(q.serie || []).length) return;
     var pontos = q.serie.filter(function (p) { return p.pct !== null; });
     if (!pontos.length) return;
+
+    var ctx = cv.getContext("2d");
+    var brand = css("--brand"), danger = css("--danger");
+
+    // Preenchimento em gradiente, e nao cor chapada com alfa: a area encosta
+    // no eixo sem virar uma faixa solida que compete com a linha.
+    var fundo = ctx.createLinearGradient(0, 0, 0, cv.clientHeight || 190);
+    fundo.addColorStop(0, brand + "33");
+    fundo.addColorStop(1, brand + "00");
+
+    // So o ultimo mes ganha ponto visivel. Marcar os oito polui a linha; o
+    // que se procura e onde a serie esta agora.
+    var ultimo = pontos.length - 1;
+
     var ds = [{
-      label: ind + " %", data: pontos.map(function (p) { return p.pct; }),
-      borderColor: css("--brand"), backgroundColor: css("--brand") + "22",
-      fill: true, tension: .3
+      label: ind + " %",
+      data: pontos.map(function (p) { return p.pct; }),
+      borderColor: brand, backgroundColor: fundo, fill: true,
+      tension: 0.35, borderWidth: 2.5,
+      pointRadius: pontos.map(function (_, i) { return i === ultimo ? 4 : 0; }),
+      pointHoverRadius: 5,
+      pointBackgroundColor: "#fff",
+      pointBorderColor: brand, pointBorderWidth: 2.5
     }];
     if (q.meta !== null && q.meta !== undefined) {
       ds.push({
         label: "Meta", data: pontos.map(function () { return Number(q.meta); }),
-        borderColor: css("--danger"), borderDash: [5, 4], borderWidth: 1.5,
-        pointRadius: 0, fill: false
+        borderColor: danger, borderDash: [5, 4], borderWidth: 1.5,
+        pointRadius: 0, pointHoverRadius: 0, fill: false, tension: 0
       });
     }
+
     new Chart(cv, {
       type: "line",
       data: { labels: pontos.map(function (p) { return Dash.rotuloMes(p.mes); }), datasets: ds },
       options: {
-        plugins: { legend: { display: false } },
-        scales: { y: { ticks: { callback: function (v) { return v + "%"; } } } }
+        interaction: { mode: "index", intersect: false },
+        layout: { padding: { top: 6, right: 4 } },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: function (c) {
+            return (c.datasetIndex === 1 ? "Meta: " : ind + ": ") + Dash.pct(c.parsed.y);
+          } } }
+        },
+        scales: {
+          // Quatro marcas bastam para ler a tendencia, e a grade fina fica
+          // atras da serie em vez de disputar com ela.
+          y: { ticks: { maxTicksLimit: 4, callback: function (v) { return v + "%"; } },
+               grid: { color: "rgba(11,23,39,.045)" } },
+          // Rotulo curto e reto: girado a 45 graus ele engordava o eixo e
+          // comia a altura do grafico, que ja e baixo.
+          x: { ticks: { maxRotation: 0, autoSkipPadding: 12,
+                        callback: function (v) {
+                          var m = this.getLabelForValue(v);
+                          return m ? m.slice(0, 3) + m.slice(-3) : m;
+                        } },
+               grid: { display: false } }
+        }
       }
     });
   }
