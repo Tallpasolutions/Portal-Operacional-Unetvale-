@@ -2,6 +2,17 @@
 {% block title %}Monitoramento · Unetvale{% endblock %}
 {% block page_title %}Monitoramento da coleta{% endblock %}
 {% block content %}
+<div class="toolbar" style="margin-bottom:14px;">
+  <button class="btn-atualizar" id="btn-atualizar" title="Pede uma coleta agora ao coletor">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+    <span class="txt">Atualizar agora</span>
+  </button>
+  <span class="subnote" style="margin:0;">
+    O pedido fica registrado no log abaixo e o coletor o atende no próximo ciclo (~45s),
+    desde que a máquina dele esteja ligada e alcance o WVSA.
+  </span>
+</div>
+
 <p class="subnote">Atualização automática às {{ status_upd.horarios|join('h, ') }}h. A coleta depende da máquina
   do coletor estar ligada e com acesso ao WVSA (VPN ou rede Unetvale) no horário. Rodadas offline são ignoradas (skip).</p>
 

@@ -30,6 +30,53 @@ LISTAS = {"tecnico": "tec", "cat1": "c1", "cat2": "c2", "cat3": "c3",
 # Quantos meses o par "fechado × corrente" mostra, quando não há preferência.
 MESES_VISIVEIS_PADRAO = 2
 
+# Janela de auditoria da reincidência, em dias: um mês do IQI/IQM só fecha
+# DEPOIS dela, porque até lá ainda entra chamado naquele mês.
+#
+# 30 para os DOIS indicadores, e não a janela real de cada um (IQI 30, IQM 15),
+# porque é o que as três telas do /iqi usam desde sempre. Uma segunda definição
+# aqui faria o Dashboard e o /iqi discordarem sobre o mesmo mês — que é
+# exatamente o defeito que esta constante existe para corrigir. Mudar para a
+# janela real é decisão de negócio e teria de mexer no /iqi junto.
+JANELA_AUDITORIA_DIAS = 30
+
+
+def _fim_do_mes(mes):
+    """Último dia do mês. Aceita "MM/AAAA" (IQI/IQM) e "AAAA-MM" (os demais).
+
+    Os dois formatos convivem porque vêm de fontes diferentes: o payload do
+    IQI/IQM traz os meses como o WVSA os entrega, e as coletas do Dashboard
+    usam ISO.
+    """
+    m, a = mes.split("/") if "/" in mes else reversed(mes.split("-"))
+    a, m = int(a), int(m)
+    return date(a + (m == 12), (m % 12) + 1, 1) - timedelta(days=1)
+
+
+def mes_fechado(mes, hoje=None):
+    """O mês já passou da janela de auditoria da reincidência?
+
+    Espelha `mesFechado` de iqi.js, iqi_tabela.js e iqi_ofensores.js — a mesma
+    conta, para as duas telas nunca discordarem sobre o mesmo mês.
+
+    Antes o Dashboard decidia pela POSIÇÃO ("o último exibido é o parcial"), e
+    com isso julho aparecia FECHADO no dia 29/08 enquanto o /iqi, na mesma
+    hora, dizia "Julho (Parcial)" — faltava exatamente um dia para a janela
+    vencer, e o card já exibia o número como definitivo.
+    """
+    hoje = hoje or datetime.now(BR_TZ).date()
+    return hoje > _fim_do_mes(mes) + timedelta(days=JANELA_AUDITORIA_DIAS)
+
+
+def _mes_em_curso(mes, hoje=None):
+    """O mês ainda não terminou.
+
+    É o que "parcial" significa para churn e IDF: cancelamento é fato do dia
+    em que acontece e feedback é do mês, então não há janela de auditoria —
+    o mês fecha quando acaba. Só o IQI/IQM espera os 30 dias.
+    """
+    return (hoje or datetime.now(BR_TZ).date()) <= _fim_do_mes(mes)
+
 
 def _agora():
     """UTC com fuso explícito — ver a armadilha do `datetime.now()` no CLAUDE.md."""
@@ -169,13 +216,12 @@ def qualidade(mapa_metas, quantos=MESES_VISIVEIS_PADRAO):
         row = dados.get_modulo(modulo)
         serie = _consolidado_mensal((row or {}).get("payload"))
         visiveis = _ultimos(serie, quantos)
-        for i, d in enumerate(visiveis):
-            # Só o ÚLTIMO mês é parcial; os anteriores estão fechados. É a
-            # mesma leitura que a tabela mensal do /iqi já faz, e o motivo é a
-            # janela de reincidência ainda aberta: o mês corrente só piora até
-            # fechar. Chamar o corrente de fechado faria a tela comemorar um
-            # número que ainda vai subir.
-            d["parcial"] = (i == len(visiveis) - 1)
+        for d in visiveis:
+            # Pela data, não pela posição na lista: um mês fica parcial até 30
+            # dias depois de terminar, porque a janela de reincidência ainda
+            # está aberta e o número só piora até fechar. Marcar "o último da
+            # lista" fazia julho virar fechado no dia 29/08, um dia antes.
+            d["parcial"] = not mes_fechado(d["mes"])
             d["vs_meta"] = _vs_meta(d.get("pct"), chave, mapa_metas)
         saida[rotulo] = {
             "serie": serie,
@@ -308,7 +354,7 @@ def cancelamentos(payload, mapa_metas, quantos=MESES_VISIVEIS_PADRAO):
     escolhidos = meses[-max(1, quantos):]
     return {
         "meses": meses,
-        "visiveis": [resumo(m, m == meses[-1]) for m in escolhidos],
+        "visiveis": [resumo(m, _mes_em_curso(m)) for m in escolhidos],
         "serie": [{"mes": m, "total": blocos[m].get("total") or 0,
                    "tecnico": blocos[m].get("tecnico") or 0,
                    "pct": round((blocos[m].get("tecnico") or 0) /
@@ -385,7 +431,7 @@ def pacote():
         },
         "idf": {
             "meses": idf_meses,
-            "visiveis": [{"mes": m, "parcial": m == idf_meses[-1], **idf_blocos[m]}
+            "visiveis": [{"mes": m, "parcial": _mes_em_curso(m), **idf_blocos[m]}
                          for m in idf_visiveis],
             "serie": [{"mes": m, **idf_blocos[m]} for m in idf_meses],
             "metas": {c: (mapa.get(f"idf_{c}") or {}).get("valor")

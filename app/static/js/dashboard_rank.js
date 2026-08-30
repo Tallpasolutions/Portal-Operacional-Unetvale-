@@ -76,6 +76,16 @@
     var o = opcoes || {};
     var lista = (visiveis || []).filter(Boolean);
     if (!lista.length) { vazio(el, o.vazio); return; }
+    // Índice do último mês FECHADO — é o número que vale para cobrança de
+    // meta, e por isso é o que ganha destaque. Assumir "o penúltimo" estava
+    // errado: quando a janela de auditoria ainda não venceu, TODOS os meses
+    // exibidos podem estar parciais, e o destaque apontava para um número
+    // que ainda vai mudar.
+    var ultimoFechado = -1;
+    lista.forEach(function (d, i) {
+      var parcial = d.parcial !== undefined ? d.parcial : (i === lista.length - 1);
+      if (!parcial) ultimoFechado = i;
+    });
     el.innerHTML = lista.map(function (d, i) {
       var ultimo = (i === lista.length - 1);
       var parcial = d.parcial !== undefined ? d.parcial : ultimo;
@@ -91,9 +101,7 @@
           (o.unidade || "p.p.") + " vs meta</span>";
       }
       var base = o.base ? '<span class="b">' + esc(o.base(d)) + "</span>" : "";
-      // O penúltimo bloco fica em destaque: é o último mês FECHADO, o número
-      // que vale para cobrança de meta.
-      var foco = (lista.length > 1 && i === lista.length - 2) ? ' class="foco"' : "";
+      var foco = (i === ultimoFechado) ? ' class="foco"' : "";
       return "<div" + foco + '><span class="q">' + esc(rotuloMes(d.mes)) + " " + badge +
         '</span><span class="n">' + fmt(d) + "</span>" + dif + base + "</div>";
     }).join("");

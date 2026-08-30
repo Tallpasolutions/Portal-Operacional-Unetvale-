@@ -89,6 +89,11 @@ Responde "como o negócio está indo", não "como o time está executando": por 
 o cliente reincide, por que ele cancela, o que a fila de agendamento acumula e
 como o cliente avalia o atendimento.
 
+**É a tela de entrada do portal.** A raiz `/` e o pós-login caem aqui (antes
+era Produtividade) — a visão gerencial é a primeira leitura do dia. O `next`
+continua ganhando: quem clicou num link direto e caiu no login volta para onde
+queria ir.
+
 **Página única, sem sub-abas** — ao contrário de Ações e Troca de Poste. A
 leitura gerencial é a soma dos blocos; separá-los obrigaria a trocar de tela
 para relacionar reincidência com cancelamento, que é justamente a relação que
@@ -539,6 +544,27 @@ módulos que usam a classe. Agora é `minmax(min(380px,100%),1fr)`. E
 últimas ficavam **escondidas e inalcançáveis** no celular. Ao acrescentar aba,
 confira no preset mobile.
 
+**"Mês fechado" é conta de calendário, não posição na lista.** O Dashboard
+decidia o selo pela posição ("o último exibido é o parcial"), e com isso
+**julho apareceu FECHADO no dia 29/08** — faltava um dia para a janela de
+auditoria vencer — enquanto o `/iqi`, na mesma hora, dizia "Julho (Parcial)".
+Duas telas, o mesmo mês, respostas diferentes. A regra agora é
+`gerencial.mes_fechado` (fim do mês + `JANELA_AUDITORIA_DIAS`), espelhando o
+`mesFechado` do JS. **São 30 dias para IQI e IQM**, e não a janela real de cada
+um (IQI 30, IQM 15), porque é o que as três telas do `/iqi` usam — corrigir
+isso exige mexer nos quatro lugares juntos, senão troca uma divergência por
+outra.
+
+⚠️ Churn e IDF **não** têm janela: cancelamento é fato do dia, feedback é do
+mês. Para eles vale `gerencial._mes_em_curso` (o mês acabou, fechou). Aplicar
+os 30 dias ali marcaria julho como parcial em pleno setembro.
+
+**O botão "Atualizar" mora no `/monitoramento`, não na topbar.** Forçar coleta
+é ação de operação, e o Monitoramento é `admin_obrigatorio` — logo, **quem não
+é admin não força mais coleta**, só lê o estado. Foi decisão consciente ao
+tirar o botão da barra. O `app.js` já saía cedo quando o botão não existia
+(`if (!btn) return`), então mover o mesmo `id` para outra tela bastou.
+
 **Pooler do Supabase: `aws-1-us-west-2`.** A região está no hostname; a errada
 dá "tenant not found".
 
@@ -636,6 +662,10 @@ a.run(port=5001, use_reloader=False)"
   dependem da sessão do gestor: IDF de 08/2026 (ligações 212 nota 4,58; chats
   1096 nota 4,49; OS 297 nota 4,51) e salas do Rocketchat (1121 solicitações,
   35 em aberto).
+
+  Corrigido depois de entrar: o selo "fechado/parcial" saía da posição na
+  lista, e julho aparecia FECHADO no dia 29/08 enquanto o `/iqi` dizia
+  "Julho (Parcial)". Agora é `gerencial.mes_fechado` (ver §6).
 
   **Ainda não exercitado:**
   * **a trava do IDF zerado** — agora existe payload bom, então ela passa a

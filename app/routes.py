@@ -32,8 +32,9 @@ def injeta_status():
 @bp.route("/")
 @login_obrigatorio
 def home():
-    # Sem tela inicial: cai direto na Produtividade.
-    return redirect(url_for("dash.produtividade"))
+    # Sem tela inicial própria: a raiz cai no Dashboard, que é a primeira
+    # entrada da sidebar e a leitura de abertura do dia.
+    return redirect(url_for("dash.dashboard"))
 
 
 @bp.route("/dashboard")

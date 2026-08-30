@@ -65,11 +65,14 @@
         <div class="page-title">{% block page_title %}{% endblock %}</div>
         <div class="topbar-right">
           {% if not sem_sync %}
-          <button class="btn-atualizar" id="btn-atualizar" title="Atualizar dados agora">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-            <span class="txt">Atualizar</span>
-          </button>
-          <div class="upd" title="Atualização automática às {{ status_upd.horarios|join(', ') }}h">
+          {# O botão "Atualizar" saiu daqui e foi para o Monitoramento: forçar
+             coleta é ação de operação, não algo para estar à mão em toda tela.
+             Aqui fica só o estado, que é leitura. #}
+          {# Vira link só para quem tem o Monitoramento. Para os demais é texto:
+             `href="#"` parece clicável e não leva a lugar nenhum. #}
+          <{{ 'a' if usuario.is_admin else 'div' }} class="upd{{ ' upd-link' if usuario.is_admin }}"
+             {% if usuario.is_admin %}href="{{ url_for('dash.monitoramento') }}"{% endif %}
+             title="Atualização automática às {{ status_upd.horarios|join(', ') }}h{{ ' · abre o Monitoramento' if usuario.is_admin }}">
             {% if status_upd.status == 'sem_dados' %}
               <span class="dot dot-gray"></span><span>Sem dados ainda</span>
             {% elif status_upd.status == 'erro' %}
@@ -77,9 +80,9 @@
             {% else %}
               <span class="dot dot-green"></span><span>Atualizado</span>
             {% endif %}
-            <span class="upd-sep">·</span><span>Última: <b>{{ status_upd.ultima }}</b></span>
-            <span class="upd-sep">·</span><span>Próxima: <b>{{ status_upd.proxima }}</b></span>
-          </div>
+            <span class="upd-sep">·</span><span class="upd-hora">Última <b>{{ status_upd.ultima }}</b></span>
+            <span class="upd-sep">·</span><span class="upd-hora">Próxima <b>{{ status_upd.proxima }}</b></span>
+          </{{ 'a' if usuario.is_admin else 'div' }}>
           {% endif %}
           <div class="user">
             <span class="user-name">{{ usuario.nome or 'usuário' }}</span>
