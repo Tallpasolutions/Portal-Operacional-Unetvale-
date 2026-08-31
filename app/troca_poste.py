@@ -554,6 +554,58 @@ def ordens(limite=50):
         return []
 
 
+# Limiar de frescor da coleta da Celesc, em minutos. É próprio, e não os 180
+# min dos módulos do WVSA: a Celesc roda DUAS vezes ao dia (07h e 13h, ver
+# `coletor/net.unetvale.troca-poste.plist`), não de 2 em 2 horas. Aplicar o
+# limiar do WVSA aqui deixaria o card vermelho todas as noites por construção —
+# e selo que acende sem motivo é selo que a equipe aprende a ignorar.
+FRESCOR_MIN = 26 * 60
+
+
+def resumo_coleta():
+    """Card de frescor da coleta da Celesc, no mesmo formato de
+    `dados.resumo_modulos()`, para entrar na mesma grade do /monitoramento.
+
+    Mora aqui, e não em `dados.py`, porque a Troca de Poste não vive em
+    `dados_modulo` — e `dados.MODULOS` não pode crescer: aquela tupla é também
+    o whitelist do `/api/ingest` e a chave primária daquela tabela.
+
+    Sem este card, uma coleta parada aparecia só como linha antiga no histórico,
+    com badge verde `ok`. Foi assim que a Celesc ficou 5 dias sem coletar sem
+    ninguém notar.
+    """
+    vazio = {"modulo": "troca_poste", "nome": "Troca de Poste · Celesc",
+             "atualizado": "—", "idade": "—", "status": "sem_dados",
+             "desatualizado": False, "na_fila": False}
+    try:
+        row = supa.select_one("coletas", {
+            "select": "finalizado_em,status",
+            "status": "in.(ok,parcial)",
+            "order": "finalizado_em.desc", "limit": "1",
+        }, schema=SCHEMA)
+    except Exception as e:
+        _falhou("resumo_coleta", e)
+        return vazio
+    if not row or not row.get("finalizado_em"):
+        return vazio
+    try:
+        dt = datetime.fromisoformat(row["finalizado_em"].replace("Z", "+00:00"))
+    except Exception:
+        return vazio
+    minutos = int((datetime.now(timezone.utc) - dt).total_seconds() // 60)
+    if minutos < 60:
+        idade = f"há {minutos} min"
+    elif minutos < 60 * 36:
+        idade = f"há {minutos // 60} h"
+    else:
+        idade = f"há {minutos // (60 * 24)} d"
+    return {**vazio,
+            "atualizado": dt.astimezone(BR_TZ).strftime("%d/%m/%Y %H:%M"),
+            "idade": idade,
+            "status": "ok" if row.get("status") == "ok" else "parcial",
+            "desatualizado": minutos > FRESCOR_MIN}
+
+
 def ultima_coleta():
     """Data/hora da coleta mais recente concluída, para o subtítulo da tela."""
     try:

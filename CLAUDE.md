@@ -41,6 +41,30 @@ App Flask (app/ + api/) na Vercel
 **O app NUNCA fala com o WVSA.** A Vercel não alcança um IP privado. Qualquer
 coisa que precise do WVSA vive em `coletor/` e roda na máquina do Jhoni.
 
+### A Troca de Poste tem OUTRO pipeline, em OUTRO repositório
+
+O diagrama acima cobre o WVSA. O schema `troca_poste` é alimentado por um
+segundo caminho, que **não** está neste repositório:
+
+```
+Celesc (avisodesligamento.celesc.com.br — site PÚBLICO, não precisa de VPN)
+   │  ~/Documents/Dashboard Operacional  →  apps/api/src/jobs/troca-poste/
+   │  pnpm --filter @portal/api  tp:coletar → tp:geocodificar → tp:match
+   ▼
+Supabase, schema troca_poste  →  o app só LÊ
+```
+
+Sim: é o monorepo que "ficou pelo caminho" (§1). Ele não está em produção como
+aplicação, **mas é a única fonte da Troca de Poste** — não o desative nem o
+mova sem substituir esse job.
+
+O agendamento mora aqui, em `coletor/net.unetvale.troca-poste.plist` +
+`coletor/coletar_celesc.sh` (07h e 13h). É um LaunchAgent **separado** do
+`com.unetvale.coletor` de propósito: a Celesc é pública, então esta coleta não
+tem por que parar quando a rede da Unetvale cai.
+
+`sync-rede` (espelho da malha, semanal e pesado) continua **manual**.
+
 ### Dois tipos de módulo, e a diferença importa
 
 | Tipo | Módulos | Se o dado sumir |
@@ -565,6 +589,53 @@ os 30 dias ali marcaria julho como parcial em pleno setembro.
 tirar o botão da barra. O `app.js` já saía cedo quando o botão não existia
 (`if (!btn) return`), então mover o mesmo `id` para outra tela bastou.
 
+**Falha de um módulo apagava o dado bom dele.** `marcar_erro` chamava
+`supa_upsert`, que manda `payload`, `status` e `atualizado_em` juntos: o
+histórico do módulo era substituído por `{"erro": ...}` e o carimbo era
+renovado — o card do Monitoramento voltava a dizer "Atualizado há 2 min" com o
+dado destruído. Aconteceu em 29/08/2026 com a Produtividade, o maior payload de
+todos. Hoje existe `supa_marcar_status`, que faz PATCH só de `status`. A
+mensagem do erro nunca dependeu disso: ela vai para `coletor_log`. Efeito
+colateral: `atualizado_em` voltou a significar "quando o dado ficou bom", então
+"Erro" e "Desatualizado" agora podem coincidir — é o estado real de um módulo
+quebrado há dias.
+
+**A coleta é SEQUENCIAL e leva ~8 min — metade dos cards com data velha no meio
+da rodada é normal.** Cada módulo só ganha carimbo novo quando termina, nesta
+ordem: produtividade, iqi, iqm, massivas, e os cinco `ger_*`. Em 31/08/2026 a
+tela foi aberta às 09:15, entre a gravação do `iqm` (09:14:27) e a do `massivas`
+(09:16:56) — e os seis módulos que faltavam, exibindo o carimbo de 29/08,
+passaram por quebrados. Por isso `enviar.py` grava `log_evento("geral",
+"inicio", ...)` e `dados.rodada_em_andamento()` existe: quem ainda não foi
+coletado recebe o selo **Na fila**, não "Desatualizado". O teto de 30 min para
+considerar a rodada viva é o mesmo `timeout=1800` com que o watcher mata o
+`enviar.py` — sem teto, um coletor morto deixaria a tela "coletando" para
+sempre.
+
+**"Desatualizado" sem causa treina a equipe a ignorar o selo.** Máquina
+desligada, máquina de pé fora da VPN e coleta em andamento produzem a mesma
+idade nos cards. O `coletor_heartbeat` (migration 0011, uma linha só, `check
+(id = 1)`) separa os três: o watcher pulsa de 2 em 2 min gravando `visto_em` e
+o `wvsa_ok` que ele **já calcula**. O pulso vem ANTES do `if ok` no laço — é
+justamente quando o WVSA está fora que a tela precisa saber que a máquina está
+viva.
+
+**O teto do botão "Atualizar" era menor que a rodada.** `app.js` alertava
+"coletor offline" depois de 5 min, e a rodada leva ~8 — ou seja, toda
+atualização manual terminava em alerta falso com a coleta ainda rodando. Hoje
+são 15 min, e o botão mostra o progresso (`3/9`).
+
+**`dados.MODULOS` não é a lista de cards — é o whitelist do `/api/ingest`** e a
+chave de `dados_modulo`. A Troca de Poste não mora naquela tabela, então entra
+na grade do Monitoramento por fora, via `troca_poste.resumo_coleta()`, com
+limiar próprio (26 h, porque a Celesc roda 2x/dia). Enfiá-la em `MODULOS`
+abriria a rota de ingestão para um módulo que ninguém ingere.
+
+**Coleta parada com badge verde.** A Celesc ficou de 26/08 a 31/08/2026 sem
+coletar e o Monitoramento não avisou: o histórico mostrava as linhas antigas com
+`ok`, e não havia card de frescor. Nenhum histórico substitui um selo de idade —
+ninguém confere data de linha de tabela.
+
 **Pooler do Supabase: `aws-1-us-west-2`.** A região está no hostname; a errada
 dá "tenant not found".
 
@@ -584,6 +655,21 @@ também precisam estar na Vercel; as do coletor, só na máquina dele.
 O coletor **em execução** vive em `~/unetvale-coletor` (cópia do `coletor/`).
 Editar aqui não muda o que roda: copie o arquivo e confira com `diff`.
 Log em `~/unetvale-coletor/coletor.log`, banco em `dados.db`.
+
+São **dois** LaunchAgents, com propósitos diferentes:
+
+| Agente | Roda | Quando | Log |
+|---|---|---|---|
+| `com.unetvale.coletor` | `watcher.py` → `enviar.py` (WVSA) | contínuo, grade 08–18h | `coletor.log` |
+| `net.unetvale.troca-poste` | `coletar_celesc.sh` (Celesc) | 07h e 13h | `celesc.log` |
+
+O segundo precisa do `pnpm` por **caminho absoluto**: o launchd roda com
+`PATH=/usr/bin:/bin:/usr/sbin:/sbin` e um `pnpm` solto sai com "command not
+found" — falha calada. O script exporta o PATH no topo.
+
+(Há um terceiro agente na máquina, `net.unetvale.celesc-sync`, de outro projeto
+— `~/Documents/Cancelamento-Projetos-Celesc`, Zimbra → planilha do Google. Não
+tem relação com o portal.)
 
 ---
 
@@ -671,6 +757,29 @@ a.run(port=5001, use_reloader=False)"
   * **a trava do IDF zerado** — agora existe payload bom, então ela passa a
     valer de verdade na próxima rodada com credencial errada. Nunca disparou.
   * **o expurgo dos snapshots** da esteira (90 dias) — nenhum venceu ainda.
+
+- **Monitoramento honesto** entrou em 31/08/2026, migration `0011`
+  (`coletor_heartbeat`). O que mudou e por quê está no §6; o resumo é que a
+  tela passou a distinguir quatro coisas que antes tinham a mesma cara:
+  módulo na fila da rodada em curso, coletor mudo, coletor sem rota até o WVSA
+  e módulo de fato parado.
+
+  Exercitado contra produção: a rodada disparada pelo botão às 09:55 apareceu
+  como "Coleta em andamento", o contador subiu 3→4→5→7 e o aviso sumiu ao
+  fechar (8/8 módulos OK); os três estados do banner conferidos pelo HTML
+  servido; e a prova de que `marcar_erro` preserva payload e carimbo foi feita
+  numa linha descartável no banco de produção.
+
+- **Coleta da Celesc agendada** em 31/08/2026
+  (`net.unetvale.troca-poste`, 07h e 13h). Antes disso ela **nunca teve
+  agendamento** — as 356 linhas de `troca_poste.desligamentos` vinham de uma
+  execução manual de 26/08. A primeira rodada agendada, disparada por
+  `launchctl kickstart`, trouxe **70 desligamentos novos**, 226 confirmados e 5
+  desaparecidos, e passou por `tp:geocodificar` e `tp:match` (426 analisados).
+
+  **Ainda não exercitado:** o agendamento disparando sozinho no horário — até
+  agora só rodou por `kickstart`. Conferir o `celesc.log` depois das 07h e das
+  13h. E `sync-rede` segue manual.
 
 - **Backup do Supabase não foi confirmado.** Ações e Troca de Poste não têm de
   onde ser recoletados. Confirme antes de qualquer operação destrutiva.
