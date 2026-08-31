@@ -6,6 +6,10 @@ A cada ciclo (~45s):
     tabela `controle.pedido_em`).
   - Cobre os HORÁRIOS 08/10/12/14/16/18h mesmo que o Mac tenha dormido — ao
     acordar, detecta o horário que ainda não rodou e roda.
+  - Bate ponto em `coletor_heartbeat` (de 2 em 2 min), para que a tela de
+    Monitoramento consiga dizer POR QUE o dado está velho: máquina desligada,
+    máquina de pé sem rota até o WVSA, ou coleta em andamento. Sem isso, os
+    três casos produzem a mesma idade nos cards.
 
 Só coleta quando o WVSA está acessível (VPN/rede Unetvale). Usa a própria
 `dados_modulo` (timestamp mais recente) como "última coleta", sem estado local.
@@ -29,6 +33,9 @@ BR_TZ = timezone(timedelta(hours=-3))
 HORARIOS = [8, 10, 12, 14, 16, 18]
 PY = sys.executable
 INTERVALO = 45  # segundos entre verificações
+# O pulso não precisa da resolução do ciclo: a tela arredonda em minutos, e
+# escrever de 45 em 45 s daria ~1900 gravações por dia para nenhum ganho.
+HEARTBEAT_INTERVALO = 120  # segundos entre gravações do sinal de vida
 
 
 def log(m):
@@ -54,6 +61,27 @@ def wvsa_ok():
         return requests.get(base + "/login", timeout=8).status_code < 500
     except requests.RequestException:
         return False
+
+
+def bater_ponto(ok):
+    """Grava o sinal de vida (tabela `coletor_heartbeat`, uma linha só).
+
+    Best-effort de propósito: se o Supabase estiver fora, o coletor continua
+    tentando coletar. Perder o pulso é menos grave que parar a coleta — e a
+    própria ausência de pulso já é a informação que a tela mostra.
+    """
+    url, key = _sb()
+    try:
+        requests.patch(
+            f"{url}/rest/v1/coletor_heartbeat",
+            params={"id": "eq.1"},
+            headers={"apikey": key, "Authorization": f"Bearer {key}",
+                     "Content-Type": "application/json", "Prefer": "return=minimal"},
+            json={"visto_em": datetime.now(timezone.utc).isoformat(), "wvsa_ok": bool(ok)},
+            timeout=10,
+        )
+    except Exception:
+        pass
 
 
 def _get(path):
@@ -111,9 +139,18 @@ def rodar(motivo):
 
 def main():
     log(f"watcher iniciado (intervalo {INTERVALO}s, horários {HORARIOS})")
+    ultimo_pulso = 0.0
     while True:
         try:
-            if wvsa_ok():
+            ok = wvsa_ok()
+            # O pulso vem ANTES do `if ok`: é justamente quando o WVSA está
+            # inalcançável que a tela precisa saber que a máquina está viva —
+            # senão "coletor desligado" e "coletor fora da rede" continuam com
+            # a mesma cara, que foi o problema que motivou o heartbeat.
+            if time.monotonic() - ultimo_pulso >= HEARTBEAT_INTERVALO:
+                bater_ponto(ok)
+                ultimo_pulso = time.monotonic()
+            if ok:
                 m = motivo_para_rodar()
                 if m:
                     rodar(m)

@@ -8,6 +8,21 @@ from . import supa
 BR_TZ = timezone(timedelta(hours=-3))
 HORARIOS = [8, 10, 12, 14, 16, 18]  # grade fixa de atualização (horário de Brasília)
 
+# Teto para considerar uma rodada "em andamento". Não é palpite: é o mesmo
+# `timeout=1800` com que o watcher mata o `enviar.py`. Sem teto, um coletor
+# morto no meio da rodada deixaria a tela dizendo "coletando" para sempre.
+RODADA_TIMEOUT_MIN = 30
+
+# Sem sinal há mais que isto, o coletor é dado como mudo. Folga generosa sobre
+# o pulso de 2 min do watcher para que uma falha de rede passageira não vire
+# alarme.
+HEARTBEAT_MUDO_MIN = 10
+
+# Carimbo impossível, para carimbo ilegível contar como "ainda não coletado".
+# Usar o início da rodada como padrão faria o contrário: uma data corrompida
+# seria contada como módulo já concluído.
+MIN_DT = datetime.min.replace(tzinfo=timezone.utc)
+
 # Os `ger_*` são as cinco coletas do Dashboard. Entram aqui, e não numa lista
 # própria, para que o ponto verde/vermelho do cabeçalho e a tela de
 # Monitoramento cubram o módulo novo pelo mesmo caminho dos antigos — uma
@@ -109,9 +124,18 @@ def status_geral():
     }
 
 
-def resumo_modulos():
+def resumo_modulos(rodada=None):
     """Status atual de cada módulo (para a tela de monitoramento): última
-    atualização, idade e se está desatualizado (sem dado novo há > 3h)."""
+    atualização, idade e se está desatualizado (sem dado novo há > 3h).
+
+    `rodada` é o retorno de `rodada_em_andamento()`. Ele importa porque a coleta
+    é SEQUENCIAL e leva ~8 minutos: durante a rodada, quem ainda não foi
+    coletado exibe o carimbo da rodada anterior. Sem essa informação, "ainda não
+    chegou a vez" e "parou de atualizar" ficam idênticos na tela — foi
+    exatamente assim que uma rodada normal, aberta às 09:15 de 31/08/2026,
+    pareceu meia dúzia de módulos quebrados.
+    """
+    inicio = (rodada or {}).get("inicio")
     todos = get_todos()
     agora = datetime.now(timezone.utc)
     out = []
@@ -121,12 +145,94 @@ def resumo_modulos():
         idade = int((agora - dt).total_seconds() // 60) if dt else None
         status = (row or {}).get("status") or "sem_dados"
         desatualizado = idade is not None and idade > 180  # esperado a cada 2h (08–18h)
+        # Na fila: a rodada começou e este módulo ainda não foi gravado. Não
+        # está atrasado, está esperando — e por isso não leva selo de alerta.
+        na_fila = bool(inicio and (dt is None or dt < inicio))
+        if na_fila:
+            desatualizado = False
         out.append({
             "modulo": m, "nome": NOMES.get(m, m),
             "atualizado": dt.astimezone(BR_TZ).strftime("%d/%m/%Y %H:%M") if dt else "—",
-            "idade": _idade_texto(idade), "status": status, "desatualizado": desatualizado,
+            "idade": _idade_texto(idade), "status": status,
+            "desatualizado": desatualizado, "na_fila": na_fila,
         })
     return out
+
+
+def rodada_em_andamento():
+    """Há uma coleta acontecendo agora? E quanto dela já saiu?
+
+    A verdade mora em `coletor_log`, na linha `geral` mais recente:
+      · `pedido`  — o botão foi clicado, o watcher ainda não pegou (até 45 s);
+      · `inicio`  — o `enviar.py` está rodando;
+      · `ok`/`erro`/`skip` — a rodada fechou.
+
+    Só a linha mais recente decide, por isso `limit=1`: um `inicio` de ontem
+    seguido de um `ok` não pode ressuscitar como "rodando".
+    """
+    vazio = {"rodando": False, "inicio": None, "inicio_br": "—", "concluidos": 0,
+             "total": len(MODULOS), "aguardando": False}
+    try:
+        row = supa.select_one("coletor_log", {
+            "modulo": "eq.geral", "select": "executado_em,status",
+            "order": "executado_em.desc", "limit": "1",
+        })
+    except Exception:
+        return vazio
+    if not row:
+        return vazio
+
+    dt = _parse_dt(row.get("executado_em"))
+    if not dt:
+        return vazio
+    if datetime.now(timezone.utc) - dt > timedelta(minutes=RODADA_TIMEOUT_MIN):
+        return vazio  # rodada abandonada: o watcher já teria matado o processo
+
+    estado = row.get("status")
+    if estado == "pedido":
+        # Ainda não começou, mas o botão precisa continuar em "Atualizando…" —
+        # senão a tela recarrega antes de a coleta sair do lugar.
+        return {**vazio, "rodando": True, "aguardando": True}
+    if estado != "inicio":
+        return vazio
+
+    # Conta pelos CARIMBOS, não pelas linhas de log: `coletor_log` recebe uma
+    # linha por módulo do coletor, e o `iqm` não tem a sua (nasce dentro da
+    # coleta do `iqi`). Contando log, o progresso pararia em 8/9 e nunca
+    # fecharia. Contando carimbo, bate exatamente com os cards da tela — e sai
+    # de graça, porque `get_todos()` é a mesma leitura que o resumo já faz.
+    concluidos = sum(1 for r in get_todos().values()
+                     if (_parse_dt(r.get("atualizado_em")) or MIN_DT) >= dt)
+    return {"rodando": True, "inicio": dt,
+            "inicio_br": dt.astimezone(BR_TZ).strftime("%H:%M"),
+            "concluidos": concluidos, "total": len(MODULOS), "aguardando": False}
+
+
+def heartbeat():
+    """Sinal de vida do coletor (tabela `coletor_heartbeat`, ver migration 0011).
+
+    Sem isto a tela só sabe dizer "Desatualizado", sem causa. Com isto ela
+    separa os três casos que produzem a mesma idade: máquina desligada, máquina
+    de pé mas sem rota até o WVSA, e coleta em andamento.
+    """
+    fora = {"vivo": False, "visto": "—", "idade": "—", "wvsa_ok": False}
+    try:
+        row = supa.select_one("coletor_heartbeat",
+                              {"select": "visto_em,wvsa_ok", "id": "eq.1"})
+    except Exception:
+        return fora  # migration ainda não aplicada: some da tela em vez de quebrá-la
+    if not row:
+        return fora
+    dt = _parse_dt(row.get("visto_em"))
+    if not dt:
+        return fora
+    minutos = int((datetime.now(timezone.utc) - dt).total_seconds() // 60)
+    return {
+        "vivo": minutos <= HEARTBEAT_MUDO_MIN,
+        "visto": dt.astimezone(BR_TZ).strftime("%d/%m/%Y %H:%M"),
+        "idade": _idade_texto(minutos),
+        "wvsa_ok": bool(row.get("wvsa_ok")),
+    }
 
 
 def get_log(limite=150):

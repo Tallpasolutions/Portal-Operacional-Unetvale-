@@ -32,13 +32,22 @@
     if (msg) alert(msg);
   }
 
+  // Uma rodada completa leva ~8 min (a coleta é sequencial, 9 módulos). O teto
+  // anterior era de 5 min, ou seja: MENOR que o normal — toda atualização
+  // manual acabava em alerta de "coletor offline" com a coleta ainda rodando.
+  // 15 min dá folga sobre a rodada real sem esconder um coletor de fato morto.
+  const TETO_MS = 15 * 60 * 1000;
+
   async function acompanhar() {
     const inicio = Date.now();
     timer = setInterval(async () => {
       let s;
       try { s = await (await fetch("/api/atualizar/status")).json(); } catch (e) { return; }
       if (!s.rodando) { clearInterval(timer); timer = null; location.reload(); return; }
-      if (Date.now() - inicio > 5 * 60 * 1000) {
+      // Progresso no próprio botão: sem ele, 8 min de "Atualizando…" parado
+      // parecem travamento e convidam a recarregar no meio da rodada.
+      setTxt(s.total ? `Atualizando… ${s.concluidos || 0}/${s.total}` : "Atualizando…");
+      if (Date.now() - inicio > TETO_MS) {
         parar("A atualização está demorando — o coletor pode estar offline (sem VPN/rede Unetvale) ou desligado.");
       }
     }, 5000);

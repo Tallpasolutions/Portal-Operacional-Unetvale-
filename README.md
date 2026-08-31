@@ -54,6 +54,12 @@ supabase/migrations/0002_coletor_log.sql           log do coletor
 supabase/migrations/0003_supervisores.sql          papel de supervisor
 supabase/migrations/0004_supervisor_tecnicos.sql   vínculo por técnico
 supabase/migrations/0005_acoes.sql                 módulo Ações
+supabase/migrations/0006_reuniao_transcricao.sql   Reuniões: gravação e ata
+supabase/migrations/0007_ata_editada.sql           ata editável no texto
+supabase/migrations/0008_reuniao_convidados.sql    convidados sem conta
+supabase/migrations/0009_dashboard.sql             esteira + metas do Dashboard
+supabase/migrations/0010_dashboard_config.sql      preferências do Dashboard
+supabase/migrations/0011_coletor_heartbeat.sql     sinal de vida do coletor
 ```
 
 Em **Project Settings → API**, copie a **Project URL** e a chave
@@ -103,6 +109,12 @@ cp ../.env.example .env       # preencha as seções APP e COLETOR
 O agendamento é um **LaunchAgent** (`com.unetvale.coletor.plist`) que mantém o
 `watcher.py` de pé; ele dispara nos horários e atende ao botão "Atualizar" do
 portal. Log em `coletor.log`.
+
+A **Troca de Poste tem coleta própria**, num segundo LaunchAgent
+(`net.unetvale.troca-poste.plist` → `coletar_celesc.sh`, 07h e 13h, log em
+`celesc.log`). Ela chama o pipeline da Celesc que vive no monorepo
+`~/Documents/Dashboard Operacional` — ver §2 do `CLAUDE.md`. É separada porque o
+site da Celesc é público: não depende da VPN e não deve parar junto do WVSA.
 
 ```bash
 .venv/bin/python enviar.py --so iqi                                  # só um módulo

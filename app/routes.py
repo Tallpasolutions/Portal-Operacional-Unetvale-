@@ -504,9 +504,18 @@ def monitoramento():
     # As coletas da Celesc (módulo Troca de Poste) ficam aqui junto das do
     # WVSA: é a mesma pergunta — "a ingestão está rodando?" — e ter duas telas
     # separadas para ela só fazia procurar em dois lugares.
+    #
+    # A rodada é lida ANTES do resumo e passada a ele: durante a coleta (~8 min,
+    # sequencial) os módulos ainda não gravados exibem o carimbo da rodada
+    # anterior, e sem esse aviso isso passa por defeito.
+    rodada = dados.rodada_em_andamento()
+    resumo = dados.resumo_modulos(rodada)
+    # A Troca de Poste entra na mesma grade por fora, com limiar próprio: ela
+    # não mora em `dados_modulo` (ver `tp.resumo_coleta`).
+    resumo.append(tp.resumo_coleta())
     return render_template("monitoramento.html", ativo="monitoramento",
-                           resumo=dados.resumo_modulos(), logs=dados.get_log(150),
-                           coletas=tp.coletas(30))
+                           resumo=resumo, rodada=rodada, pulso=dados.heartbeat(),
+                           logs=dados.get_log(150), coletas=tp.coletas(30))
 
 
 def _supervisores_para_filtro(u):
@@ -541,18 +550,6 @@ def _ultima_data():
     return ult
 
 
-def _ultimo_pedido():
-    """Timestamp do pedido manual mais recente (registrado em coletor_log)."""
-    try:
-        rows = supa.select("coletor_log", {
-            "status": "eq.pedido", "select": "executado_em",
-            "order": "executado_em.desc", "limit": "1",
-        })
-        return dados._parse_dt(rows[0]["executado_em"]) if rows else None
-    except Exception:
-        return None
-
-
 @bp.route("/api/atualizar", methods=["POST"])
 @login_obrigatorio
 def api_atualizar():
@@ -571,11 +568,16 @@ def api_atualizar():
 @bp.route("/api/atualizar/status")
 @login_obrigatorio
 def api_atualizar_status():
-    ped = _ultimo_pedido()
+    # Mesma fonte que a tela usa (`coletor_log`, linha `geral` mais recente).
+    # Antes daqui saía outra definição de "rodando" — pedido mais novo que o
+    # último carimbo —, que só enxergava coleta pedida pelo botão: rodada
+    # agendada não aparecia, e o botão recarregava a página no meio dela.
+    rodada = dados.rodada_em_andamento()
     ult = _ultima_data()
-    rodando = bool(ped and (ult is None or ped > ult))
     return jsonify({
-        "rodando": rodando,
+        "rodando": rodada["rodando"],
+        "concluidos": rodada["concluidos"],
+        "total": rodada["total"],
         "ultima": ult.astimezone(dados.BR_TZ).strftime("%d/%m/%Y %H:%M") if ult else "—",
     })
 

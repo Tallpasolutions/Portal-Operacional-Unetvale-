@@ -16,16 +16,59 @@
 <p class="subnote">Atualização automática às {{ status_upd.horarios|join('h, ') }}h. A coleta depende da máquina
   do coletor estar ligada e com acesso ao WVSA (VPN ou rede Unetvale) no horário. Rodadas offline são ignoradas (skip).</p>
 
+<!-- Estado do coletor.
+     Existe porque "Desatualizado" sozinho não tem causa: máquina desligada,
+     máquina de pé sem rota até o WVSA e coleta em andamento produzem a mesma
+     idade nos cards. O pulso (migration 0011) separa os três. -->
+{% if pulso.visto != '—' %}
+  {% if not pulso.vivo %}
+  <div class="aviso-erro" style="margin:0 0 12px;">
+    <b>Coletor sem dar sinal desde {{ pulso.visto }}</b> ({{ pulso.idade }}) — a máquina do coletor
+    provavelmente está desligada ou sem internet. Nada será coletado até ela voltar; os dados
+    abaixo são os últimos bons.
+  </div>
+  {% elif not pulso.wvsa_ok %}
+  <div class="aviso-ambar" style="margin:0 0 12px;">
+    <b>Coletor de pé, mas sem acesso ao WVSA</b> (sinal {{ pulso.idade }}). Fora da VPN e da rede
+    Unetvale as rodadas são ignoradas — os últimos dados bons ficam preservados.
+  </div>
+  {% else %}
+  <div class="aviso-ok" style="margin:0 0 12px;">
+    Coletor ativo (sinal {{ pulso.idade }}) e com acesso ao WVSA.
+  </div>
+  {% endif %}
+{% endif %}
+
+<!-- Rodada em andamento.
+     A coleta é sequencial e leva ~8 min: sem este aviso, os módulos que ainda
+     não chegaram na vez exibem o carimbo da rodada anterior e passam por
+     quebrados. Foi o que aconteceu em 31/08/2026. -->
+{% if rodada.aguardando %}
+<div class="aviso-info" style="margin:0 0 12px;">
+  <b>Atualização solicitada.</b> O coletor pega o pedido no próximo ciclo (~45 s).
+</div>
+{% elif rodada.rodando %}
+<div class="aviso-info" style="margin:0 0 12px;">
+  <b>Coleta em andamento desde {{ rodada.inicio_br }}</b> — {{ rodada.concluidos }} de
+  {{ rodada.total }} módulos concluídos. Os marcados <b>Na fila</b> ainda mostram o carimbo da
+  rodada anterior; a coleta é sequencial e leva cerca de 8 minutos.
+</div>
+{% endif %}
+
 <!-- Status atual por módulo -->
 <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(230px,1fr));margin-bottom:18px;">
   {% for r in resumo %}
   <div class="card">
     <div class="card-b">
-      <div style="display:flex;align-items:center;justify-content:space-between;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
         <span style="font-weight:700;">{{ r.nome }}</span>
-        {% if r.status == 'sem_dados' %}<span class="badge badge-cinza">Sem dados</span>
-        {% elif r.status == 'erro' %}<span class="badge badge-vermelho">Erro</span>
+        {# `erro` vem antes de `na_fila`: falha nunca pode ficar escondida atrás
+           de "esperando a vez". #}
+        {% if r.status == 'erro' %}<span class="badge badge-vermelho">Erro</span>
+        {% elif r.na_fila %}<span class="badge badge-cinza">Na fila</span>
+        {% elif r.status == 'sem_dados' %}<span class="badge badge-cinza">Sem dados</span>
         {% elif r.desatualizado %}<span class="badge badge-ambar">Desatualizado</span>
+        {% elif r.status == 'parcial' %}<span class="badge badge-ambar">Parcial</span>
         {% else %}<span class="badge badge-verde">Atualizado</span>{% endif %}
       </div>
       <div style="font-size:22px;font-weight:800;color:var(--ink-d);margin-top:8px;">{{ r.idade }}</div>
@@ -37,8 +80,10 @@
 
 <!-- Coletas do módulo Troca de Poste (fonte Celesc, pipeline próprio) -->
 <h3 class="secao">Coletas da Celesc — Troca de Poste</h3>
-<p class="subnote">Varredura das 11 cidades monitoradas. Desligamento que sai da lista da Celesc é marcado
-  como desaparecido e some das telas, mas <b>não é apagado</b> — fica no banco para auditoria.</p>
+<p class="subnote">Varredura das 11 cidades monitoradas, duas vezes ao dia (07h e 13h), por um
+  LaunchAgent próprio — <b>separado</b> do coletor do WVSA, porque o site da Celesc é público e não
+  depende da VPN. Desligamento que sai da lista da Celesc é marcado como desaparecido e some das
+  telas, mas <b>não é apagado</b> — fica no banco para auditoria.</p>
 <div class="card" style="margin-bottom:18px;">
   <div class="card-h">Histórico de coletas ({{ coletas|length }})</div>
   <div class="card-b tabela-wrap">

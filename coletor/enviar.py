@@ -107,9 +107,41 @@ def supa_inserir(tabela, registro):
     r.raise_for_status()
 
 
+def supa_marcar_status(modulo, status):
+    """Muda SÓ a coluna `status`, sem tocar em `payload` nem `atualizado_em`.
+
+    Existe porque `supa_upsert` manda as três colunas juntas: usá-lo para
+    registrar uma falha trocava o payload histórico por `{"erro": ...}` e ainda
+    renovava o carimbo — o card do Monitoramento voltava a dizer "Atualizado há
+    2 min" com o dado destruído. Aconteceu de verdade em 29/08/2026, com a
+    Produtividade (o maior payload de todos), que só voltou na rodada seguinte.
+    """
+    url = os.environ["SUPABASE_URL"].rstrip("/")
+    key = os.environ["SUPABASE_SERVICE_KEY"]
+    r = requests.patch(
+        f"{url}/rest/v1/dados_modulo",
+        params={"modulo": f"eq.{modulo}"},
+        headers={
+            "apikey": key, "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json", "Prefer": "return=minimal",
+        },
+        json={"status": status},
+        timeout=30,
+    )
+    r.raise_for_status()
+
+
 def marcar_erro(modulo, erro):
+    """Marca o módulo como em erro preservando o último dado bom.
+
+    A mensagem do erro não se perde: `main()` já a grava em `coletor_log` via
+    `log_evento(modulo, "erro", ...)`, que é o histórico que a tela mostra.
+    Módulo que nunca coletou não tem linha, o PATCH não afeta nada e o card
+    segue em "Sem dados" — que é a verdade.
+    """
     try:
-        supa_upsert(modulo, {"erro": str(erro)[:500]}, status="erro")
+        supa_marcar_status(modulo, "erro")
+        log(f"  -> Supabase: {modulo} (erro; dado anterior preservado)")
     except Exception as e:
         log(f"  !! não consegui registrar erro de {modulo}: {e}")
 
@@ -380,6 +412,13 @@ def main():
         sys.exit(0)
 
     alvos = [args.so] if args.so else list(MODULOS)
+
+    # A coleta é sequencial e leva ~8 min. Sem marcar o início, a tela de
+    # Monitoramento não tem como distinguir "ainda não chegou a vez deste
+    # módulo" de "este módulo parou de atualizar": no meio da rodada metade dos
+    # cards exibe o carimbo da rodada anterior, e isso já passou por defeito.
+    log_evento("geral", "inicio", f"Rodada iniciada ({len(alvos)} módulos)")
+
     falhas = 0
     for modulo in alvos:
         try:

@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Agendamento da coleta da Celesc (módulo Troca de Poste).
+
+  Instalação:
+      cp coletor/net.unetvale.troca-poste.plist ~/Library/LaunchAgents/
+      launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/net.unetvale.troca-poste.plist
+  Rodar na hora (teste):
+      launchctl kickstart -k gui/$(id -u)/net.unetvale.troca-poste
+  Log:
+      ~/unetvale-coletor/celesc.log
+
+  Separado do `com.unetvale.coletor` (WVSA) de propósito: o site da Celesc é
+  público e não depende da VPN, então esta coleta não deve parar quando a rede
+  da Unetvale cai. Horários 07h e 13h — é o `CRON_COLETA_CELESC` que o monorepo
+  previu e nunca ligou a nada.
+
+  ATENÇÃO: o script chama o monorepo em ~/Documents, pasta protegida por TCC no
+  macOS. Se o job sair com código 78 e sem log, é isso — a saída é mover o
+  monorepo para fora de ~/Documents (foi o que se fez com o coletor do WVSA,
+  que vive em ~/unetvale-coletor). O `net.unetvale.celesc-sync`, de outro
+  projeto, já roda de ~/Documents sem problema, então há precedente.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>net.unetvale.troca-poste</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/jhonicleyton/unetvale-coletor/coletar_celesc.sh</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Hour</key><integer>13</integer><key>Minute</key><integer>0</integer></dict>
+    </array>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jhonicleyton/unetvale-coletor/celesc-launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jhonicleyton/unetvale-coletor/celesc-launchd.log</string>
+
+    <!-- false: não queremos uma coleta a cada login/reboot, só nos horários. -->
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>
