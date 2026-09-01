@@ -397,9 +397,19 @@ Os que nasceram no Dashboard:
 | `.par-mes` | par "mês fechado × mês corrente" numa moldura só |
 | `.regua` | contraste de duas partes numa barra (resolvido × não resolvido) |
 
+**Cartão recolhido** (`.card.recolhido` + `hidden` no `.card-b`, com o botão no
+`.card-h`): o cartão vira uma linha só até alguém clicar. É para formulário que
+existe mas não é o motivo de a pessoa ter aberto a tela — o "Comentário do
+gestor" e a "Definição" do `acao_detalhe.html`. A regra do CSS tira a borda de
+baixo do cabeçalho enquanto está fechado; sem ela sobra um risco separando o
+nada. O estado **não** é guardado: depois de enviar, a página recarrega fechada,
+que é o estado de leitura. Quem abre uma ação vem ver o que ela é e o que foi
+feito, não editar.
+
 **Nada de `confirm()` do navegador.** Ele abre uma caixa do sistema, com o
 domínio no topo, que não pertence à tela — use `.modal` com `<dialog>`. As
-telas antigas ainda usam `confirm()`; ao mexer numa delas, troque.
+telas antigas ainda usam `confirm()`; ao mexer numa delas, troque — foi
+assim que o de apagar ação, no `acao_detalhe.html`, virou `#dlg-excluir`.
 
 ---
 
