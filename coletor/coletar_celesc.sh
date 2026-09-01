@@ -21,6 +21,25 @@
 # =====================================================================
 set -uo pipefail
 
+# Limite por etapa, em segundos. NAO e paranoia: o launchd nao comeca uma
+# segunda copia de um job que ainda esta rodando, entao uma etapa travada nao
+# atrasa a rodada — ela CANCELA todas as seguintes, e sem erro em lugar nenhum.
+#
+# Foi exatamente o que aconteceu em 31/08/2026: o `tp:coletar` das 13h terminou
+# o trabalho as 13:03 (o log tem o "coleta_concluida") e o processo node ficou
+# vivo, sem fazer nada, por mais de 20 horas. Com ele de pe, a coleta das 07h
+# do dia 01/09 simplesmente nao rodou, e o /monitoramento seguiu verde porque
+# o limiar de la e 26 h.
+#
+# A rodada inteira leva ~4 min. 20 min por etapa e folga larga e continua bem
+# abaixo das 6 h entre 07h e 13h.
+LIMITE_ETAPA=${LIMITE_ETAPA:-1200}
+
+# Cada etapa em seu proprio grupo de processo. Sem isto o cao de guarda mataria
+# so o `pnpm`, e o `tsx`/`node` filho — que e justamente quem trava — ficaria
+# vivo segurando o job do mesmo jeito.
+set -m
+
 # O launchd roda com PATH=/usr/bin:/bin:/usr/sbin:/sbin. Sem isto, `pnpm` sai
 # com "command not found" e o job nunca roda — falha silenciosa clássica.
 export PATH="/opt/homebrew/opt/node@20/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -48,17 +67,56 @@ falhas=0
 #   match        -> cruza com a rede e classifica o risco
 # `sync-rede` (espelho da malha) fica de fora: é semanal e pesado, e no monorepo
 # tem cron próprio (CRON_SYNC_REDE, domingo 03h). Continua manual por ora.
+# Roda uma etapa com prazo. Devolve o codigo dela; >= 128 quer dizer que foi
+# derrubada por sinal, que aqui e sempre o cao de guarda.
+executar_com_limite() {
+  pnpm --filter @portal/api "$1" >> "$LOG" 2>&1 &
+  local pid=$!
+  ( sleep "$LIMITE_ETAPA"
+    kill -TERM -"$pid" 2>/dev/null
+    sleep 10
+    kill -KILL -"$pid" 2>/dev/null ) &
+  local cao=$!
+  local st=0
+  wait "$pid" || st=$?
+  kill "$cao" 2>/dev/null   # terminou dentro do prazo: o cao nao late
+  wait "$cao" 2>/dev/null
+  return "$st"
+}
+
 for etapa in tp:coletar tp:geocodificar tp:match; do
   registrar "-> $etapa"
-  if pnpm --filter @portal/api "$etapa" >> "$LOG" 2>&1; then
+  st=0
+  executar_com_limite "$etapa" || st=$?
+  if [ "$st" -eq 0 ]; then
+    # O `tp:coletar` sai com 0 mesmo quando TODAS as cidades falham: ele trata
+    # a falha por cidade e segue. Em 01/09/2026, 12:32 UTC, as 11 cidades
+    # deram "fetch failed" e a rodada registrou "coleta da Celesc concluída"
+    # com total 0 — sucesso na cara de quem lesse o log. Aqui o desfecho da
+    # coleta é conferido pelo que ela própria gravou.
+    if [ "$etapa" = "tp:coletar" ]; then
+      total=$(grep '"msg":"coleta_concluida"' "$LOG" | tail -1 |
+              sed -n 's/.*"total":\([0-9]*\).*/\1/p')
+      if [ "${total:-0}" -eq 0 ]; then
+        registrar "   $etapa VOLTOU VAZIO (0 desligamentos) — a Celesc não respondeu"
+        falhas=$((falhas + 1))
+        break
+      fi
+      registrar "   $etapa ok ($total desligamentos)"
+      continue
+    fi
     registrar "   $etapa ok"
-  else
-    registrar "   $etapa FALHOU (código $?)"
-    falhas=$((falhas + 1))
-    # Não segue adiante: geocodificar sem ter coletado, ou casar sem ter
-    # geocodificado, só produz uma rodada vazia que parece sucesso.
-    break
+    continue
   fi
+  if [ "$st" -ge 128 ]; then
+    registrar "   $etapa DERRUBADO apos $((LIMITE_ETAPA / 60)) min sem terminar (sinal $((st - 128)))"
+  else
+    registrar "   $etapa FALHOU (código $st)"
+  fi
+  falhas=$((falhas + 1))
+  # Não segue adiante: geocodificar sem ter coletado, ou casar sem ter
+  # geocodificado, só produz uma rodada vazia que parece sucesso.
+  break
 done
 
 if [ "$falhas" -eq 0 ]; then
