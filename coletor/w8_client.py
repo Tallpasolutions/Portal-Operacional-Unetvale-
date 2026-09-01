@@ -103,11 +103,51 @@ def listar_tecnicos(s, cfg):
     return [(v, t.strip()) for v, t in opts if v]
 
 
-def _serie_tecnico(s, cfg, tid):
-    url = (s.base + f"/graficos/indicadores/iqi/{cfg['tipos']}/{cfg['dias']}/{tid}/0/S?highchart=S")
-    j = s.get(url, headers={"X-Requested-With": "XMLHttpRequest"}, timeout=60).json()
+def _serie(s, url):
+    """(cats, total_os, reincidencias, pct) de um grafico do indicador.
+
+    A ordem das series no JSON do WVSA nao e a da legenda: series[0] e a
+    contagem de contratos reincidentes, series[1] o total de OSs e series[2] o
+    percentual. Trocar as duas primeiras inverte o indicador sem erro nenhum.
+    """
+    j = s.get(url, headers={"X-Requested-With": "XMLHttpRequest"}, timeout=90).json()
     cats = j["xAxis"]["categories"]
     return cats, j["series"][1]["data"], j["series"][0]["data"], j["series"][2]["data"]
+
+
+def _serie_tecnico(s, cfg, tid):
+    return _serie(s, s.base +
+                  f"/graficos/indicadores/iqi/{cfg['tipos']}/{cfg['dias']}/{tid}/0/S?highchart=S")
+
+
+def _serie_geral(s, cfg):
+    """O consolidado do indicador, exatamente como o WVSA o publica.
+
+    🚨 Somar os tecnicos NAO reconstroi este numero. Nao troque por uma conta
+    feita aqui.
+
+    A URL e a mesma que a pagina do `indicadores4` carrega sozinha ao abrir —
+    sem os segmentos de tecnico/empresa/massivas. Medido em 01/09/2026: ela
+    devolve o mesmo que `/0/0/S`, entao o padrao do servidor para
+    `ignorarMassivas` E `S`, e o coletor sempre esteve certo nesse ponto.
+
+    Por que a soma dos tecnicos diverge, medido no mesmo dia:
+
+      * TECNICO QUE SAI DESAPARECE DO SELECT, e leva a historia dele junto.
+        Em 01/2026, 51 das 146 reincidencias do IQI eram de 11 tecnicos que
+        ja nao estao na lista — a "RW Telecom" inteira sumiu. O total de OSs
+        do mes caia de 757 (WVSA) para 493 (soma). Como o payload e regravado
+        inteiro a cada rodada, isso PIORA sozinho: cada saida reescreve o
+        passado.
+      * OS COM DOIS TECNICOS CONTA DUAS VEZES na soma. No IQM de 07/2026, 19
+        dos 134 contratos reincidentes tinham 2+ tecnicos distintos — a soma
+        dava 155 reincidencias onde o WVSA dava 133.
+
+    Os dois efeitos andam em sentidos opostos e nao se cancelam: o Dashboard
+    mostrava 8,78% de IQM em 07/2026 contra 7,49% do WVSA.
+    """
+    return _serie(s, s.base +
+                  f"/graficos/indicadores/iqi/{cfg['tipos']}/{cfg['dias']}?highchart=S")
 
 
 def coletar(ind="IQI", progress=None):
@@ -135,16 +175,27 @@ def coletar(ind="IQI", progress=None):
     with ThreadPoolExecutor(max_workers=12) as ex:
         list(ex.map(task, techs))
 
-    cats_ref = next((v[0] for v in raw.values() if v), [])
-    idxs = [i for i, c in enumerate(cats_ref) if int(c.split("/")[1]) >= ANO_INICIO]
-    meses = [cats_ref[i] for i in idxs]
+    # Os meses saem da serie GERAL, e nao do primeiro tecnico que respondeu:
+    # ela e a unica que cobre o periodo inteiro independentemente de quem
+    # estava na equipe. Cada tecnico e encaixado nesses meses PELO ROTULO —
+    # posicao so seria segura enquanto os dois endpoints devolvessem a mesma
+    # janela, e nada no WVSA promete isso.
+    cats_geral, tos_g, cham_g, pct_g = _serie_geral(s, cfg)
+    idxs = [i for i, c in enumerate(cats_geral) if int(c.split("/")[1]) >= ANO_INICIO]
+    meses = [cats_geral[i] for i in idxs]
+    geral = [[tos_g[i] or 0, cham_g[i] or 0, pct_g[i]] for i in idxs]
 
     tecnicos = []
     for nome, v in raw.items():
         if not v:
             continue
-        _, tos, cham, iqi = v
-        monthly = [[tos[i] or 0, cham[i] or 0, iqi[i] or 0] for i in idxs]
+        cats_t, tos, cham, iqi = v
+        pos = {c: i for i, c in enumerate(cats_t)}
+        monthly = []
+        for m in meses:
+            i = pos.get(m)
+            monthly.append([tos[i] or 0, cham[i] or 0, iqi[i] or 0]
+                           if i is not None else [0, 0, 0])
         if any(rr[0] > 0 for rr in monthly):
             tecnicos.append({"nome": nome, "m": monthly})
 
@@ -157,6 +208,9 @@ def coletar(ind="IQI", progress=None):
         "meses": meses,
         "meta": cfg["meta"],
         "minOS": cfg["minOS"],
+        # O numero do indicador. `tecnicos` e o recorte de execucao — util
+        # para ranking, mas a soma dele nao e o indicador (ver _serie_geral).
+        "geral": geral,
         "tecnicos": tecnicos,
         "atualizado_em": datetime.now(BR_TZ).strftime("%d/%m/%Y %H:%M"),
     }
@@ -170,3 +224,5 @@ if __name__ == "__main__":
     t0 = time.time()
     data = coletar(ind, progress=lambda d, t: print(f"\r{d}/{t}", end="", flush=True))
     print(f"\n{ind} OK em {time.time()-t0:.1f}s | meses={data['meses']} | tecnicos={len(data['tecnicos'])}")
+    for m, g in zip(data["meses"], data["geral"]):
+        print(f"  {m}: {g[1]}/{g[0]} = {g[2]}%   (consolidado do WVSA)")

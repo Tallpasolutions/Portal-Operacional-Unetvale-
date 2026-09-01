@@ -287,6 +287,13 @@ mesma página, que foi exatamente o que aconteceu aqui.
 O único filtro que sobrou dentro de um bloco são os chips de empresa do
 "Por empresa" — refinam só aquele bloco e não têm equivalente no topo.
 
+O KPI **"do mês (WVSA)"**, na `.toolbar` e no topo do "Por empresa", é o
+consolidado do `indicadores4` — o número que se confere contra o relatório.
+Ele some quando há recorte (supervisor ou chips de empresa): o número da
+operação inteira não fala do que está na tela. Tudo mais naqueles blocos é a
+soma dos técnicos, rotulada como **soma**, e ela não fecha com o KPI de
+propósito (§6).
+
 ### Papéis
 
 Três, independentes — a pessoa pode ser um, vários ou nenhum:
@@ -531,6 +538,36 @@ zerada e o total continua parecendo plausível — ninguém repara. Mesma famíl
 do `empresa=todas`. `apenas_pendentes` é irmã dela: vem **marcada** no
 formulário e reduz a resposta às OS ainda não classificadas (13 linhas em vez
 de 212). Não envie o campo.
+
+**Somar os técnicos NÃO dá o indicador.** O IQI/IQM das telas saía da soma das
+séries por técnico e não batia com o `indicadores4` do WVSA — medido em
+01/09/2026, IQM de 07/2026: **8,78% na tela contra 7,49% no relatório**. São
+dois motivos, e eles andam em sentidos opostos, então não se cancelam:
+
+* **técnico que sai desaparece do `select`** e leva a história dele junto. Em
+  01/2026 o total de OS do IQI caía de 757 (WVSA) para 493 (soma) — 35% a
+  menos; a "RW Telecom" inteira sumiu, com 15 reincidências só naquele mês.
+  Como o payload é regravado inteiro a cada rodada, isso **piora sozinho**:
+  cada saída reescreve o passado;
+* **OS com dois técnicos conta duas vezes** na soma. No IQM de 07/2026, 19 dos
+  134 contratos reincidentes tinham 2+ técnicos distintos.
+
+Hoje o coletor traz a série consolidada em `payload["geral"]`
+(`w8_client._serie_geral`), pedindo a **mesma URL que a página do WVSA carrega
+sozinha** — sem os segmentos de técnico/empresa/massivas.
+`gerencial._consolidado_mensal` lê dela e só recua para a soma enquanto a
+primeira coleta não roda, dizendo `fonte: "soma"` para a tela não afirmar
+"WVSA" sobre número que não é.
+
+⚠️ O consolidado **inclui infraestrutura e inclui quem já saiu**; o ranking por
+técnico do `/iqi` exclui infra e exige o mínimo de OSs. Os dois estão certos e
+não fecham entre si — as duas telas dizem isso, e é por isso que o `/iqi` tem
+um KPI "do mês (WVSA)" ao lado dos contadores do ranking.
+
+E não, **`ignorarMassivas` não era o problema aqui**: medido no mesmo dia, a URL
+sem o segmento devolve exatamente o mesmo que `/0/0/S`. O padrão do servidor é
+`S`, e o coletor sempre esteve certo nesse ponto — ao contrário do
+`operacional31` logo acima.
 
 **A aba "Indicadores" do `operacional31` ignora o filtro `tipo`.** `tipo=iqi` e
 `tipo=iqm` devolvem Cat 4/Cat 5 idênticos (Total 3548 nos dois, medido em
@@ -780,6 +817,27 @@ a.run(port=5001, use_reloader=False)"
   **Ainda não exercitado:** o agendamento disparando sozinho no horário — até
   agora só rodou por `kickstart`. Conferir o `celesc.log` depois das 07h e das
   13h. E `sync-rede` segue manual.
+
+- **IQI/IQM consolidado do WVSA** entrou em 01/09/2026, sem migration — o
+  campo `geral` viaja dentro do payload de `dados_modulo`. Antes disso as duas
+  telas somavam os técnicos e mostravam três números diferentes para o mesmo
+  mês (Dashboard 8,78%, "Por empresa" 8,52%, WVSA 7,49% no IQM de 07/2026).
+  O porquê está no §6.
+
+  Exercitado contra o WVSA de verdade: a coleta rodou (`enviar.py --so iqi`) e
+  os oito meses de 2026 saíram idênticos ao relatório nos dois indicadores;
+  `/dashboard` e `/iqi` conferidos no navegador, no desktop e no preset mobile,
+  console limpo; o recuo (`fonte: "soma"`) e o mês sem OS exercitados por
+  script.
+
+  **Ainda não exercitado:** o recorte por supervisor no KPI novo — não há
+  supervisor cadastrado em produção, então o caminho que **esconde** o KPI só
+  foi provado disparando o evento `iqifiltro` à mão.
+
+  Sobrou em aberto, e é da mesma família: `w8_client.coletar` engole exceção
+  por técnico (`except Exception: raw[nome] = None`) e o técnico simplesmente
+  não aparece no ranking, sem erro em lugar nenhum. Na medição de 01/09/2026
+  foram 0 falhas em 132, mas nada avisaria se não fosse.
 
 - **Backup do Supabase não foi confirmado.** Ações e Troca de Poste não têm de
   onde ser recoletados. Confirme antes de qualquer operação destrutiva.

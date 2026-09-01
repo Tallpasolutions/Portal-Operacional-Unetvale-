@@ -28,6 +28,24 @@
     serie(ind, q);
   });
 
+  // De onde vem o consolidado. Nao e enfeite: o numero desta tela inclui
+  // infraestrutura e inclui tecnico que ja saiu, enquanto o ranking do /iqi
+  // exclui infra — quem somar o de la nao chega neste, e precisa saber por que.
+  (function () {
+    var el = $("qual-fonte");
+    if (!el) return;
+    var fontes = ["IQI", "IQM"].map(function (i) { return ((D.qualidade || {})[i] || {}).fonte; });
+    if (fontes.indexOf("soma") >= 0) {
+      el.innerHTML = "\u26a0\ufe0f Consolidado ainda pela soma dos t\u00e9cnicos: a coleta que traz a " +
+        "s\u00e9rie do WVSA n\u00e3o rodou depois da atualiza\u00e7\u00e3o. O n\u00famero pode divergir do relat\u00f3rio.";
+      el.style.color = "var(--warning)";
+    } else if (fontes.indexOf("wvsa") >= 0) {
+      el.textContent = "IQI e IQM s\u00e3o o consolidado do relat\u00f3rio indicadores4 do WVSA \u2014 o m\u00eas inteiro, " +
+        "com infraestrutura e com quem j\u00e1 saiu da equipe. O ranking por t\u00e9cnico do /iqi exclui infra, " +
+        "ent\u00e3o a soma de l\u00e1 n\u00e3o fecha com este n\u00famero.";
+    }
+  })();
+
   function serie(ind, q) {
     var cv = $("g-" + ind.toLowerCase() + "-serie");
     if (!cv || !window.Chart || !(q.serie || []).length) return;

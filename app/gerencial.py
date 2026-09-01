@@ -180,18 +180,33 @@ def _vs_meta(valor, chave, mapa):
 # Qualidade: IQI/IQM consolidado, mês a mês
 # ==========================================================================
 def _consolidado_mensal(payload):
-    """% consolidado por mês: reincidências ÷ OSs, e não média dos percentuais.
+    """% consolidado por mês — o número que o WVSA publica, não uma conta nossa.
 
-    A diferença importa e é a mesma já adotada na visão "Por empresa" do
-    /iqi: média de percentual daria o mesmo peso a quem fez 11 OSs e a quem
-    fez 60.
+    Sai de `payload["geral"]`, a mesma série que a página do `indicadores4`
+    carrega sozinha ao abrir. É `reincidências ÷ OSs` do mês inteiro, incluindo
+    infraestrutura e incluindo quem já saiu da equipe.
 
-    Infraestrutura fica de fora — regra de negócio do indicador, centralizada
-    em `supervisores.eh_infra`.
+    ⚠️ Somar `tecnicos` NÃO reproduz esse número — foi o que esta função fazia
+    até 01/09/2026, e por isso o Dashboard mostrava 8,78% de IQM em 07/2026
+    contra 7,49% no WVSA. Os dois motivos estão em `_serie_geral`
+    (coletor/w8_client.py) e andam em sentidos opostos, então não se cancelam:
+    técnico que sai some do relatório e leva a história dele, e OS com dois
+    técnicos conta duas vezes.
+
+    O recuo para a soma existe pelo mesmo motivo do `_select_reunioes` de
+    acoes.py: deploy e coleta não acontecem no mesmo segundo, e sem ele a tela
+    ficaria vazia entre um e outro. Ele se identifica em `fonte`, para a tela
+    não afirmar "WVSA" sobre um número que ainda é a soma antiga.
     """
     if not payload or not payload.get("meses"):
-        return []
+        return [], "sem_dados"
     meses = payload["meses"]
+    geral = payload.get("geral")
+    if geral:
+        return [{"mes": m, "os": g[0], "chamados": g[1],
+                 "pct": round(g[2], 2) if g[2] is not None else None}
+                for m, g in zip(meses, geral)], "wvsa"
+
     os_mes = [0] * len(meses)
     ch_mes = [0] * len(meses)
     for t in payload.get("tecnicos", []):
@@ -206,7 +221,7 @@ def _consolidado_mensal(payload):
     for i, mes in enumerate(meses):
         pct = round(ch_mes[i] / os_mes[i] * 100, 2) if os_mes[i] else None
         saida.append({"mes": mes, "os": os_mes[i], "chamados": ch_mes[i], "pct": pct})
-    return saida
+    return saida, "soma"
 
 
 def qualidade(mapa_metas, quantos=MESES_VISIVEIS_PADRAO):
@@ -214,7 +229,7 @@ def qualidade(mapa_metas, quantos=MESES_VISIVEIS_PADRAO):
     saida = {}
     for modulo, rotulo, chave in (("iqi", "IQI", "iqi"), ("iqm", "IQM", "iqm")):
         row = dados.get_modulo(modulo)
-        serie = _consolidado_mensal((row or {}).get("payload"))
+        serie, fonte = _consolidado_mensal((row or {}).get("payload"))
         visiveis = _ultimos(serie, quantos)
         for d in visiveis:
             # Pela data, não pela posição na lista: um mês fica parcial até 30
@@ -226,6 +241,7 @@ def qualidade(mapa_metas, quantos=MESES_VISIVEIS_PADRAO):
         saida[rotulo] = {
             "serie": serie,
             "visiveis": visiveis,
+            "fonte": fonte,
             "meta": (mapa_metas.get(chave) or {}).get("valor"),
         }
     return saida

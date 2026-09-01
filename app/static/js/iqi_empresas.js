@@ -57,7 +57,12 @@
       : d.tecnicos;
     for (const t of base) {
       const reg = t.m[mesIdx];
-      if (!reg || reg[0] <= d.minOS) continue;
+      // `< minOS`, nao `<= minOS`: o resto da tela usa "ao menos minOS"
+      // (`reg[0] >= MINOS` em iqi.js). Com `<=`, o tecnico de exatamente 10 OSs
+      // entrava no grafico e ficava de fora daqui — duas contas discordando
+      // sobre a mesma pessoa, que e justamente o que o comentario acima promete
+      // que nao acontece.
+      if (!reg || reg[0] < d.minOS) continue;
       const emp = empresaDe(t.nome);
       const cur = acc.get(emp) || { empresa: emp, tecnicos: 0, os: 0, cham: 0 };
       cur.tecnicos += 1;
@@ -91,18 +96,31 @@
     const kpi = (v, r, cor) =>
       `<div class="kpi"><div class="v"${cor ? ` style="color:${cor}"` : ""}>${v}</div><div class="l">${r}</div></div>`;
 
+    // "Soma", e nao "consolidado": este numero e a soma das empresas na tela,
+    // e ele NAO e o indicador do mes. Chamar os dois de consolidado foi o que
+    // deixou tres numeros diferentes para o mesmo mes circulando (Dashboard,
+    // este bloco e o WVSA) sem ninguem saber qual valia.
     const rotulo = selecionadas.size
-      ? `${IND} consolidado — ${selecionadas.size} empresa${selecionadas.size > 1 ? "s" : ""} selecionada${selecionadas.size > 1 ? "s" : ""}`
-      : `${IND} consolidado — todas as empresas`;
+      ? `${IND} — soma de ${selecionadas.size} empresa${selecionadas.size > 1 ? "s" : ""} selecionada${selecionadas.size > 1 ? "s" : ""}`
+      : `${IND} — soma das empresas listadas`;
+
+    // O indicador de verdade, do WVSA. So aparece sem recorte: com chips ou
+    // com supervisor, o numero da operacao inteira nao fala do que esta na tela.
+    const g = (DADOS().geral || [])[mesIdx];
+    const oficial = (g && g[2] !== null && g[2] !== undefined && !selecionadas.size && !alcanceSup)
+      ? kpi(pct(g[2]), `${IND} do mês no WVSA — ${g[1].toLocaleString("pt-BR")} de ${g[0].toLocaleString("pt-BR")} OSs`,
+            g[2] < meta ? "var(--success)" : "var(--danger)")
+      : "";
 
     $("emp-kpis").innerHTML = [
+      oficial,
       kpi(pct(consolidado), rotulo,
           consolidado === null ? null : consolidado < meta ? "var(--success)" : "var(--danger)"),
       kpi(sel.length, "Empresas no recorte"),
       kpi(`${naMeta}/${sel.length}`, `Empresas dentro da meta (< ${meta}%)`),
       kpi(os.toLocaleString("pt-BR"), "OSs somadas"),
       kpi(cham.toLocaleString("pt-BR"), "OSs com chamado"),
-    ].join("");
+    ].filter(Boolean).join("");
   }
 
   function renderGrafico(linhas) {
@@ -149,14 +167,14 @@
       </tr>`).join("") ||
       `<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--muted)">Nenhuma empresa com técnicos elegíveis neste mês.</td></tr>`;
 
-    // Rodapé com o consolidado do recorte — é a "média geral" das empresas
-    // selecionadas, pela mesma fórmula ponderada.
+    // Rodapé com a soma do recorte, pela mesma fórmula ponderada. Não é o
+    // indicador do mês — esse está no KPI do topo, vindo do WVSA.
     const os = sel.reduce((s, l) => s + l.os, 0);
     const cham = sel.reduce((s, l) => s + l.cham, 0);
     const geral = os ? (cham / os) * 100 : null;
     $("tab-empresas").querySelector("tfoot").innerHTML = sel.length
       ? `<tr class="total">
-           <td>${selecionadas.size ? `Consolidado (${sel.length} selecionadas)` : "Consolidado geral"}</td>
+           <td>${selecionadas.size ? `Soma (${sel.length} selecionadas)` : "Soma das empresas"}</td>
            <td class="num">${sel.reduce((s, l) => s + l.tecnicos, 0)}</td>
            <td class="num">${os.toLocaleString("pt-BR")}</td>
            <td class="num">${cham.toLocaleString("pt-BR")}</td>
