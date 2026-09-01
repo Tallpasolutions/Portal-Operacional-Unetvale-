@@ -116,18 +116,27 @@
   // ----------------------------------------------------------- causa raiz
   var cr = D.causa_raiz || {};
   var crInd = "IQI";
-  Dash.preencherSelect($("cr-mes"), cr.visiveis || []);
+  // Abre no ultimo mes COM dado (gerencial.mes_padrao), nao no mais recente:
+  // na virada do mes o mais recente esta vazio e a tela inteira parecia
+  // quebrada horas depois de a coleta ter rodado.
+  Dash.preencherSelect($("cr-mes"), cr.visiveis || [], cr.mes_padrao);
   function causaRaiz() {
     Array.prototype.forEach.call($("cr-ind").children, function (b) {
       b.classList.toggle("active", b.dataset.ind === crInd);
     });
-    var d = ((cr[crInd] || {})[$("cr-mes").value]) || {};
+    var mes = $("cr-mes").value;
+    var d = ((cr[crInd] || {})[mes]) || {};
     $("cr-total").textContent = Dash.num(d.total || 0);
-    Dash.rank($("cr-cat4"), d.cat4 || {}, { limite: 10 });
-    Dash.rank($("cr-cat5"), d.cat5 || {}, { limite: 12 });
-    Dash.rank($("cr-cat1"), d.cat1 || {}, { limite: 8, destacarTopo: false });
-    Dash.rank($("cr-cat2"), d.cat2 || {}, { limite: 8, destacarTopo: false });
-    Dash.rank($("cr-cidades"), d.cidade || {}, { limite: 10, destacarTopo: false });
+    // Mes sem registro nao e falha de coleta, e o texto nao pode dizer que e:
+    // "a proxima coleta preenchera" mandava conferir o coletor por um mes que
+    // ainda nao aconteceu.
+    var nada = "Nenhuma reincidência de " + crInd + " registrada em " +
+      Dash.rotuloMes(mes) + " até agora.";
+    Dash.rank($("cr-cat4"), d.cat4 || {}, { limite: 10, vazio: nada });
+    Dash.rank($("cr-cat5"), d.cat5 || {}, { limite: 12, vazio: nada });
+    Dash.rank($("cr-cat1"), d.cat1 || {}, { limite: 8, destacarTopo: false, vazio: nada });
+    Dash.rank($("cr-cat2"), d.cat2 || {}, { limite: 8, destacarTopo: false, vazio: nada });
+    Dash.rank($("cr-cidades"), d.cidade || {}, { limite: 10, destacarTopo: false, vazio: nada });
   }
   $("cr-ind").addEventListener("click", function (e) {
     var b = e.target.closest("button[data-ind]");
@@ -142,7 +151,8 @@
     { base: function (d) { return Dash.num(d.tecnico) + " de " + Dash.num(d.total) + " cancelamentos"; },
       vazio: "Sem dados de cancelamento ainda." });
 
-  Dash.preencherSelect($("ca-mes"), (c.visiveis || []).map(function (d) { return d.mes; }));
+  Dash.preencherSelect($("ca-mes"), (c.visiveis || []).map(function (d) { return d.mes; }),
+    c.mes_padrao);
   function cancelamentos() {
     var mes = $("ca-mes").value;
     var d = (c.visiveis || []).filter(function (x) { return x.mes === mes; })[0];
@@ -154,11 +164,13 @@
     $("ca-tec").textContent = Dash.num(d.tecnico) + " (" + Dash.pct(d.pct) + ")";
     $("ca-valor").textContent = Dash.moeda(d.valor);
     $("ca-quando").textContent = Dash.rotuloMes(d.mes);
-    Dash.rank($("cmt-motivos"), d.motivos_tecnicos, { limite: 6, vazio: "Sem motivos técnicos no mês." });
-    Dash.rank($("ca-grupos"), d.grupos, { limite: 10 });
-    Dash.rank($("ca-cidades"), d.cidades, { limite: 10, destacarTopo: false });
-    Dash.rank($("ca-casa"), d.tempo_casa, { limite: 10, destacarTopo: false });
-    Dash.rank($("ca-ticket"), d.faixa_ticket, { limite: 10, destacarTopo: false });
+    var nada = "Nenhum cancelamento registrado em " + Dash.rotuloMes(d.mes) + " até agora.";
+    Dash.rank($("cmt-motivos"), d.motivos_tecnicos,
+      { limite: 6, vazio: d.total ? "Sem motivos técnicos no mês." : nada });
+    Dash.rank($("ca-grupos"), d.grupos, { limite: 10, vazio: nada });
+    Dash.rank($("ca-cidades"), d.cidades, { limite: 10, destacarTopo: false, vazio: nada });
+    Dash.rank($("ca-casa"), d.tempo_casa, { limite: 10, destacarTopo: false, vazio: nada });
+    Dash.rank($("ca-ticket"), d.faixa_ticket, { limite: 10, destacarTopo: false, vazio: nada });
   }
   $("ca-mes").addEventListener("change", cancelamentos);
   cancelamentos();
@@ -220,7 +232,11 @@
     }
     $("idf-kpis").innerHTML = CANAIS.map(function (p) {
       var d = atual[p[0]] || {};
-      return kpi(p[1] + " · " + Dash.num(d.n) + " avaliações", Dash.nota(d.nota));
+      // Zero avaliacao nao e nota zero. No dia 1 do mes o canal sem feedback
+      // aparecia como "0,00", que se le como pessimo atendimento em vez de
+      // "ninguem avaliou ainda".
+      return kpi(p[1] + " · " + Dash.num(d.n) + " avaliações",
+                 d.n ? Dash.nota(d.nota) : "—");
     }).join("");
     $("idf-mes").textContent = Dash.rotuloMes(atual.mes);
     $("idf-reguas").innerHTML = CANAIS.map(function (p) {
