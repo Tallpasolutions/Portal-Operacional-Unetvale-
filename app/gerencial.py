@@ -247,6 +247,29 @@ def qualidade(mapa_metas, quantos=MESES_VISIVEIS_PADRAO):
     return saida
 
 
+def mes_padrao(meses, tem_dado):
+    """O último mês COM dado, e não o mais recente da lista.
+
+    Existe por causa da virada do mês. Em 01/09/2026, com a coleta recém
+    rodada e agosto inteiro gravado, o Dashboard abria assim: causa raiz e
+    cancelamentos apontando para setembro — que tinha 9 horas de vida e zero
+    registro — e nove blocos dizendo "Sem dados ainda. A próxima coleta
+    preencherá este bloco". A coleta já tinha rodado. A tela culpava o
+    coletor por um mês que simplesmente ainda não aconteceu.
+
+    O mesmo critério que o `/iqi` usa desde sempre para escolher o mês do
+    seletor ("padrão = último homologado"): quem abre a tela quer o último
+    mês sobre o qual há o que ler.
+
+    Sem nenhum mês com dado, devolve o mais recente — a tela então diz que
+    aquele mês está vazio, que é a verdade, em vez de não escolher nada.
+    """
+    for m in reversed(meses or []):
+        if tem_dado(m):
+            return m
+    return (meses or [None])[-1]
+
+
 def _ultimos(serie, quantos):
     """Os N últimos itens, como cópias (a tela anota `parcial` e `vs_meta`)."""
     return [dict(d) for d in (serie or [])[-max(1, quantos):]]
@@ -342,7 +365,7 @@ def cancelamentos(payload, mapa_metas, quantos=MESES_VISIVEIS_PADRAO):
     blocos = (payload or {}).get("meses_dados") or {}
     meses = sorted(blocos)
     if not meses:
-        return {"meses": [], "visiveis": [], "serie": []}
+        return {"meses": [], "mes_padrao": None, "visiveis": [], "serie": []}
 
     def resumo(mes, parcial):
         d = blocos[mes]
@@ -370,6 +393,7 @@ def cancelamentos(payload, mapa_metas, quantos=MESES_VISIVEIS_PADRAO):
     escolhidos = meses[-max(1, quantos):]
     return {
         "meses": meses,
+        "mes_padrao": mes_padrao(escolhidos, lambda m: (blocos[m].get("total") or 0)),
         "visiveis": [resumo(m, _mes_em_curso(m)) for m in escolhidos],
         "serie": [{"mes": m, "total": blocos[m].get("total") or 0,
                    "tecnico": blocos[m].get("tecnico") or 0,
@@ -421,6 +445,9 @@ def pacote():
     meses_cat = cat.get("meses") or []
     visiveis_cat = meses_cat[-max(1, quantos):]
 
+    cr_iqi = {m: agregar_categorias(cat, "IQI", [m]) for m in visiveis_cat}
+    cr_iqm = {m: agregar_categorias(cat, "IQM", [m]) for m in visiveis_cat}
+
     idf_blocos = idf.get("meses_dados") or {}
     idf_meses = sorted(idf_blocos)
     idf_visiveis = idf_meses[-max(1, quantos):]
@@ -435,8 +462,14 @@ def pacote():
             # sem filtro por equipe. Quem precisa cruzar com empresa e
             # supervisor usa a visualização "Causa raiz" do /iqi, que recebe
             # os registros e filtra no cliente.
-            "IQI": {m: agregar_categorias(cat, "IQI", [m]) for m in visiveis_cat},
-            "IQM": {m: agregar_categorias(cat, "IQM", [m]) for m in visiveis_cat},
+            "IQI": cr_iqi,
+            "IQM": cr_iqm,
+            # Qual mês a tela abre. Ver `mes_padrao`: na virada do mês o mais
+            # recente está vazio, e abrir nele fazia o Dashboard inteiro
+            # parecer quebrado.
+            "mes_padrao": mes_padrao(
+                visiveis_cat,
+                lambda m: (cr_iqi.get(m) or {}).get("total") or (cr_iqm.get(m) or {}).get("total")),
         },
         "cancelamentos": cancelamentos(payload("ger_cancelamentos"), mapa, quantos),
         "esteira": {

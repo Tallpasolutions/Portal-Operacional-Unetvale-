@@ -673,6 +673,37 @@ coletar e o Monitoramento não avisou: o histórico mostrava as linhas antigas c
 `ok`, e não havia card de frescor. Nenhum histórico substitui um selo de idade —
 ninguém confere data de linha de tabela.
 
+**A virada do mês esvaziava o Dashboard inteiro.** Causa raiz e cancelamentos
+abriam no mês MAIS RECENTE da lista. No dia 1º isso é o mês que começou
+ontem à meia-noite: em 01/09/2026, com a coleta recém rodada e agosto inteiro
+gravado, nove blocos diziam **"Sem dados ainda. A próxima coleta preencherá
+este bloco"** — a coleta já tinha rodado, e a tela mandava conferir o coletor
+por um mês que ainda não aconteceu. Agora o servidor escolhe em
+`gerencial.mes_padrao` (último mês COM dado), que é o mesmo critério que o
+`/iqi` usa desde sempre ("padrão = último homologado"), e o texto de bloco
+vazio diz o que é: "Nenhuma reincidência de IQI registrada em setembro/26 até
+agora". ⚠️ Mês sem registro **não** é falha de coleta — nenhum texto da tela
+pode sugerir que é. Na mesma virada, o IDF mostrava **"0,00"** num canal com
+zero avaliações: zero avaliação não é nota zero, e agora sai "—".
+
+**Etapa travada não atrasa a rodada seguinte: ela CANCELA todas.** O launchd
+não começa uma segunda cópia de um job que ainda está rodando, e não avisa. Em
+31/08/2026 o `tp:coletar` das 13h terminou o trabalho às 13:03 e o processo
+node ficou vivo **mais de 20 horas** sem fazer nada; com ele de pé, a coleta
+das 07h do dia 01/09 simplesmente não rodou, e o `/monitoramento` seguiu verde
+porque o limiar da Celesc é 26 h. Hoje `coletar_celesc.sh` tem prazo por etapa
+(`LIMITE_ETAPA`, 20 min) com um cão de guarda que mata o **grupo de processo**
+— matar só o `pnpm` deixaria o `tsx`/`node` filho, que é justamente quem
+trava, segurando o job do mesmo jeito. Isso exige `set -m`.
+
+**`tp:coletar` sai com código 0 mesmo com TODAS as cidades falhando.** Ele
+trata a falha por cidade e segue. Medido em 01/09/2026 12:32 UTC: as 11
+cidades deram `fetch failed` (queda passageira — dois minutos depois o mesmo
+endereço respondia 200) e a rodada registrou "coleta da Celesc concluída" com
+`total: 0`. Sucesso na cara de quem lesse o log. `coletar_celesc.sh` agora lê
+o `total` do `coleta_concluida` que o próprio job gravou e recusa a rodada
+vazia, em vez de seguir para o geocodificar e o match sem nada nas mãos.
+
 **Pooler do Supabase: `aws-1-us-west-2`.** A região está no hostname; a errada
 dá "tenant not found".
 
@@ -814,9 +845,14 @@ a.run(port=5001, use_reloader=False)"
   `launchctl kickstart`, trouxe **70 desligamentos novos**, 226 confirmados e 5
   desaparecidos, e passou por `tp:geocodificar` e `tp:match` (426 analisados).
 
-  **Ainda não exercitado:** o agendamento disparando sozinho no horário — até
-  agora só rodou por `kickstart`. Conferir o `celesc.log` depois das 07h e das
-  13h. E `sync-rede` segue manual.
+  **O agendamento sozinho falhou na primeira tentativa**, em 01/09/2026: às 07h
+  nada rodou, porque a rodada das 13h do dia anterior nunca terminou (§6). O
+  processo pendurado foi derrubado à mão, `coletar_celesc.sh` ganhou prazo por
+  etapa e recusa de rodada vazia, e três rodadas seguidas passaram inteiras
+  pelas três etapas e **encerraram o processo** (`state = not running`), a
+  última trazendo 42 desligamentos novos, 257 confirmados e 8 desaparecidos.
+  Falta ver o horário disparar sozinho — as três foram por `kickstart`.
+  `sync-rede` segue manual.
 
 - **IQI/IQM consolidado do WVSA** entrou em 01/09/2026, sem migration — o
   campo `geral` viaja dentro do payload de `dados_modulo`. Antes disso as duas
