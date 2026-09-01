@@ -103,6 +103,26 @@
       : `${IND} = OSs com atendimento/reincidência em até ${DATA.dias} dias após a ${DATA.evento} ÷ total de OSs. ` +
         `Considera apenas técnicos com ao menos ${MINOS} OSs de ${DATA.evento} no mês.`;
 
+    // O indicador do mes como o WVSA publica. Fica ao lado dos contadores do
+    // ranking porque e o numero que o gestor confere contra o relatorio — e
+    // porque somar as barras abaixo NAO chega nele: aqui infra esta fora, quem
+    // saiu da equipe nao aparece mais e OS de dois tecnicos conta duas vezes.
+    const kg = document.getElementById("kpi-geral");
+    if (kg) {
+      const g = (DATA.geral || [])[mesIdx];
+      // Com supervisor filtrado o numero da empresa inteira nao diz respeito
+      // ao que esta na tela; some, em vez de convidar a comparacao errada.
+      // style.display, e nao o atributo hidden: .kpi tem display proprio.
+      if (g && g[2] !== null && g[2] !== undefined && !alcanceSup) {
+        kg.style.display = "";
+        document.getElementById("geral-pct").textContent = fmt(g[2]);
+        kg.title = `${IND} de ${DATA.meses[mesIdx]} no relatório indicadores4 do WVSA: ` +
+          `${g[1]} de ${g[0]} OSs. Mês inteiro, com infraestrutura e com quem já saiu da equipe.`;
+      } else {
+        kg.style.display = "none";
+      }
+    }
+
     renderChips();
     const dadosTabela = selecionado ? base.filter((d) => d.nome === selecionado) : base;
     const chartData = [...base].sort((a, b) =>
