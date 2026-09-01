@@ -90,10 +90,16 @@
 </div>
 {% endif %}
 
+{# A caixa abre por clique. Aberta por padrão, ela ficava entre a ficha e a
+   linha do tempo disputando a atenção com as duas: quem abre a ação vem ler o
+   que ela é e o que foi feito, e quem vem comentar já sabe que veio comentar. #}
 {% if pode_gerir %}
-<div class="card" style="margin-top:16px;">
-  <div class="card-h">Comentário do gestor</div>
-  <div class="card-b">
+<div class="card recolhido" style="margin-top:16px;">
+  <div class="card-h">
+    <span>Comentário do gestor</span>
+    <button class="btn-ghost" type="button" data-abrir="bloco-comentar">Comentar</button>
+  </div>
+  <div class="card-b" id="bloco-comentar" hidden>
     <form method="post" action="{{ url_for('dash.acao_comentar', acao_id=acao.id) }}">
       <div class="field">
         <textarea name="texto" rows="2" required style="width:100%;"
@@ -131,9 +137,14 @@
 </div>
 
 {% if pode_gerir %}
-<div class="card" style="margin-top:16px;">
-  <div class="card-h">Editar definição <span class="subnote">dono, prazo, prioridade e área</span></div>
-  <div class="card-b">
+<div class="card recolhido" style="margin-top:16px;">
+  <div class="card-h">
+    {# "Editar definição" com um botão "Editar" ao lado seria a mesma palavra
+       duas vezes: o cabeçalho diz o que é, o botão diz o que fazer com isso. #}
+    <span>Definição <span class="subnote" style="margin:0;">dono, prazo, prioridade e área</span></span>
+    <button class="btn-ghost" type="button" data-abrir="bloco-definicao">Editar</button>
+  </div>
+  <div class="card-b" id="bloco-definicao" hidden>
     <form method="post" action="{{ url_for('dash.acao_editar', acao_id=acao.id) }}">
       <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));">
         <div class="field" style="grid-column:1/-1;"><label>Ação</label>
@@ -173,10 +184,20 @@
       criada por engano. Depois do primeiro registro só cabe mudar o status para <b>Cancelada</b>:
       o histórico não se reescreve.
     </p>
-    <form method="post" action="{{ url_for('dash.acao_excluir', acao_id=acao.id) }}"
-          onsubmit="return confirm('Apagar {{ acao.codigo }}? Isso não pode ser desfeito.');">
-      <button class="btn-ghost" type="submit" style="color:var(--danger);">Apagar ação</button>
+    <form method="post" id="form-excluir"
+          action="{{ url_for('dash.acao_excluir', acao_id=acao.id) }}">
+      <button class="btn-ghost" type="button" id="abrir-excluir" style="color:var(--danger);">Apagar ação</button>
     </form>
+    {# `confirm()` abre a caixa do sistema, com o domínio no topo, que não
+       pertence à tela — CLAUDE.md §5. #}
+    <dialog id="dlg-excluir" class="modal">
+      <h3>Apagar {{ acao.codigo }}?</h3>
+      <p>Isso não pode ser desfeito.</p>
+      <div class="modal-acoes">
+        <button class="btn sec" type="button" data-fechar>Cancelar</button>
+        <button class="btn" type="button" id="confirmar-excluir" style="background:var(--danger);">Apagar</button>
+      </div>
+    </dialog>
     {% endif %}
   </div>
 </div>

@@ -87,6 +87,10 @@ body.collapsed .brand-text, body.collapsed .menu a span:not(.ic){ display:none; 
 .card-h{ padding:14px 18px; border-bottom:1px solid var(--borda); font-weight:700; font-size:14px; color:var(--ink-d);
   display:flex; align-items:center; justify-content:space-between; }
 .card-b{ padding:16px 18px; }
+/* Cartão recolhido (o corpo escondido atrás de um botão no cabeçalho, como
+   em acao_detalhe.html): sem isto a borda de baixo do cabeçalho fica lá,
+   riscando a tela para separar de nada. */
+.card.recolhido > .card-h{ border-bottom:none; }
 .grid{ display:grid; gap:16px; }
 .kpis{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px; margin-bottom:18px; }
 .kpi{ background:var(--branco); border:1px solid var(--borda-2); border-radius:10px; padding:16px; box-shadow:var(--sombra); }

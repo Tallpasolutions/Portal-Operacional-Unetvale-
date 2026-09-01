@@ -29,4 +29,44 @@
     sel.addEventListener("change", sincronizar);
     sincronizar();
   }
+
+  // Blocos do gestor recolhidos: o botão do cabeçalho abre o formulário.
+  // O motivo está no template — a tela é para LER a ação, e dois formulários
+  // abertos por padrão empurravam a linha do tempo para fora da primeira
+  // dobra. O estado NÃO é persistido de propósito: depois de comentar a
+  // página recarrega e a caixa volta a fechar, que é o estado de leitura.
+  document.querySelectorAll("[data-abrir]").forEach(function (btn) {
+    var alvo = document.getElementById(btn.dataset.abrir);
+    if (!alvo) return;
+    var rotulo = btn.textContent;
+    btn.addEventListener("click", function () {
+      var abrindo = alvo.hidden;
+      alvo.hidden = !abrindo;
+      // Sem isso sobra a borda de baixo do cabeçalho separando o nada.
+      btn.closest(".card").classList.toggle("recolhido", !abrindo);
+      btn.textContent = abrindo ? "Fechar" : rotulo;
+      // Abrir e ainda ter de procurar onde escrever é um passo a mais; e o
+      // foco leva o bloco para a tela, que no caso da Definição fica no pé
+      // da página.
+      if (abrindo) {
+        var campo = alvo.querySelector("textarea, input:not([type=hidden]), select");
+        if (campo) campo.focus();
+      }
+    });
+  });
+
+  // `confirm()` abre a caixa do sistema, com o domínio no topo — CLAUDE.md §5.
+  var dlg = document.getElementById("dlg-excluir");
+  var abrirEx = document.getElementById("abrir-excluir");
+  if (dlg && abrirEx) {
+    abrirEx.addEventListener("click", function () { dlg.showModal(); });
+    dlg.addEventListener("click", function (e) {
+      // Clique fora do conteúdo (na área escurecida) fecha.
+      if (e.target === dlg || (e.target.dataset && e.target.dataset.fechar !== undefined)) dlg.close();
+    });
+    document.getElementById("confirmar-excluir").addEventListener("click", function () {
+      dlg.close();
+      document.getElementById("form-excluir").submit();
+    });
+  }
 })();
