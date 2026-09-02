@@ -21,6 +21,26 @@
 # =====================================================================
 set -uo pipefail
 
+# O launchd dispara o job num DARK WAKE e a maquina volta a dormir logo depois.
+# Sem segurar uma assercao de energia, a rodada anda so nas frestas de 2-6 s de
+# dark wake: em 02/09/2026 o job das 07h comecou as 07:06:57, o Mac voltou a
+# dormir as 07:06:59, e 58 min de relogio produziram QUATRO linhas de log antes
+# de morrer com `read EADDRNOTAVAIL` — a interface de rede some no sleep e o
+# socket nao consegue nem fazer bind ao acordar.
+#
+# `caffeinate` envolve o script INTEIRO (por isso o re-exec, e nao um caffeinate
+# por etapa): o cao de guarda tambem precisa de tempo correndo. `-i` impede o
+# idle sleep na bateria, `-s` o system sleep na tomada, `-m` o disk sleep.
+# A guarda evita recursao infinita se o exec falhar.
+if [ -z "${CELESC_ACORDADO:-}" ]; then
+  export CELESC_ACORDADO=1
+  # `/bin/bash "$0"` explicito, e nao `"$0"` sozinho: o caffeinate faz execvp e
+  # dependeria do bit de execucao do arquivo. O plist tambem chama
+  # `/bin/bash <script>` — uma copia sem o bit falharia com "No such file or
+  # directory", que e a mensagem menos util possivel para o que de fato houve.
+  exec /usr/bin/caffeinate -ims /bin/bash "$0" "$@"
+fi
+
 # Limite por etapa, em segundos. NAO e paranoia: o launchd nao comeca uma
 # segunda copia de um job que ainda esta rodando, entao uma etapa travada nao
 # atrasa a rodada — ela CANCELA todas as seguintes, e sem erro em lugar nenhum.
@@ -72,7 +92,13 @@ falhas=0
 executar_com_limite() {
   pnpm --filter @portal/api "$1" >> "$LOG" 2>&1 &
   local pid=$!
-  ( sleep "$LIMITE_ETAPA"
+  # O prazo e por RELOGIO DE PAREDE, nao por `sleep "$LIMITE_ETAPA"`: `sleep`
+  # nao anda enquanto a maquina dorme. Em 02/09/2026 a etapa arrastou 58 min e
+  # o cao, que dormia junto, nunca latiu — o log saiu "FALHOU (codigo 1)", nunca
+  # "DERRUBADO". Cochilos de 30 s deixam o cao no maximo 30 s atrasado ao
+  # acordar, e ai a rodada morre com diagnostico em vez de arrastar por horas.
+  local prazo=$(( $(date +%s) + LIMITE_ETAPA ))
+  ( while [ "$(date +%s)" -lt "$prazo" ]; do sleep 30; done
     kill -TERM -"$pid" 2>/dev/null
     sleep 10
     kill -KILL -"$pid" 2>/dev/null ) &
