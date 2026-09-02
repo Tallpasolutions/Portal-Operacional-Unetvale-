@@ -99,9 +99,14 @@
           <td style="white-space:nowrap;">{{ c.inicio_br }}</td>
           <td style="white-space:nowrap;">{{ c.fim_br }}</td>
           <td>
-            {% if c.status == 'ok' %}<span class="badge badge-verde">ok</span>
-            {% elif c.status == 'parcial' %}<span class="badge badge-ambar">parcial</span>
-            {% else %}<span class="badge badge-vermelho">{{ c.status }}</span>{% endif %}
+            {% if c.status_exibicao == 'ok' %}<span class="badge badge-verde">ok</span>
+            {% elif c.status_exibicao == 'parcial' %}<span class="badge badge-ambar">parcial</span>
+            {% elif c.status_exibicao == 'executando' %}<span class="badge badge-ambar">executando</span>
+            {% else %}<span class="badge badge-vermelho">{{ c.status_exibicao }}</span>{% endif %}
+            {# `interrompida` não existe no banco: é `executando` que passou do prazo — o
+               processo morreu sem conseguir fechar a linha. Dizer por quê aqui evita que
+               alguém vá procurar um coletor que não está rodando. #}
+            {% if c.status_exibicao == 'interrompida' %}<div class="subnote">o processo morreu antes de fechar a coleta</div>{% endif %}
             {% if c.erro %}<div style="font-size:12px;color:var(--danger);">{{ c.erro }}</div>{% endif %}
           </td>
           <td class="num">{{ c.cidades_ok }}/{{ c.cidades_alvo }}</td>

@@ -714,6 +714,52 @@ endereço respondia 200) e a rodada registrou "coleta da Celesc concluída" com
 o `total` do `coleta_concluida` que o próprio job gravou e recusa a rodada
 vazia, em vez de seguir para o geocodificar e o match sem nada nas mãos.
 
+**O launchd dispara o job num DARK WAKE, e a máquina volta a dormir 2 s
+depois.** Este é o modo de falha mais caro da Celesc, porque não se parece com
+nada: em 02/09/2026 o job das 07h começou às **07:06:57** — exatamente o
+`DarkWake` que o `dasd` tinha agendado — e o `pmset -g log` mostra
+`Entering Sleep state` às **07:06:59**. Dali em diante a rodada andou só nas
+frestas de 2–6 s de dark wake: **58 minutos de relógio para produzir quatro
+linhas de log**, numa rodada que leva 2 min, até morrer com
+`read EADDRNOTAVAIL` — a interface de rede some no sleep e o socket não
+consegue nem fazer `bind` ao acordar. O `/monitoramento` ficou anunciando uma
+coleta "executando" que não tinha processo nenhum atrás.
+
+`coletar_celesc.sh` agora se re-executa sob `caffeinate -ims` (`-i` segura o
+idle sleep na bateria, `-s` o system sleep na tomada, `-m` o disk sleep). O
+re-exec é `exec caffeinate … /bin/bash "$0"`, com `/bin/bash` **explícito**: o
+`caffeinate` faz `execvp` e dependeria do bit de execução do arquivo. O
+`caffeinate` guarda um filho segurando a asserção e executa o utilitário no pid
+original — `ps` mostra `bash` como pai e `caffeinate` como filho, e isso é
+`exec` bem-sucedido, não o contrário. ⚠️ Nada disso vence **lid fechado na
+bateria**: aí o macOS dorme de qualquer jeito.
+
+**O cão de guarda por `sleep` não anda enquanto a máquina dorme.** Corolário do
+anterior, e a razão de ele não ter latido: o prazo de 20 min existia desde
+31/08/2026, a etapa arrastou 58 min, e o log saiu `FALHOU (código 1)` — nunca
+`DERRUBADO`. O `sleep 1200` dormia junto com o Mac. Hoje o prazo é por
+**relógio de parede** (`date +%s` num laço que cochila 30 s por vez), então
+tempo dormido conta e a rodada morre com diagnóstico em vez de arrastar por
+horas.
+
+**Coleta que morre no meio fica `executando` PARA SEMPRE.** `abrirColeta`
+insere a linha com `status='executando'` e quem a fecha é o `gravarColeta`, no
+fim — uma exceção no laço das cidades nunca chega lá. São **duas** defesas, e
+elas não são redundantes:
+
+* `cli.ts` (monorepo) marca a coleta como `erro` no `catch` do `main()`;
+* `troca_poste._status_exibicao` (portal) mostra `executando` com mais de
+  `COLETA_EXECUTANDO_MAX_MIN` (30 min) como **interrompida**.
+
+A segunda existe porque a primeira não cobre o caso que gerou o problema:
+quando **a rede é o que falhou**, o UPDATE de socorro falha junto. O status cru
+do banco não é reescrito pelo portal — `status` segue o que está lá e a tela lê
+`status_exibicao`.
+
+⚠️ O card de frescor **nunca** foi enganado por isso: `resumo_coleta` e
+`ultima_coleta` filtram `status in.(ok,parcial)`. Quem mentia era só o
+histórico.
+
 **Pooler do Supabase: `aws-1-us-west-2`.** A região está no hostname; a errada
 dá "tenant not found".
 
@@ -861,8 +907,33 @@ a.run(port=5001, use_reloader=False)"
   etapa e recusa de rodada vazia, e três rodadas seguidas passaram inteiras
   pelas três etapas e **encerraram o processo** (`state = not running`), a
   última trazendo 42 desligamentos novos, 257 confirmados e 8 desaparecidos.
-  Falta ver o horário disparar sozinho — as três foram por `kickstart`.
   `sync-rede` segue manual.
+
+  **O horário disparou sozinho pela primeira vez em 02/09/2026, às 07:06:57 —
+  e a rodada morreu mesmo assim.** O agendamento estava certo; a máquina é que
+  dormiu 2 s depois do dark wake que o disparou (§6). A rodada arrastou 58 min,
+  morreu com `read EADDRNOTAVAIL` e deixou a linha `executando` órfã.
+
+  Corrigido no mesmo dia, em três lugares: `coletar_celesc.sh` se re-executa
+  sob `caffeinate -ims` e passou a medir o prazo por relógio de parede; o
+  `cli.ts` do monorepo marca a coleta como `erro` ao morrer; e o portal mostra
+  `executando` velho como **interrompida**.
+
+  Exercitado de verdade, pelo caminho do launchd (`launchctl kickstart`), às
+  09:11 de 02/09/2026: rodada inteira em **2 min 45 s** (`tp:coletar` →
+  `geocodificar` → `match`), **306 desligamentos, 23 novos**, 283 confirmados,
+  2 desaparecidos, 491 analisados no match; `last exit code = 0`,
+  `state = not running`, as três asserções de energia de pé durante a rodada
+  (`pmset -g assertions`) e **nenhum `caffeinate` vivo depois** — assertion
+  vazada seria pior que o problema original, porque impediria o Mac de dormir
+  para sempre.
+
+  **Ainda não exercitado:** o `marcarColetaErro` de verdade (o SQL foi provado
+  contra a linha órfã numa transação com `rollback` — marca `erro`, é
+  idempotente pela guarda `status='executando'` e não toca em coleta `ok` —
+  mas nenhuma rodada morreu desde que ele existe); e o `caffeinate` segurando
+  a máquina num horário em que ela de fato tentaria dormir, que é o teste que
+  só o relógio dá.
 
 - **IQI/IQM consolidado do WVSA** entrou em 01/09/2026, sem migration — o
   campo `geral` viaja dentro do payload de `dados_modulo`. Antes disso as duas

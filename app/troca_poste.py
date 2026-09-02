@@ -510,6 +510,41 @@ def ordem(ordem_id):
     }, schema=SCHEMA)
 
 
+# Por quanto tempo uma linha `executando` ainda é plausível, em minutos.
+#
+# A linha em `troca_poste.coletas` cobre só a PRIMEIRA etapa (`tp:coletar`);
+# quem a fecha é o `gravarColeta`, no fim dela. O cão de guarda do
+# `coletor/coletar_celesc.sh` derruba a etapa em `LIMITE_ETAPA` (20 min), então
+# 30 min é o teto com folga — passou disso, o processo morreu sem conseguir
+# fechar a linha.
+COLETA_EXECUTANDO_MAX_MIN = 30
+
+
+def _status_exibicao(status, iniciado_em):
+    """Traduz o status cru da coleta para o que a tela deve dizer.
+
+    Existe por causa de 02/09/2026: o Mac dormiu logo depois do dark wake que
+    disparou o job das 07h, a rodada morreu com `read EADDRNOTAVAIL` e a linha
+    ficou **`executando` para sempre** — a tela anunciava uma coleta em curso
+    que não tinha processo nenhum atrás. `abrirColeta` insere `executando` e só
+    `gravarColeta` troca para `ok`/`parcial`/`erro`; morrendo no meio, ninguém
+    toca na linha.
+
+    O coletor agora marca `erro` ao morrer (ver `cli.ts` no monorepo), mas isso
+    **não** cobre o caso que gerou o problema: quando a rede é justamente o que
+    falhou, o UPDATE de socorro falha junto. Só o leitor pode desconfiar de uma
+    coleta que começou há horas e nunca terminou — e é o leitor que está aqui.
+    """
+    if status != "executando" or not iniciado_em:
+        return status
+    try:
+        dt = datetime.fromisoformat(iniciado_em.replace("Z", "+00:00"))
+    except Exception:
+        return status
+    minutos = (datetime.now(timezone.utc) - dt).total_seconds() / 60
+    return "interrompida" if minutos > COLETA_EXECUTANDO_MAX_MIN else status
+
+
 def coletas(limite=30):
     """Histórico das coletas na Celesc."""
     try:
@@ -534,6 +569,8 @@ def coletas(limite=30):
                     r[destino] = "—"
             else:
                 r[destino] = "—"
+        # `status` segue cru (é o que está no banco); a tela lê `status_exibicao`.
+        r["status_exibicao"] = _status_exibicao(r.get("status"), r.get("iniciado_em"))
     return rows
 
 
