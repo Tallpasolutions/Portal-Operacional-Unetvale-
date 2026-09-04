@@ -200,6 +200,57 @@
     {% endif %}
   </div>
 </div>
+<h3 class="secao" id="modulos-por-usuario-secao">Acesso aos módulos</h3>
+{# ===================== Módulos por usuário ===================== #}
+<div class="card" id="modulos-por-usuario" style="margin-bottom:16px;">
+  <div class="card-h">Acesso aos módulos ({{ usuarios|length }} usuários)</div>
+  <div class="card-b">
+    <p class="subnote" style="margin-top:0;">
+      O que cada pessoa enxerga na barra lateral. <b>Desmarcar esconde o módulo e também
+      fecha a URL</b> — a rota devolve 404, não basta sumir do menu. Quem nunca foi
+      configurado vê tudo, que é como o portal sempre funcionou.
+      <br>
+      O <b>admin nunca perde módulo</b>: é ele quem edita esta lista, e trancá-lo aqui
+      exigiria mexer no banco para destravar. Configurações também não entra na lista —
+      é onde cada um troca a própria senha.
+    </p>
+
+    <div class="tabela-wrap">
+      <table class="tbl">
+        <thead><tr>
+          <th>Usuário</th>
+          {% for m in modulos %}<th style="text-align:center">{{ m.rotulo }}</th>{% endfor %}
+          <th></th>
+        </tr></thead>
+        <tbody>
+          {% for pessoa in usuarios %}
+          {% set ocultos = modulos_bloqueados.get(pessoa.id, []) %}
+          <tr>
+            <td>
+              <form method="post" action="{{ url_for('dash.configuracoes_modulos') }}"
+                    id="mod-{{ pessoa.id }}"></form>
+              <b>{{ pessoa.nome or '—' }}</b>
+              <div style="font-size:12px;color:var(--muted)">{{ pessoa.email }}</div>
+              <input type="hidden" name="usuario_id" value="{{ pessoa.id }}" form="mod-{{ pessoa.id }}">
+            </td>
+            {% for m in modulos %}
+            <td style="text-align:center">
+              <input type="checkbox" name="modulo" value="{{ m.chave }}"
+                     form="mod-{{ pessoa.id }}" style="width:auto;accent-color:var(--brand);"
+                     {% if m.chave not in ocultos %}checked{% endif %}>
+            </td>
+            {% endfor %}
+            <td>
+              <button class="btn-ghost" type="submit" form="mod-{{ pessoa.id }}">Salvar</button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <h3 class="secao" id="metas-dashboard">Metas do Dashboard</h3>
 <p class="subnote">
   Campo em branco significa <b>meta não definida</b>: o card mostra o número e omite a
