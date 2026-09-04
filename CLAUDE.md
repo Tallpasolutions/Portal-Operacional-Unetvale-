@@ -82,10 +82,12 @@ servidor, e cuidado redobrado com migration destrutiva.
 - **Flask 3.0.3** + Jinja2 + `requests` + `python-dotenv`. Sem ORM.
 - **Supabase via PostgREST**, encapsulado em `app/supa.py`. Usa a chave
   `service_role`, que **ignora RLS** — a autorização é toda do Flask.
-  Atenção: `select`, `select_one`, `insert` e `update` aceitam `schema=`;
-  **`delete` e `upsert` não** — só funcionam no `public`. Precisa apagar em
+  Atenção: `select`, `select_one`, `insert`, `update`, `upsert` e `rpc` aceitam
+  `schema=`; **`delete` não** — só funciona no `public`. Precisa apagar em
   `troca_poste`? Acrescente o parâmetro lá (o PostgREST endereça schema pelos
   cabeçalhos `Accept-Profile`/`Content-Profile`, já tratados em `_headers`).
+  `supa.rpc()` chama função no Postgres: é como se faz o que precisa ser
+  **atômico**, já que não há transação entre requisições do PostgREST.
 - **Chart.js 4** vendorizado (`app/static/vendor/`), configurado em
   `app/static/js/chart-setup.js`. **Não** troque por outra biblioteca.
 - **Leaflet 1.9.4** vendorizado, só no mapa da Troca de Poste.
@@ -294,6 +296,39 @@ operação inteira não fala do que está na tela. Tudo mais naqueles blocos é 
 soma dos técnicos, rotulada como **soma**, e ela não fecha com o KPI de
 propósito (§6).
 
+### Troca de Poste: quatro abas, e a revisão é a que alimenta o resto
+
+`/troca-poste` é leitura do schema `troca_poste` (§2) com **duas** escritas
+próprias, ambas por clique humano: a revisão de endereço e a abertura de OS.
+
+| Aba (`?aba=`) | O que é |
+|---|---|
+| `desligamentos` | inventário: filtros, KPIs, dois gráficos, tabela linha a linha |
+| `revisao` | fila + mapa com pino arrastável — confirmar, corrigir, reprovar |
+| `ordens` | candidatos **agrupados por bairro/dia**, script da OS e o botão |
+| `mapa` | todos os desligamentos, com a malha óptica sob demanda |
+
+**A OS é do bairro e do dia, não da rua.** A Celesc publica o mesmo bairro
+fatiado em várias ruas para o mesmo desligamento, e a equipe vai uma vez: em
+04/09/2026, 273 desligamentos ativos eram 58 grupos. O agrupamento é o
+`criterio='bairro_dia'` que o schema modela desde a migration 09 e que nenhum
+código gravava. Quem monta o grupo de verdade é o banco
+(`troca_poste.criar_os_bairro_dia`) — a tela agrupa só para exibir, e o servidor
+não confia nos ids que o browser manda.
+
+**A revisão é o que faz a fila encolher.** Confirmar um endereço grava três
+coisas na mesma transação: a posição como `manual`, o **alias** em
+`enderecos_alias` e o recálculo do match. O alias tem prioridade máxima sobre
+qualquer geocodificador (ADR-0005): na próxima coleta aquele texto da Celesc
+nasce resolvido. Sem o segundo passo, revisar conserta uma linha; com ele,
+conserta o endereço. Reprovar existe para o endereço que não dá para
+posicionar — sai da fila **sem** coordenada e sem alias, em vez de virar
+palpite com score 100.
+
+A correção humana é durável: `marcar_coordenadas_colapsadas` tem
+`and g.validacao <> 'manual'` e o upsert da geocodificação preserva `manual`.
+Nenhuma rodada posterior rebaixa o que uma pessoa apontou no mapa.
+
 ### Papéis
 
 Três, independentes — a pessoa pode ser um, vários ou nenhum:
@@ -341,6 +376,13 @@ existe, e códigos como `AC-001` são fáceis de adivinhar.
 `supabase/migrations/NNNN_nome.sql`, numeradas em sequência, aplicadas à mão no
 SQL Editor do Supabase (ou por `psycopg` com a `DATABASE_URL`). São **aditivas**:
 nada de `drop`/`alter` destrutivo em tabela com dado de produção.
+
+⚠️ O schema `troca_poste` é a exceção: o DDL dele nasceu e continua no monorepo
+(`*_tp_*.sql`, §2). A partir da `0012` há migrations de `troca_poste` **aqui**
+também, e o critério é de quem consome: função que só o portal chama
+(`aplicar_revisao`, `criar_os_bairro_dia`) mora neste repositório, porque
+deixá-la no monorepo faria a tela depender de DDL num repositório que ninguém
+abre para mexer nesta funcionalidade. Tabela e coluna do pipeline continuam lá.
 
 ### Git: confira se o commit chegou na main
 
@@ -760,6 +802,59 @@ do banco não é reescrito pelo portal — `status` segue o que está lá e a te
 `ultima_coleta` filtram `status in.(ok,parcial)`. Quem mentia era só o
 histórico.
 
+**`L.marker` do Leaflet vendorizado nasce quebrado.** O ícone padrão busca
+`vendor/images/marker-icon.png`, `-2x` e `-shadow` — três PNGs que a
+vendorização não trouxe. Dá 404 e o pino vira retângulo. O mapa de
+desligamentos nunca esbarrou nisso porque desenha `circleMarker` (SVG). O pino
+arrastável da revisão usa `L.divIcon` com SVG inline e os tokens de cor da casa
+(`troca_poste_revisao.js`): resolve sem acrescentar binário ao repositório.
+
+**`desligamentos.bairro_norm` NÃO serve para agrupar por bairro.** Ela é
+`generated always as (normalizar_texto(bairro_raw))` — do bairro **bruto**, que
+vem com o código da cidade grudado ("CALHEIROS - GCR", "ESCALVADOS (NAVEG)").
+O bairro limpo é a coluna `bairro`, criada depois (migration 14 do monorepo).
+Agrupar pelo `bairro_norm` separaria o mesmo bairro em dois grupos conforme a
+Celesc tenha ou não posto o sufixo naquele aviso. A chave de agrupamento sai de
+`normalizar_texto(bairro)`, calculado **no banco**, dentro de
+`troca_poste.criar_os_bairro_dia`.
+
+**Chave de idempotência derivada de linha recém-criada nunca colide.** A
+`chave_idempotencia` das OS era `os:{agrupamento_id}:{data}`, e o
+`agrupamento_id` nascia a cada clique — então o `unique` da coluna existia no
+papel e valia **zero**: dois cliques criavam duas OS para o mesmo lugar. Hoje a
+chave é `os:bairro_dia:{cidade}:{bairro_norm}:{data}`, que é estável, e o banco
+recusa a segunda. Chave de idempotência tem que sair do FATO, não do registro.
+
+**Coluna de controle que ninguém lê é pior que coluna inexistente.**
+`ordens_servico.dry_run` existia desde a migration 09 e o `enviar_os.py`
+mandava o POST do mesmo jeito — não havia como conferir o payload sem criar OS
+de verdade num sistema de produção. Hoje ele para em `status='ensaio'` (env
+`OS_DRY_RUN`, ligado por padrão) e o ensaio nem precisa de VPN: ele termina
+antes da requisição. São **dois** interruptores, de propósito:
+`OS_ENVIO_HABILITADO` mostra o botão, `OS_DRY_RUN=false` faz a OS sair.
+
+**Fora da VPN, o envio marcava `erro` no que ninguém tentou enviar.** O login
+no WVSA falhava e a ordem ia para `erro`, obrigando um clique novo — quando a
+causa era só a máquina não estar na rede. `enviar_os.alcancavel()` sonda antes e
+deixa a ordem em `pronta`, que é o que a mensagem "Aguardando o coletor" da tela
+já pressupunha.
+
+**Lista longa empurra o painel vizinho para fora da tela.** A fila de revisão
+tem 178 endereços; sem `max-height` ela jogava o mapa ao lado para **15.000px**
+abaixo do topo, e no celular (coluna única) clicar numa linha não mostrava nada
+— nem `scrollIntoView` chegava lá a tempo. `.tp-fila` limita a 420px, a mesma
+altura do mapa, com `thead` grudado. O precedente é o `.lista-marcar`.
+
+**O texto da OS existe DUAS vezes, e quem envia é o Python.**
+`app/solicitacao.py` (Flask) e `packages/utils/src/troca-poste/solicitacao.ts`
+(monorepo) implementam o mesmo contrato. O caminho real de envio passa pelo
+Python; o TypeScript não tem caller de envio. Em 04/09/2026 o bloco
+"NOSSA REDE NO LOCAL" (classificação, distância do cabo, poste de terceiro,
+contagem de postes e siglas `CB_*`) saiu **só do Python**, a pedido: é
+vocabulário do Geogrid, e quem está no poste não identifica ativo por sigla. A
+classificação continua escolhendo os candidatos — ela só não é impressa. Ao
+mexer num dos dois arquivos, saiba que o outro não acompanha.
+
 **Pooler do Supabase: `aws-1-us-west-2`.** A região está no hostname; a errada
 dá "tenant not found".
 
@@ -780,12 +875,20 @@ O coletor **em execução** vive em `~/unetvale-coletor` (cópia do `coletor/`).
 Editar aqui não muda o que roda: copie o arquivo e confira com `diff`.
 Log em `~/unetvale-coletor/coletor.log`, banco em `dados.db`.
 
-São **dois** LaunchAgents, com propósitos diferentes:
+São **três** LaunchAgents, com propósitos diferentes:
 
 | Agente | Roda | Quando | Log |
 |---|---|---|---|
 | `com.unetvale.coletor` | `watcher.py` → `enviar.py` (WVSA) | contínuo, grade 08–18h | `coletor.log` |
 | `net.unetvale.troca-poste` | `coletar_celesc.sh` (Celesc) | 07h e 13h | `celesc.log` |
+| `net.unetvale.enviar-os` | `enviar_os.py --daemon` (OS no WVSA) | **residente** | `enviar_os.log` |
+
+O terceiro não tem grade porque a fila dele não se enche por relógio: ela se
+enche quando alguém clica em "Abrir OS" no portal. Uma OS que esperasse o
+próximo horário chegaria depois do desligamento que ela existe para acompanhar.
+`KeepAlive` porque é um laço infinito e ninguém está olhando para reiniciá-lo.
+**Sem este agente, ligar `OS_ENVIO_HABILITADO` não adianta nada**: a ordem fica
+em `pronta` para sempre e a tela diz "aguardando o coletor".
 
 O segundo precisa do `pnpm` por **caminho absoluto**: o launchd roda com
 `PATH=/usr/bin:/bin:/usr/sbin:/sbin` e um `pnpm` solto sai com "command not
@@ -837,10 +940,72 @@ a.run(port=5001, use_reloader=False)"
 
 - **Ações** entrou vazio: zero ação, zero gestor, 10 áreas. Só o admin cria
   ação enquanto ninguém for marcado gestor em Configurações.
-- **Envio de OS ao WVSA** (Troca de Poste) está atrás de
-  `OS_ENVIO_HABILITADO=false` e **nunca rodou ponta a ponta**.
-- **Tela de revisão com inserção de localização** (Troca de Poste) nunca foi
-  feita — é o item mais antigo em aberto.
+- **Troca de Poste: agrupamento por bairro, revisão com mapa e ensaio de OS**
+  entrou em 04/09/2026, migration `0012` (`aplicar_revisao`,
+  `criar_os_bairro_dia`, `status='ensaio'`, índice `agrupamentos_bairro_dia_uk`).
+  Três coisas que estavam modeladas no schema desde o início e nunca tinham
+  código: `criterio='bairro_dia'`, a tabela `enderecos_alias` e a coluna
+  `dry_run`.
+
+  **A OS passou a ser do bairro/dia.** Medido em 04/09/2026 contra produção:
+  273 desligamentos ativos viram **58 grupos** — e os 29 grupos críticos cobrem
+  **165 trechos**, que antes seriam 165 OS. O maior deles (Governador Celso
+  Ramos · AREIAS DO MEIO · 04/09) tem **15 trechos** num deslocamento só.
+
+  **A tela de revisão virou ferramenta**: fila à esquerda, mapa com pino
+  arrastável à direita, e três ações (confirmar, corrigir, reprovar). Confirmar
+  e corrigir gravam o alias — é o que faz a fila encolher em vez de o mesmo
+  endereço voltar toda coleta. A fila de produção tinha **178** endereços, 16
+  deles com coordenada colapsada.
+
+  Exercitado no navegador contra o Supabase de produção (leitura), no desktop e
+  no preset mobile, console limpo: agrupamento, script do grupo de 15 trechos,
+  `?aba=` na URL, seleção na fila, mapa com pino, os dois modais, e a recusa do
+  servidor com o envio desligado. As rotas novas foram respondidas pelo
+  `test_client`, inclusive com entrada ruim (coordenada fora de SC, lat não
+  numérica, id inexistente): todas `4xx`, nenhuma `5xx`.
+
+  Migration `0012` aplicada em 04/09/2026, e as duas funções provadas contra
+  produção em transação com `rollback`:
+
+  * **a revisão**: `R EULALIO TRINDADE` saiu de `validacao='revisar'`/`score 68`
+    para `manual`/`100`, a coordenada gravada bateu com a enviada (erro 0,00 m),
+    o alias nasceu com a observação certa, o match recalculou de
+    **`indeterminado` para `alto`** e a linha de `auditoria` (`geo.revisar`) foi
+    escrita. Chamar duas vezes continua dando **um** alias. Rodar
+    `marcar_coordenadas_colapsadas()` depois **não** rebaixou o `manual`.
+    Reprovar gravou `reprovado` e **zero** alias;
+  * **a OS do bairro/dia**: `AREIAS DO MEIO · 04/09` com **15 trechos** virou um
+    agrupamento `bairro_dia` com 15 itens e uma ordem `rascunho`/`dry_run=true`.
+    A segunda chamada devolveu `ja_existia` com o MESMO `ordem_id` e **não**
+    criou segundo agrupamento. O `CHECK` aceitou `ensaio`. As três travas
+    recusaram: `criada` sem clique humano, status inventado e segunda OS com a
+    mesma `chave_idempotencia`. Com `origem='clique_usuario'` e `enviado_por`,
+    `criada` passa.
+
+  O ramo de ensaio do `enviar_os.py` foi provado com `atualizar` e `Wvsa`
+  substituídos: grava `status='ensaio'` com `payload_enviado`, **não** abre
+  sessão no WVSA, e fora da VPN a ordem real fica em `pronta` em vez de virar
+  `erro`.
+
+  **Ainda não exercitado:**
+  * **o LaunchAgent `net.unetvale.enviar-os`** — não foi instalado, e o
+    `enviar_os.py` não foi copiado para `~/unetvale-coletor`;
+  * **o envio REAL** (`OS_DRY_RUN=false`), que segue sem nunca ter acontecido;
+  * **a revisão pela tela contra o banco** — a função foi provada por script; o
+    caminho do botão até ela foi provado só com a função ainda inexistente.
+
+  ⚠️ **`bairro_wvsa_id` é NULL nos 515 desligamentos.** O código deixou de
+  cravar `bairro_id=""` e passou a ler a coluna, mas **nada preenche essa
+  coluna** — o `resolverBairro()` do `WvsaClient` está implementado no monorepo
+  e não tem caller. Na prática o campo `bairro` do formulário do WVSA continua
+  indo vazio, e só se saberá no primeiro envio real se ele é obrigatório. É
+  pendência do pipeline, não do portal.
+
+- **Envio REAL de OS ao WVSA** segue sem nunca ter rodado ponta a ponta. São
+  dois interruptores: `OS_ENVIO_HABILITADO=true` mostra o botão e
+  `OS_DRY_RUN=false` faz a OS sair. Enquanto o segundo não virar, todo clique
+  para em `ensaio` — que é como este caminho se prova sem deslocar equipe.
 - **Reuniões com gravação** está em produção desde 29/08/2026. Migrations
   `0006` (gravação e ata), `0007` (ata editável) e `0008` (convidados). Bucket
   privado `reuniao-audio`; chave e modelos no `.env`

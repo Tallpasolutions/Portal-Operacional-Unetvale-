@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Envio de Ordens de Serviço ao WVSA (módulo Troca de Poste).
+
+  Instalação:
+      cp coletor/enviar_os.py ~/unetvale-coletor/          # o que roda é a cópia
+      cp coletor/net.unetvale.enviar-os.plist ~/Library/LaunchAgents/
+      launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/net.unetvale.enviar-os.plist
+  Conferir:
+      launchctl print gui/$(id -u)/net.unetvale.enviar-os | grep -E "state|pid"
+  Log:
+      ~/unetvale-coletor/enviar_os.log
+
+  É o TERCEIRO agente, e é diferente dos outros dois de propósito:
+
+    com.unetvale.coletor     : watcher/WVSA, grade de 08h às 18h
+    net.unetvale.troca-poste : Celesc, 07h e 13h
+    este                     : RESIDENTE, sem horário
+
+  Não tem grade porque a fila não se enche por relógio: ela se enche quando
+  alguém clica em "Abrir OS" no portal. Uma OS que ficasse esperando o próximo
+  horário chegaria depois do desligamento que ela existe para acompanhar.
+
+  Sem este agente, ligar `OS_ENVIO_HABILITADO` não adianta nada: a ordem fica
+  em `pronta` para sempre e a tela diz "aguardando o coletor" — que era
+  exatamente o estado antes de ele existir.
+
+  `KeepAlive` porque o processo é um laço infinito (modo daemon): se ele morrer
+  por queda de rede ou exceção não prevista, ninguém está olhando para
+  reiniciá-lo, e a fila para em silêncio.
+
+  ⚠️ O envio é ensaio enquanto `OS_DRY_RUN` não for `false` no
+  ~/unetvale-coletor/.env. O ensaio não precisa de VPN — ele para antes da
+  requisição.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>net.unetvale.enviar-os</string>
+
+    <!-- Caminho absoluto do Python do venv: o launchd roda com
+         PATH=/usr/bin:/bin:/usr/sbin:/sbin, e um `python3` solto pegaria o do
+         sistema, sem `requests` nem `python-dotenv` — falha calada, como o
+         `pnpm` do coletar_celesc.sh. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/jhonicleyton/unetvale-coletor/.venv/bin/python</string>
+        <string>/Users/jhonicleyton/unetvale-coletor/enviar_os.py</string>
+        <string>--daemon</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/jhonicleyton/unetvale-coletor</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jhonicleyton/unetvale-coletor/enviar_os.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jhonicleyton/unetvale-coletor/enviar_os.log</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+</dict>
+</plist>
