@@ -258,6 +258,11 @@ def agrupar(linhas):
     grupos = {}
     for l in linhas:
         chave = f"{l.get('cidade_id') or l['cidade']}|{_norm(l.get('bairro'))}|{l.get('data') or ''}"
+        # A chave fica CARIMBADA na linha. A tabela de Desligamentos agrupa por
+        # ela em vez de recalcular no JS: um terceiro normalizador de bairro
+        # (Python, SQL e JS) divergiria, e o grupo perderia trecho sem erro na
+        # tela — a armadilha do `APELIDOS_EMPRESA` (CLAUDE.md §6).
+        l["grupo_chave"] = chave
         g = grupos.get(chave)
         if not g:
             g = grupos[chave] = {
