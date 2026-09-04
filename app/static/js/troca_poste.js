@@ -218,11 +218,55 @@
   }
 
   // ---- tabela ------------------------------------------------------------
+  // Agrupada por bairro e dia, como a operação enxerga: a Celesc publica o
+  // mesmo bairro fatiado em várias ruas para o MESMO desligamento, e 191
+  // linhas soltas escondem que são ~40 lugares. O trecho continua acessível —
+  // o grupo abre no clique —, porque é ele que diz onde a equipe encosta.
+  //
+  // A chave vem carimbada do servidor (`grupo_chave`): agrupar aqui por conta
+  // própria exigiria um terceiro normalizador de bairro, e é assim que dois
+  // grupos "Centro" aparecem sem ninguém entender por quê.
+  const abertos = new Set();
+
+  function agruparLinhas(linhas) {
+    const mapa = new Map();
+    for (const l of linhas) {
+      const k = l.grupo_chave || l.id;
+      if (!mapa.has(k)) mapa.set(k, []);
+      mapa.get(k).push(l);
+    }
+    return [...mapa.entries()].map(([chave, itens]) => {
+      const num = (campo, fn) => {
+        const v = itens.map((x) => x[campo]).filter((x) => x != null);
+        return v.length ? fn(...v) : null;
+      };
+      return {
+        chave, itens,
+        cidade: itens[0].cidade,
+        bairro: itens[0].bairro,
+        data: itens[0].data,
+        data_br: itens[0].data_br,
+        // O grupo herda o PIOR risco: um trecho crítico faz o lugar crítico.
+        classificacao: itens.map((x) => x.classificacao)
+          .sort((a, b) => ORDEM.indexOf(a) - ORDEM.indexOf(b))[0],
+        hora_inicio: itens.map((x) => x.hora_inicio).filter(Boolean).sort()[0] || null,
+        hora_fim: itens.map((x) => x.hora_fim).filter(Boolean).sort().pop() || null,
+        // Menor distância: é a que decide o risco do lugar.
+        dist_cabo: num("dist_cabo", Math.min),
+        // Máximo, NÃO soma: os mesmos postes aparecem em trechos vizinhos, e
+        // somar inventaria rede que não existe.
+        qtd_postes: num("qtd_postes", Math.max),
+        // Menor score: o elo fraco é o que manda o grupo para a revisão.
+        geo_score: num("geo_score", Math.min),
+      };
+    });
+  }
+
   function renderTabela(linhas) {
-    const ordenadas = [...linhas];
+    const grupos = agruparLinhas(linhas);
     if (estado.ordem) {
       const c = estado.ordem;
-      ordenadas.sort((a, b) => {
+      grupos.sort((a, b) => {
         let x = a[c], y = b[c];
         if (c === "classificacao") { x = ORDEM.indexOf(x); y = ORDEM.indexOf(y); }
         if (x == null) return 1;
@@ -230,23 +274,66 @@
         const r = typeof x === "number" ? x - y : String(x).localeCompare(String(y));
         return estado.desc ? -r : r;
       });
+    } else {
+      grupos.sort((a, b) => (ORDEM.indexOf(a.classificacao) - ORDEM.indexOf(b.classificacao))
+                            || String(a.data).localeCompare(String(b.data))
+                            || a.cidade.localeCompare(b.cidade));
     }
-    $("#tp-contagem").textContent = `${fmt(ordenadas.length)} no recorte`;
-    const corpo = ordenadas.map((l) => `
-      <tr>
-        <td><span class="badge ${BADGE[l.classificacao] || "badge-cinza"}">${l.risco_rotulo}</span></td>
-        <td><b>${l.cidade}</b><div style="font-size:12px;color:var(--muted)">${l.bairro || "—"}</div></td>
-        <td>${[l.tipo_via, l.logradouro].filter(Boolean).join(" ") || l.endereco}
-          ${(l.numero_inicio != null || l.numero_fim != null)
-            ? `<div style="font-size:12px;color:var(--muted)">nº ${l.numero_inicio ?? "?"} a ${l.numero_fim ?? "?"}</div>` : ""}</td>
-        <td style="white-space:nowrap">${l.data_br}
-          <div style="font-size:12px;color:var(--muted)">${l.hora_inicio || "—"}–${l.hora_fim || "—"}</div></td>
-        <td class="num">${l.dist_cabo != null ? Math.round(l.dist_cabo) + " m" : "—"}</td>
-        <td class="num">${l.qtd_postes ?? "—"}</td>
-        <td class="num"><span style="color:${l.geo_validacao === "ok" ? "var(--success)" : "var(--muted)"};font-weight:${l.geo_validacao === "ok" ? 700 : 400}">${l.geo_score != null ? Math.round(l.geo_score) : "—"}</span></td>
-      </tr>`).join("");
-    $("#tp-tabela").querySelector("tbody").innerHTML =
-      corpo || `<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted)">Nenhum desligamento com estes filtros.</td></tr>`;
+
+    $("#tp-contagem").textContent =
+      `${fmt(grupos.length)} ${grupos.length === 1 ? "grupo" : "grupos"} · ${fmt(linhas.length)} trechos`;
+
+    const via = (l) => [l.tipo_via, l.logradouro].filter(Boolean).join(" ") || l.endereco;
+    const metros = (v) => (v != null ? Math.round(v) + " m" : "—");
+
+    const corpo = grupos.map((g) => {
+      const aberto = abertos.has(g.chave);
+      const amostra = g.itens.slice(0, 2).map(via).join(", ")
+        + (g.itens.length > 2 ? ` +${g.itens.length - 2}` : "");
+      const detalhe = g.itens.map((l) => `
+        <tr class="tp-trecho" data-de="${g.chave}"${aberto ? "" : " hidden"}>
+          <td></td>
+          <td></td>
+          <td style="padding-left:26px">${via(l)}
+            ${(l.numero_inicio != null || l.numero_fim != null)
+              ? `<div style="font-size:12px;color:var(--muted)">nº ${l.numero_inicio ?? "?"} a ${l.numero_fim ?? "?"}</div>` : ""}</td>
+          <td style="white-space:nowrap;font-size:12px;color:var(--muted)">${l.hora_inicio || "—"}–${l.hora_fim || "—"}</td>
+          <td class="num">${metros(l.dist_cabo)}</td>
+          <td class="num">${l.qtd_postes ?? "—"}</td>
+          <td class="num"><span style="color:${l.geo_validacao === "ok" ? "var(--success)" : "var(--muted)"};font-weight:${l.geo_validacao === "ok" ? 700 : 400}">${l.geo_score != null ? Math.round(l.geo_score) : "—"}</span></td>
+        </tr>`).join("");
+
+      return `
+        <tr class="tp-grupo" data-grupo="${g.chave}" style="cursor:pointer">
+          <td><span class="badge ${BADGE[g.classificacao] || "badge-cinza"}">${ROTULO[g.classificacao] || g.classificacao}</span></td>
+          <td><b>${g.cidade}</b><div style="font-size:12px;color:var(--muted)">${g.bairro || "sem bairro"}</div></td>
+          <td>
+            <b>${g.itens.length} ${g.itens.length === 1 ? "trecho" : "trechos"}</b>
+            <span class="tp-seta" style="color:var(--muted)">${aberto ? "▾" : "▸"}</span>
+            <div style="font-size:12px;color:var(--muted)">${amostra}</div>
+          </td>
+          <td style="white-space:nowrap">${g.data_br}
+            <div style="font-size:12px;color:var(--muted)">${g.hora_inicio || "—"}–${g.hora_fim || "—"}</div></td>
+          <td class="num">${metros(g.dist_cabo)}</td>
+          <td class="num">${g.qtd_postes ?? "—"}</td>
+          <td class="num">${g.geo_score != null ? Math.round(g.geo_score) : "—"}</td>
+        </tr>${detalhe}`;
+    }).join("");
+
+    const tbody = $("#tp-tabela").querySelector("tbody");
+    tbody.innerHTML = corpo ||
+      `<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted)">Nenhum desligamento com estes filtros.</td></tr>`;
+
+    tbody.onclick = (e) => {
+      const tr = e.target.closest("tr.tp-grupo");
+      if (!tr) return;
+      const chave = tr.dataset.grupo;
+      const abrir = !abertos.has(chave);
+      if (abrir) abertos.add(chave); else abertos.delete(chave);
+      tbody.querySelectorAll(`tr.tp-trecho[data-de="${CSS.escape(chave)}"]`)
+        .forEach((x) => { x.hidden = !abrir; });
+      tr.querySelector(".tp-seta").textContent = abrir ? "▾" : "▸";
+    };
   }
 
   // A aba Revisão é do `troca_poste_revisao.js`: ela tem mapa, estado de

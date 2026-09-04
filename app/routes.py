@@ -145,12 +145,15 @@ def troca_poste():
         abort(403)
     de, ate = tp.periodo_padrao()
     linhas = tp.listar()
+    # Antes do pacote: `agrupar` carimba `grupo_chave` em cada linha, e é dela
+    # que a tabela de Desligamentos monta os grupos.
+    grupos = tp.agrupar(linhas)
     pacote = {
         "linhas": linhas,
         # A OS é do bairro/dia, então o script também é: o operador lê o texto
         # do GRUPO antes de clicar, não um texto por rua que ninguém enviaria.
         "grupos": [{**g, "script_os": solicitacao.montar(g["itens"])}
-                   for g in tp.agrupar(linhas)],
+                   for g in grupos],
         "revisao": tp.fila_revisao(),
         "ordens": tp.ordens(),
         "rotulos_risco": tp.ROTULO_RISCO,

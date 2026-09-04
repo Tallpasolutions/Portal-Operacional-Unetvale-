@@ -303,14 +303,25 @@ próprias, ambas por clique humano: a revisão de endereço e a abertura de OS.
 
 | Aba (`?aba=`) | O que é |
 |---|---|
-| `desligamentos` | inventário: filtros, KPIs, dois gráficos, tabela linha a linha |
+| `desligamentos` | inventário: filtros, KPIs, dois gráficos, tabela **agrupada por bairro/dia** (o trecho abre no clique) |
 | `revisao` | fila + mapa com pino arrastável — confirmar, corrigir, reprovar |
 | `ordens` | candidatos **agrupados por bairro/dia**, script da OS e o botão |
 | `mapa` | todos os desligamentos, com a malha óptica sob demanda |
 
-**A OS é do bairro e do dia, não da rua.** A Celesc publica o mesmo bairro
-fatiado em várias ruas para o mesmo desligamento, e a equipe vai uma vez: em
-04/09/2026, 273 desligamentos ativos eram 58 grupos. O agrupamento é o
+**O bairro/dia é a unidade do módulo inteiro, não só da OS.** A Celesc publica
+o mesmo bairro fatiado em várias ruas para o mesmo desligamento, e a equipe vai
+uma vez: em 04/09/2026, 273 desligamentos ativos eram 58 grupos. A tabela de
+Desligamentos agrupa pela mesma chave (191 trechos do recorte de 7 dias em 39
+grupos) e abre os trechos no clique — 191 linhas soltas escondem que são ~39
+lugares. A chave vem **carimbada do servidor** em `linha["grupo_chave"]`:
+recalculá-la no JS exigiria um terceiro normalizador de bairro (Python, SQL e
+JS), e é assim que dois grupos "Centro" aparecem sem ninguém entender por quê.
+
+No cabeçalho do grupo, `dist_cabo` é o **menor** (é o que decide o risco do
+lugar) e `qtd_postes` é o **máximo, não a soma**: os mesmos postes aparecem em
+trechos vizinhos, e somar inventaria rede que não existe. O `geo_score` é o
+menor — o elo fraco é o que manda o grupo para a revisão. O CSV continua saindo
+linha a linha, que é o formato de quem vai cruzar em planilha. O agrupamento é o
 `criterio='bairro_dia'` que o schema modela desde a migration 09 e que nenhum
 código gravava. Quem monta o grupo de verdade é o banco
 (`troca_poste.criar_os_bairro_dia`) — a tela agrupa só para exibir, e o servidor

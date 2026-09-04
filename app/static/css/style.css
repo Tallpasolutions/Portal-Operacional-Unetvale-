@@ -592,3 +592,10 @@ tr.clicavel{ cursor:pointer; }
    a do mapa ao lado, para as duas colunas terminarem juntas no desktop. */
 .tp-fila{ max-height:420px; overflow-y:auto; }
 .tp-fila thead th{ position:sticky; top:0; z-index:1; background:var(--fundo); }
+
+/* Desligamentos agrupados por bairro (Troca de Poste).
+   A linha do grupo é clicável e abre os trechos; sem o realce, nada na tela
+   diz que ali tem mais coisa — e o trecho é justamente onde a equipe encosta. */
+.tp-grupo:hover{ background:var(--brand-l); }
+.tp-grupo .tp-seta{ font-size:11px; margin-left:4px; }
+.tp-trecho > td{ background:var(--fundo); }
