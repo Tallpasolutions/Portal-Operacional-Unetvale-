@@ -8,7 +8,7 @@ WVSA, faz o POST.
 
 🚨 UM POST EM /relatorios/infra10/save CRIA OS DE VERDADE e desloca equipe.
 
-Travas que permanecem (o dry-run foi desligado a pedido do Jhoni; estas não):
+Travas:
 
   1. Só envia ordem com `origem='clique_usuario'` e `enviado_por` preenchido.
      O próprio Postgres recusa gravar 'criada' sem isso (constraint
@@ -17,6 +17,10 @@ Travas que permanecem (o dry-run foi desligado a pedido do Jhoni; estas não):
      for repetido, a mesma chave impede OS duplicada no WVSA.
   3. A ordem vira 'enviando' antes do POST. Se o processo morrer no meio, ela
      fica visível como travada em vez de ser reenviada e duplicar.
+  4. A coluna `dry_run` da ordem faz a rodada parar em 'ensaio': monta e
+     registra o payload sem tocar no WVSA. É como este caminho se prova sem
+     deslocar equipe. Quem grava essa coluna é o portal, a partir do
+     `OS_DRY_RUN` do ambiente DELE — aqui não se lê variável nenhuma.
 
 Uso:
   python enviar_os.py            # processa a fila uma vez e sai
@@ -35,7 +39,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 SCHEMA = "troca_poste"
-INTERVALO = float(os.environ.get("OS_POLL_SEGUNDOS", "2"))
+# 5s, não 2s: como agente RESIDENTE isto roda o dia inteiro, e a 2s eram ~43 mil
+# consultas por dia ao PostgREST para uma fila que enche algumas vezes por
+# semana. O teto é a tela, que espera o desfecho por 90s — 5s de latência ainda
+# são imperceptíveis no clique, com 18x de folga. O 2s vinha de quando o script
+# rodava sob demanda e saía em seguida.
+INTERVALO = float(os.environ.get("OS_POLL_SEGUNDOS", "5"))
 TIMEOUT = 45
 
 
@@ -142,6 +151,26 @@ class Wvsa:
         return r.status_code, r.text, (m.group(1) if m else None)
 
 
+def alcancavel():
+    """O WVSA responde daqui?
+
+    Serve para separar "a máquina não está na rede" de "o WVSA recusou". Sem
+    isso, rodar fora da VPN marcava a ordem como `erro` — o operador via
+    "falhou" para uma OS que ninguém chegou a tentar enviar, e reenviar exigia
+    um clique novo. Inalcançável, a ordem fica em `pronta`: é exatamente o que a
+    mensagem "Aguardando o coletor" da tela já pressupõe.
+    """
+    base = os.environ.get("W8_BASE", "").rstrip("/")
+    if not base:
+        return False
+    try:
+        requests.get(base, timeout=5, allow_redirects=True)
+        return True
+    except requests.RequestException as e:
+        log("wvsa_inalcancavel", erro=str(e))
+        return False
+
+
 # ----------------------------------------------------------------- payload
 def montar_payload(o):
     """Monta os campos do formulário a partir da ordem gravada.
@@ -192,6 +221,21 @@ def processar(ordem, wvsa):
         return
 
     payload = montar_payload(ordem)
+
+    # Trava 4: o ENSAIO. Percorre tudo — fila, clique conferido, payload
+    # montado — e para aqui. Antes esta coluna era lida por ninguém: o
+    # `dry_run` existia no banco e o POST saía do mesmo jeito, o que tornava
+    # impossível conferir o payload sem criar OS de verdade num sistema de
+    # produção. `ensaio` é estado terminal: a tela mostra o que seria enviado, e
+    # o operador clica de novo depois de `OS_DRY_RUN=false`.
+    if ordem.get("dry_run"):
+        atualizar(oid, {"status": "ensaio", "payload_enviado": payload,
+                        "erro": None,
+                        "resposta_bruta": {"ensaio": True,
+                                           "nota": "dry_run ligado — nada foi enviado ao WVSA"}})
+        log("ensaio", ordem=oid, chave=chave)
+        return
+
     atualizar(oid, {"status": "enviando", "payload_enviado": payload,
                     "tentativas": (ordem.get("tentativas") or 0) + 1})
 
@@ -219,10 +263,34 @@ def rodada(wvsa_cache=None):
     if not fila:
         return 0, wvsa_cache
     log("fila", quantidade=len(fila))
-    wvsa = wvsa_cache or Wvsa().login()
+
+    # Ensaio não precisa de sessão nem de rota até o WVSA: ele para antes da
+    # requisição. Separar os dois grupos permite conferir payload de qualquer
+    # lugar, inclusive fora da VPN.
+    feitas = 0
+    reais = []
     for ordem in fila:
+        if ordem.get("dry_run"):
+            processar(ordem, None)
+            feitas += 1
+        else:
+            reais.append(ordem)
+    if not reais:
+        return feitas, wvsa_cache
+
+    wvsa = wvsa_cache
+    if wvsa is None:
+        if not alcancavel():
+            # Deixa as ordens em `pronta`. A próxima rodada tenta de novo, e a
+            # tela continua dizendo "aguardando o coletor" — que é a verdade.
+            log("aguardando_rota", ordens=len(reais))
+            return feitas, None
+        wvsa = Wvsa().login()
+
+    for ordem in reais:
         processar(ordem, wvsa)
-    return len(fila), wvsa
+        feitas += 1
+    return feitas, wvsa
 
 
 def main():

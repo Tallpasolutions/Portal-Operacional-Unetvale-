@@ -2,7 +2,11 @@
 {% block title %}Troca de Poste · Unetvale{% endblock %}
 {% block page_title %}Troca de Poste{% endblock %}
 {% block content %}
-{% if not pacote.linhas %}
+{# A condição olha os TRÊS conteúdos, não só os desligamentos. Antes bastava a
+   Celesc não ter avisos programados para a página inteira virar uma frase — e
+   com ela sumiam a fila de revisão e as ordens de serviço, que são trabalho
+   pendente de gente, não espelho da Celesc. #}
+{% if not (pacote.linhas or pacote.revisao or pacote.ordens) %}
   <div class="vazio">
     Sem desligamentos programados no momento. A Celesc publica os avisos com poucos dias de
     antecedência — a próxima coleta preencherá este painel.
@@ -90,44 +94,100 @@
   <p class="subnote">
     Desligamentos cuja posição não atingiu o score mínimo de confiança. Sem posição confiável o
     sistema <b>não classifica</b> — decidir sobre rede em cima de palpite é como o script antigo
-    gerava falso positivo. Confirmar aqui vira verdade permanente e o endereço não volta para a fila.
+    gerava falso positivo. Confirmar aqui vira verdade permanente: o endereço é aprendido e não
+    volta para a fila nas próximas coletas.
   </p>
   <div class="kpis" id="tp-rev-kpis"></div>
-  <div class="card">
-    <div class="card-h">Fila de revisão</div>
-    <div class="card-b tabela-wrap">
-      <table class="tbl" id="tp-rev-tabela">
-        <thead><tr>
-          <th class="num">Score</th><th>Cidade / Bairro</th><th>Endereço</th>
-          <th>Data</th><th>Método</th><th class="num">Fontes</th><th class="num">Dispersão</th>
-        </tr></thead>
-        <tbody></tbody>
-      </table>
+  <div class="chips" id="tp-rev-chips"></div>
+
+  <div class="grid charts-2">
+    <div class="card">
+      <div class="card-h">
+        <span>Fila de revisão</span>
+        <span class="upd" id="tp-rev-contagem"></span>
+      </div>
+      <div class="card-b tabela-wrap tp-fila" style="padding:0;">
+        <table class="tbl" id="tp-rev-tabela">
+          <thead><tr>
+            <th class="num">Score</th><th>Endereço</th><th>Data</th><th>Motivo</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-h">
+        <span id="tp-rev-titulo">Selecione um endereço</span>
+        <span class="upd" id="tp-rev-metodo"></span>
+      </div>
+      <!-- Sem padding: o mapa encosta na borda, como no painel Mapa. -->
+      <div class="card-b" style="padding:0;">
+        <div id="tp-rev-mapa" style="height:420px;overflow:hidden;"></div>
+        <div style="padding:12px 18px;border-top:1px solid var(--borda);">
+          <p class="subnote" id="tp-rev-ajuda" style="margin:0 0 12px;">
+            Clique numa linha da fila para ver onde o sistema acha que é. Arraste o pino se o
+            lugar estiver errado — a posição corrigida vale para este desligamento e para todo
+            aviso futuro com o mesmo endereço.
+          </p>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;">
+            <button class="btn" id="tp-rev-confirmar" disabled>Confirmar posição</button>
+            <button class="btn sec" id="tp-rev-reprovar" disabled>Não dá para posicionar</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
+
+  <dialog id="tp-dlg-reprovar" class="modal">
+    <h3>Reprovar este endereço?</h3>
+    <p>
+      Ele sai da fila <b>sem</b> coordenada e sem ser aprendido — a classificação de rede
+      continuará indeterminada. Use quando o endereço da Celesc não permitir localizar o trecho.
+    </p>
+    <div class="modal-acoes">
+      <button class="btn sec" type="button" data-fechar>Cancelar</button>
+      <button class="btn" type="button" id="tp-rev-reprovar-ok" style="background:var(--danger);">Reprovar</button>
+    </div>
+  </dialog>
 </section>
 
 <!-- ===================== Ordens de Serviço ===================== -->
 <section data-painel="ordens" hidden>
   <div class="alert" id="tp-os-aviso"></div>
   <p class="subnote" id="tp-os-nota"></p>
+  {# O aviso do envio precisa aparecer NESTA aba: o `#tp-chips` original mora
+     no painel de Desligamentos e ficaria escondido justamente na hora do erro. #}
+  <div class="chips" id="tp-os-chips"></div>
   <div class="kpis" id="tp-os-kpis"></div>
 
+  {# Uma linha por BAIRRO/DIA, não por rua. A Celesc fatia o mesmo bairro em
+     várias ruas no mesmo dia e a equipe vai uma vez só; uma OS por rua faria a
+     operação abrir quatro chamados para um deslocamento. #}
   <div class="card" style="margin-bottom:16px;">
     <div class="card-h">
       <span>Candidatos a OS — <span id="tp-cand-contagem"></span></span>
-      <span class="upd">críticos do recorte atual</span>
+      <span class="upd">agrupados por bairro e dia · críticos do recorte atual</span>
     </div>
     <div class="card-b tabela-wrap">
       <table class="tbl" id="tp-candidatos">
         <thead><tr>
-          <th>Risco</th><th>Cidade / Bairro</th><th>Endereço</th><th>Data</th>
+          <th>Risco</th><th>Cidade / Bairro</th><th>Data</th><th class="num">Trechos</th>
           <th>Script da OS</th><th>Ação</th>
         </tr></thead>
         <tbody></tbody>
       </table>
     </div>
   </div>
+
+  <dialog id="tp-dlg-os" class="modal">
+    <h3>Abrir OS no WVSA?</h3>
+    <p id="tp-dlg-os-texto"></p>
+    <div class="modal-acoes">
+      <button class="btn sec" type="button" data-fechar>Cancelar</button>
+      <button class="btn" type="button" id="tp-dlg-os-ok">Abrir OS</button>
+    </div>
+  </dialog>
 
   <div class="card">
     <div class="card-h">Ordens de serviço</div>
@@ -173,4 +233,5 @@
 <script>window.__TP__ = {{ pacote|tojson }};</script>
 <script src="{{ url_for('static', filename='js/troca_poste_mapa.js') }}"></script>
 <script src="{{ url_for('static', filename='js/troca_poste.js') }}"></script>
+<script src="{{ url_for('static', filename='js/troca_poste_revisao.js') }}"></script>
 {% endblock %}

@@ -4,12 +4,17 @@
 (function () {
   const TP = window.__TP__ || {};
   const LINHAS = TP.linhas || [];
-  if (!LINHAS.length) return;
+  const GRUPOS = TP.grupos || [];
+  // Sem sair cedo quando não há desligamento: a fila de revisão e as ordens de
+  // serviço são trabalho pendente que existe independente da Celesc ter avisos
+  // programados. O `return` que havia aqui apagava as duas abas junto.
+  if (!document.querySelector("#tp-abas")) return;
 
   const ROTULO = TP.rotulos_risco || {};
   const ORDEM = TP.ordem_risco || [];
   const HOJE = TP.hoje;
   const ENVIO_LIGADO = TP.envio_os_habilitado === true;
+  const ENSAIO = TP.envio_os_ensaio !== false;
 
   // Cores por risco: seguem o CUSTO DO ERRO, não estética. Crítico é fibra a
   // menos de 25 m — errar para menos ali é cabo rompido e cliente fora do ar.
@@ -121,10 +126,16 @@
 
   let timerAviso = null;
   function avisar(msg) {
-    const chips = $("#tp-chips");
-    chips.innerHTML = `<span class="chip" style="background:#fdeede;color:#b65a16;">${msg}</span>`;
+    // Escolhe o container do painel VISÍVEL: um aviso renderizado numa aba
+    // oculta é o mesmo que nenhum aviso, e é na aba de Ordens que o envio
+    // falha. Substitui os `alert()` que havia aqui.
+    const alvo = [...document.querySelectorAll(".chips")]
+      .find((c) => c.closest("section[data-painel]") && !c.closest("section[data-painel]").hidden)
+      || $("#tp-chips");
+    if (!alvo) return;
+    alvo.innerHTML = `<span class="chip" style="background:#fdeede;color:#b65a16;">${msg}</span>`;
     clearTimeout(timerAviso);
-    timerAviso = setTimeout(() => { chips.innerHTML = ""; }, 6000);
+    timerAviso = setTimeout(() => { alvo.innerHTML = ""; }, 8000);
   }
 
   // ---- KPIs e subtítulo --------------------------------------------------
@@ -238,46 +249,43 @@
       corpo || `<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted)">Nenhum desligamento com estes filtros.</td></tr>`;
   }
 
-  // ---- abas fixas (não dependem do filtro) -------------------------------
-  function renderRevisao() {
-    const itens = TP.revisao || [];
-    $("#tp-badge-revisao").textContent = itens.length ? ` (${itens.length})` : "";
-    $("#tp-rev-kpis").innerHTML = [
-      `<div class="kpi"><div class="v">${fmt(itens.length)}</div><div class="l">Na fila de revisão</div></div>`,
-      `<div class="kpi"><div class="v">${fmt(LINHAS.filter((l) => l.geo_validacao === "ok").length)}</div><div class="l">Aceitos automaticamente</div></div>`,
-    ].join("");
-    $("#tp-rev-tabela").querySelector("tbody").innerHTML = itens.map((i) => `
-      <tr>
-        <td class="num"><b>${i.score != null ? Math.round(i.score) : "—"}</b></td>
-        <td><b>${i.cidade}</b><div style="font-size:12px;color:var(--muted)">${i.bairro || "—"}</div></td>
-        <td>${i.endereco}</td>
-        <td style="white-space:nowrap">${i.data_br}</td>
-        <td>${i.metodo || "—"}</td>
-        <td class="num">${i.providers_ok ?? "—"}/${i.providers_consultados ?? "—"}</td>
-        <td class="num">${i.dispersao != null ? Math.round(i.dispersao) + " m" : "—"}</td>
-      </tr>`).join("") ||
-      `<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted)">Fila vazia — nada aguardando revisão.</td></tr>`;
-  }
+  // A aba Revisão é do `troca_poste_revisao.js`: ela tem mapa, estado de
+  // seleção e escrita própria, e misturar isso aqui faria um arquivo só cuidar
+  // de duas telas com ciclos de vida diferentes.
 
   // ---- candidatos a OS ---------------------------------------------------
   // Confirmação obrigatória antes de enviar: o clique cria OS real e desloca
   // equipe. O texto do confirm diz o endereço, para não haver "cliquei errado".
-  async function abrirEEnviar(l, botao) {
-    const script = l.script_os || "";
-    if (!confirm(
-      `Criar OS no WVSA para:\n\n${l.cidade} — ${l.bairro || ""}\n` +
-      `${[l.tipo_via, l.logradouro].filter(Boolean).join(" ")}\n${l.data_br}\n\n` +
-      `Isso cria a OS de verdade e desloca equipe.`)) return;
+  function confirmarModal(dlg, texto, aoConfirmar) {
+    // `.modal`/`<dialog>` no lugar de `confirm()`: a caixa do navegador vem com
+    // o domínio no topo e não pertence à tela (CLAUDE.md §5).
+    dlg.querySelector("#tp-dlg-os-texto").innerHTML = texto;
+    const ok = dlg.querySelector("#tp-dlg-os-ok");
+    const fechar = () => { dlg.close(); ok.onclick = null; };
+    dlg.querySelectorAll("[data-fechar]").forEach((b) => { b.onclick = fechar; });
+    ok.onclick = () => { fechar(); aoConfirmar(); };
+    dlg.showModal();
+  }
 
+  async function abrirEEnviar(g, botao) {
     const marcar = (txt, on) => { botao.textContent = txt; botao.disabled = on; };
     marcar("Criando…", true);
     try {
       const r1 = await fetch("/troca-poste/os", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ desligamento_id: l.id, solicitacao: script, executor: "infra" }),
+        // O grupo inteiro numa OS: é o que o texto da solicitação descreve.
+        body: JSON.stringify({ desligamento_ids: g.ids, solicitacao: g.script_os, executor: "infra" }),
       });
       const rascunho = await r1.json();
       if (!r1.ok) throw new Error(rascunho.erro || `HTTP ${r1.status}`);
+
+      // Já existia OS para este bairro/dia — é o desfecho normal de dois
+      // operadores na mesma tela, não um erro.
+      if (rascunho.ja_existia && ["criada", "enviando", "pronta"].includes(rascunho.status)) {
+        marcar(rascunho.status === "criada" ? "OS já criada" : "OS já na fila", true);
+        botao.classList.add("on");
+        return;
+      }
 
       marcar("Enviando…", true);
       const r2 = await fetch(`/troca-poste/os/${rascunho.ordem_id}/enviar`, { method: "POST" });
@@ -287,7 +295,7 @@
       await acompanhar(rascunho.ordem_id, botao);
     } catch (e) {
       marcar("Erro — tentar de novo", false);
-      alert(`Não foi possível enviar: ${e.message}`);
+      avisar(`Não foi possível enviar: ${e.message}`);
     }
   }
 
@@ -301,6 +309,16 @@
         o = await (await fetch(`/troca-poste/os/${ordemId}`)).json();
       } catch { continue; }
 
+      // Ensaio é desfecho, não espera: o payload foi montado e conferido e
+      // nenhuma requisição saiu. Sem reconhecê-lo aqui, todo ensaio terminaria
+      // nos 90 s de timeout, dizendo que o coletor não respondeu.
+      if (o.status === "ensaio") {
+        botao.textContent = "Ensaio OK";
+        botao.disabled = true;
+        botao.classList.add("on");
+        avisar("Ensaio concluído: payload registrado, nenhuma OS criada no WVSA.");
+        return;
+      }
       if (o.status === "criada") {
         botao.textContent = o.wvsa_os_numero ? `OS ${o.wvsa_os_numero}` : "OS criada";
         botao.disabled = true;
@@ -310,7 +328,7 @@
       if (o.status === "erro") {
         botao.textContent = "Erro — tentar de novo";
         botao.disabled = false;
-        alert(`O WVSA recusou: ${o.erro || "sem detalhe"}`);
+        avisar(`O WVSA recusou: ${o.erro || "sem detalhe"}`);
         return;
       }
     }
@@ -318,28 +336,36 @@
     // isso é diferente de dizer que falhou.
     botao.textContent = "Aguardando o coletor";
     botao.disabled = false;
-    alert("A ordem está na fila, mas o processo de envio não respondeu em 90s. " +
-          "Verifique se o coletor está rodando na rede Unetvale — a OS não foi perdida.");
+    avisar("A ordem está na fila, mas o processo de envio não respondeu em 90s. " +
+           "Verifique se o coletor está rodando na rede Unetvale — a OS não foi perdida.");
   }
 
   function renderCandidatos(linhas) {
-    const cand = linhas.filter((l) => l.classificacao === "critico");
-    $("#tp-cand-contagem").textContent = `${fmt(cand.length)} no recorte`;
+    // Os grupos vêm prontos do servidor (com o script do bairro/dia já
+    // montado). Aqui só se recorta pelos ids que sobreviveram ao filtro da
+    // tela — remontar o agrupamento no cliente daria uma segunda definição da
+    // mesma regra, e o script exibido deixaria de ser o script enviado.
+    const visiveis = new Set(linhas.map((l) => l.id));
+    const cand = GRUPOS
+      .filter((g) => g.classificacao === "critico" && g.ids.some((id) => visiveis.has(id)));
+
+    $("#tp-cand-contagem").textContent =
+      `${fmt(cand.length)} ${cand.length === 1 ? "grupo" : "grupos"} no recorte`;
     const corpo = $("#tp-candidatos").querySelector("tbody");
-    corpo.innerHTML = cand.map((l, i) => `
+    corpo.innerHTML = cand.map((g, i) => `
       <tr data-i="${i}">
-        <td><span class="badge ${BADGE[l.classificacao]}">${l.risco_rotulo}</span></td>
-        <td><b>${l.cidade}</b><div style="font-size:12px;color:var(--muted)">${l.bairro || "—"}</div></td>
-        <td>${[l.tipo_via, l.logradouro].filter(Boolean).join(" ") || l.endereco}</td>
-        <td style="white-space:nowrap">${l.data_br}<div style="font-size:12px;color:var(--muted)">${l.hora_inicio || ""}–${l.hora_fim || ""}</div></td>
+        <td><span class="badge ${BADGE[g.classificacao]}">${g.risco_rotulo}</span></td>
+        <td><b>${g.cidade}</b><div style="font-size:12px;color:var(--muted)">${g.bairro || "sem bairro"}</div></td>
+        <td style="white-space:nowrap">${g.data_br}<div style="font-size:12px;color:var(--muted)">${g.hora_inicio || ""}${g.hora_fim ? "–" + g.hora_fim : ""}</div></td>
+        <td class="num">${g.qtd}</td>
         <td><button class="btn-ghost" data-script="${i}">Ver script</button></td>
         <td>${ENVIO_LIGADO
-          ? `<button class="btn" data-enviar="${i}">Enviar ao WVSA</button>`
-          : `<button class="btn sec" disabled title="O envio ao WVSA está desligado no ambiente (OS_ENVIO_HABILITADO). O fluxo ainda não foi validado ponta a ponta.">Envio desligado</button>`}</td>
+          ? `<button class="btn" data-enviar="${i}">${ENSAIO ? "Abrir OS (ensaio)" : "Abrir OS no WVSA"}</button>`
+          : `<button class="btn sec" disabled title="O envio ao WVSA está desligado no ambiente (OS_ENVIO_HABILITADO).">Envio desligado</button>`}</td>
       </tr>
       <tr data-script-de="${i}" hidden>
         <td colspan="6" style="background:var(--fundo);">
-          <pre style="margin:0;white-space:pre-wrap;font-size:12.5px;line-height:1.5;">${(l.script_os || "").replace(/</g, "&lt;")}</pre>
+          <pre style="margin:0;white-space:pre-wrap;font-size:12.5px;line-height:1.5;">${(g.script_os || "").replace(/</g, "&lt;")}</pre>
         </td>
       </tr>`).join("") ||
       `<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--muted)">Nenhum crítico no recorte atual.</td></tr>`;
@@ -356,21 +382,33 @@
       const enviar = e.target.closest("button[data-enviar]");
       // Sem ENVIO_LIGADO o botão nem é renderizado com `data-enviar`, então
       // este caminho não existe. A recusa de verdade está no servidor.
-      if (enviar) abrirEEnviar(cand[Number(enviar.dataset.enviar)], enviar);
+      if (!enviar) return;
+      const g = cand[Number(enviar.dataset.enviar)];
+      const trechos = g.ids.length === 1 ? "1 trecho" : `${g.ids.length} trechos`;
+      confirmarModal($("#tp-dlg-os"),
+        `<b>${g.cidade} — ${g.bairro || "sem bairro"}</b><br>${g.data_br} · ${trechos}<br><br>` +
+        (ENSAIO
+          ? "Modo ensaio: o payload será montado e registrado, e <b>nenhuma OS</b> será criada no WVSA."
+          : "Isso cria a OS de verdade e desloca equipe."),
+        () => abrirEEnviar(g, enviar));
     };
   }
 
   function renderOrdens() {
+    // Três estados, não dois. Descrever o envio como se ele acontecesse, com o
+    // botão em ensaio, seria pior do que não explicar nada.
     const aviso = $("#tp-os-aviso");
     if (aviso) {
-      aviso.className = ENVIO_LIGADO ? "alert alert-erro" : "alert alert-ok";
-      aviso.innerHTML = ENVIO_LIGADO
-        ? "<b>Envio real ligado.</b> Clicar em <b>Enviar ao WVSA</b> cria a OS de verdade e " +
-          "desloca equipe. Cada OS tem seu próprio botão — nenhum job envia sozinho, e a mesma " +
-          "ordem não é enviada duas vezes."
-        : "<b>Envio ao WVSA desligado.</b> Esta tela mostra os candidatos e o script exato que " +
-          "seria enviado, mas nenhuma OS é criada. O fluxo existe e está pronto; falta validá-lo " +
-          "ponta a ponta contra o WVSA antes de liberar.";
+      aviso.className = (ENVIO_LIGADO && !ENSAIO) ? "alert alert-erro" : "alert alert-ok";
+      aviso.innerHTML = !ENVIO_LIGADO
+        ? "<b>Envio ao WVSA desligado.</b> Esta tela mostra os candidatos agrupados e o script " +
+          "exato que seria enviado, mas nenhuma OS é criada."
+        : ENSAIO
+          ? "<b>Modo ensaio.</b> O clique percorre o caminho inteiro — fila, payload, registro — " +
+            "e para antes da requisição ao WVSA. <b>Nenhuma OS é criada.</b> É assim que se " +
+            "confere o payload sem deslocar equipe; para valer, <code>OS_DRY_RUN=false</code>."
+          : "<b>Envio real ligado.</b> Clicar em <b>Abrir OS no WVSA</b> cria a OS de verdade e " +
+            "desloca equipe. Uma OS por bairro e dia — a mesma combinação não é enviada duas vezes.";
     }
     // A nota explicativa acompanha o estado: descrever o envio como se ele
     // acontecesse, com o botão desligado, é pior do que não explicar nada.
@@ -386,14 +424,17 @@
     }
     const os = TP.ordens || [];
     const conta = (s) => os.filter((o) => o.status === s).length;
+    const criticos = GRUPOS.filter((g) => g.classificacao === "critico");
     $("#tp-os-kpis").innerHTML = [
-      `<div class="kpi"><div class="v">${fmt(LINHAS.filter((l) => l.classificacao === "critico").length)}</div><div class="l">Candidatos (críticos)</div></div>`,
+      `<div class="kpi"><div class="v">${fmt(criticos.length)}</div><div class="l">Grupos candidatos (bairro · dia)</div></div>`,
+      `<div class="kpi"><div class="v">${fmt(criticos.reduce((a, g) => a + g.qtd, 0))}</div><div class="l">Trechos críticos que eles cobrem</div></div>`,
       `<div class="kpi"><div class="v">${fmt(conta("rascunho"))}</div><div class="l">Rascunhos</div></div>`,
+      `<div class="kpi"><div class="v">${fmt(conta("ensaio"))}</div><div class="l">Ensaios</div></div>`,
       `<div class="kpi"><div class="v">${fmt(conta("criada"))}</div><div class="l">Enviadas ao WVSA</div></div>`,
     ].join("");
     $("#tp-os-tabela").querySelector("tbody").innerHTML = os.map((o) => `
       <tr>
-        <td><span class="badge ${o.status === "criada" ? "badge-verde" : o.status === "erro" ? "badge-vermelho" : "badge-cinza"}">${o.status}</span></td>
+        <td><span class="badge ${o.status === "criada" ? "badge-verde" : o.status === "erro" ? "badge-vermelho" : o.status === "ensaio" ? "badge-ambar" : "badge-cinza"}">${o.status}</span></td>
         <td>${o.criado_em ? dataBR((o.criado_em || "").slice(0, 10)) : "—"}</td>
         <td>${o.executor || "—"}</td><td>${o.periodo || "—"}</td>
         <td>${o.agendamento || "—"}</td><td>${o.wvsa_os_numero || "—"}</td>
@@ -478,21 +519,38 @@
     renderTabela(aplicar());
   });
 
-  $("#tp-abas").addEventListener("click", (e) => {
-    const b = e.target.closest("button[data-aba]");
-    if (!b) return;
-    [...$("#tp-abas").children].forEach((x) => x.classList.toggle("active", x === b));
+  /** Troca de aba, com o estado na URL.
+   *
+   * O `?aba=` existe para que a fila de revisão possa ser mandada por link —
+   * "olha esses 12 endereços" é uma frase que alguém precisa dizer com um
+   * endereço junto. O padrão é o mesmo do `acoes.js`.
+   */
+  function abrirAba(aba) {
+    const botoes = [...$("#tp-abas").children];
+    const b = botoes.find((x) => x.dataset.aba === aba) || botoes[0];
+    botoes.forEach((x) => x.classList.toggle("active", x === b));
     document.querySelectorAll("section[data-painel]").forEach((s) => {
       s.hidden = s.dataset.painel !== b.dataset.aba;
     });
-    // O mapa e os gráficos precisam de tamanho real para desenhar: se o painel
-    // estava oculto, o canvas media 0. Redesenha ao entrar na aba.
+    const u = new URL(location.href);
+    u.searchParams.set("aba", b.dataset.aba);
+    history.replaceState(null, "", u);
+
+    // Mapa e gráficos precisam de tamanho real para desenhar: enquanto o painel
+    // estava `hidden`, o canvas media 0. Redesenha ao entrar na aba.
     if (b.dataset.aba === "desligamentos") Object.values(charts).forEach((c) => c.resize());
     if (b.dataset.aba === "mapa" && window.__tpMapa) window.__tpMapa.aoMostrar(aplicar());
+    // A aba de revisão tem mapa próprio, e pelo mesmo motivo.
+    if (b.dataset.aba === "revisao" && window.__tpRevisao) window.__tpRevisao.aoMostrar();
+  }
+
+  $("#tp-abas").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-aba]");
+    if (b) abrirAba(b.dataset.aba);
   });
 
   // ---- início ------------------------------------------------------------
-  renderRevisao();
   renderOrdens();
   render();
+  abrirAba(new URL(location.href).searchParams.get("aba") || "desligamentos");
 })();

@@ -119,12 +119,13 @@ def delete(tabela, match):
     r.raise_for_status()
 
 
-def upsert(tabela, registro, on_conflict):
+def upsert(tabela, registro, on_conflict, schema=None):
     """POST com Prefer: resolution=merge-duplicates (upsert por `on_conflict`)."""
     url, _ = _cfg()
     r = requests.post(
         f"{url}/rest/v1/{tabela}",
-        headers=_headers({"Prefer": f"resolution=merge-duplicates,return=representation"}),
+        headers=_headers({"Prefer": f"resolution=merge-duplicates,return=representation"},
+                         schema=schema),
         params={"on_conflict": on_conflict},
         json=registro,
         timeout=TIMEOUT,
@@ -132,6 +133,36 @@ def upsert(tabela, registro, on_conflict):
     r.raise_for_status()
     data = r.json()
     return data[0] if isinstance(data, list) and data else data
+
+
+def rpc(funcao, argumentos=None, schema=None):
+    """POST /rest/v1/rpc/<funcao> -> o que a função devolver.
+
+    Existe para o que precisa ser ATÔMICO. O PostgREST não tem transação
+    entre requisições: três chamadas seguidas podem parar na segunda e deixar
+    meio fato gravado. Quando os passos são um fato só — a revisão de endereço
+    grava a posição, aprende o alias e recalcula o match —, a transação mora
+    numa função no Postgres e daqui sai uma requisição.
+    """
+    url, _ = _cfg()
+    r = requests.post(
+        f"{url}/rest/v1/rpc/{funcao}",
+        headers=_headers(schema=schema),
+        json=argumentos or {},
+        timeout=TIMEOUT,
+    )
+    if r.status_code >= 400:
+        # `raise_for_status()` sozinho descarta o corpo, e é o corpo que traz o
+        # `message` do `raise exception` da função — sem ele a rota só sabe
+        # "HTTP 400" e devolve 500 para o que era erro de entrada.
+        try:
+            corpo = r.json()
+        except ValueError:
+            corpo = {}
+        detalhe = corpo.get("message") or corpo.get("hint") or r.text[:300]
+        raise RuntimeError(f"{funcao}: {detalhe}")
+    # Função `returns void` responde 204 sem corpo; `.json()` estouraria.
+    return r.json() if r.content else None
 
 
 # =====================================================================
