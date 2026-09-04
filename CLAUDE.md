@@ -358,9 +358,19 @@ agenda faz isso lá, onde a lista está viva. O parâmetro segue existindo na
 função para quando houver um caso.
 
 O `bairro` é autocomplete, não select, e por isso é resolvido no **momento do
-envio**, pelo coletor (é o único ponto que alcança o WVSA). ⚠️ Aquele
-autocomplete rate-limita e falha em silêncio — devolve HTTP 200 com lista
-vazia. Lista vazia é "tente de novo", NUNCA "não existe": aceitar o vazio
+envio**, pelo coletor (é o único ponto que alcança o WVSA).
+
+⚠️ **O parâmetro é `query`, não `term`, e os cabeçalhos `X-Requested-With:
+XMLHttpRequest` + `Accept: application/json` são obrigatórios.** Sem eles o
+WVSA devolve o HTML da tela com HTTP 200, e o código lê "nenhuma sugestão" —
+ou seja, a resposta *parece* "esse bairro não existe" quando é a requisição que
+está errada. Custou uma rodada de teste em 04/09/2026: `AREIAS DO MEIO`,
+`CENTRO` e `BOMBAS` voltaram todos vazios até os cabeçalhos entrarem; com eles,
+ids reais (`64d11040188881a70f09e902` e cia.), e só o bairro inventado volta
+vazio.
+
+⚠️ E ele rate-limita, falhando em silêncio do mesmo jeito: HTTP 200 com lista
+vazia. Lista vazia é "tente de novo", NUNCA "não existe" — aceitar o vazio
 mandaria a OS com bairro em branco justamente quando o WVSA está ocupado.
 
 A correção humana é durável: `marcar_coordenadas_colapsadas` tem
