@@ -39,7 +39,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 SCHEMA = "troca_poste"
-INTERVALO = float(os.environ.get("OS_POLL_SEGUNDOS", "2"))
+# 5s, não 2s: como agente RESIDENTE isto roda o dia inteiro, e a 2s eram ~43 mil
+# consultas por dia ao PostgREST para uma fila que enche algumas vezes por
+# semana. O teto é a tela, que espera o desfecho por 90s — 5s de latência ainda
+# são imperceptíveis no clique, com 18x de folga. O 2s vinha de quando o script
+# rodava sob demanda e saía em seguida.
+INTERVALO = float(os.environ.get("OS_POLL_SEGUNDOS", "5"))
 TIMEOUT = 45
 
 

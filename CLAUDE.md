@@ -895,6 +895,12 @@ próximo horário chegaria depois do desligamento que ela existe para acompanhar
 **Sem este agente, ligar `OS_ENVIO_HABILITADO` não adianta nada**: a ordem fica
 em `pronta` para sempre e a tela diz "aguardando o coletor".
 
+⚠️ Ele pesquisa a fila a cada `OS_POLL_SEGUNDOS` (5). Ao mexer nesse número,
+lembre que agora é um processo residente: a 2s eram ~43 mil consultas por dia
+ao PostgREST para uma fila que enche algumas vezes por semana. O teto é a tela,
+que espera o desfecho por 90 s. Ele não escreve log quando a fila está vazia,
+então `enviar_os.log` só cresce com atividade.
+
 O segundo precisa do `pnpm` por **caminho absoluto**: o launchd roda com
 `PATH=/usr/bin:/bin:/usr/sbin:/sbin` e um `pnpm` solto sai com "command not
 found" — falha calada. O script exporta o PATH no topo.
