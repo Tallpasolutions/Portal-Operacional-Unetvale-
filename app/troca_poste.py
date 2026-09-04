@@ -11,8 +11,10 @@ recorte (o universo inteiro hoje são 356). Uma requisição ao PostgREST com os
 relacionamentos embutidos sai mais barata que criar views e mantê-las em
 sincronia, e não exige DDL novo em produção.
 """
+import os
 import struct
 import sys
+import unicodedata
 from datetime import datetime, timedelta, timezone
 
 from . import supa
@@ -50,7 +52,8 @@ ROTULO_RISCO = {
 STATUS_OCULTOS = ("desapareceu", "expirado")
 
 _CAMPOS = (
-    "id,bairro,endereco_raw,tipo_via_extenso,logradouro,numero_inicio,numero_fim,"
+    "id,cidade_id,bairro,bairro_wvsa_id,endereco_raw,tipo_via_extenso,"
+    "logradouro,numero_inicio,numero_fim,"
     "data_evento,hora_inicio,hora_fim,causa,causa_categoria,status,"
     "cidades(nome),"
     "analise_rede(classificacao,dist_cabo_m,dist_poste_m,qtd_postes,qtd_caixas,"
@@ -164,7 +167,11 @@ def _linha(row):
         "lon": coord[1] if coord else None,
         "id": row["id"],
         "cidade": cidade,
+        # `cidade_id` e `bairro_wvsa_id` não aparecem na tela: servem ao
+        # agrupamento e ao campo `bairro` do formulário do WVSA, que ia vazio.
+        "cidade_id": row.get("cidade_id"),
         "bairro": row.get("bairro"),
+        "bairro_wvsa_id": row.get("bairro_wvsa_id"),
         "endereco": row.get("endereco_raw") or "",
         "tipo_via": row.get("tipo_via_extenso") or "",
         "logradouro": row.get("logradouro") or "",
@@ -217,73 +224,72 @@ def listar(de=None, ate=None, incluir_passados=False, limite=2000):
     return linhas
 
 
-def _aplicar_filtros(linhas, cidade=None, bairro=None, risco=None):
-    out = linhas
-    if cidade:
-        out = [l for l in out if l["cidade"] == cidade]
-    if bairro:
-        out = [l for l in out if l["bairro"] == bairro]
-    if risco:
-        out = [l for l in out if l["classificacao"] == risco]
-    return out
+def _norm(txt):
+    """MAIÚSCULO, sem acento, espaços colapsados.
 
+    Espelha `troca_poste.normalizar_texto` do banco, e serve **só** para montar
+    os grupos da tela. A chave de verdade — a que vira `chave_idempotencia` — é
+    calculada em SQL, dentro de `criar_os_bairro_dia`, com a definição do
+    próprio Postgres.
 
-def visao(de=None, ate=None, cidade=None, bairro=None, risco=None, incluir_passados=False):
-    """Payload da tela: KPIs, tabela, e as opções de filtro DO PERÍODO.
-
-    As opções de cidade/bairro são calculadas antes do filtro correspondente —
-    a lista de cidades não pode ser restringida pela cidade já escolhida, senão
-    o usuário fica preso na primeira seleção.
+    Duas definições da mesma regra normalmente é armadilha (§6 do CLAUDE.md),
+    mas aqui a divergência é contida: se as duas discordarem, a tela mostra dois
+    grupos que o banco reconhece como um, e o segundo clique recebe
+    `ja_existia` em vez de criar OS duplicada. Não normalizar seria pior — "Centro"
+    e "CENTRO" no mesmo dia virariam dois deslocamentos.
     """
-    todas = listar(de, ate, incluir_passados)
+    if not txt:
+        return ""
+    base = unicodedata.normalize("NFD", str(txt)).upper()
+    return " ".join("".join(c for c in base
+                            if unicodedata.category(c) != "Mn").split())
 
-    # Cidades disponíveis: ignora o filtro de cidade, respeita os demais.
-    base_cidades = _aplicar_filtros(todas, bairro=None, risco=risco)
-    cidades = {}
-    for l in base_cidades:
-        c = cidades.setdefault(l["cidade"], {"cidade": l["cidade"], "total": 0, "critico": 0})
-        c["total"] += 1
-        if l["classificacao"] == "critico":
-            c["critico"] += 1
-    lista_cidades = sorted(cidades.values(), key=lambda c: (-c["critico"], -c["total"]))
 
-    # Cidade escolhida que não existe no período: a tela avisa em vez de mostrar
-    # tabela vazia sem explicação.
-    cidade_valida = (not cidade) or any(c["cidade"] == cidade for c in lista_cidades)
-    if not cidade_valida:
-        cidade = None
+def agrupar(linhas):
+    """Junta os desligamentos em grupos de (cidade, bairro, dia).
 
-    bairros = []
-    if cidade:
-        base_bairros = _aplicar_filtros(todas, cidade=cidade, risco=risco)
-        cont = {}
-        for l in base_bairros:
-            if l["bairro"]:
-                cont[l["bairro"]] = cont.get(l["bairro"], 0) + 1
-        bairros = [{"bairro": b, "total": n}
-                   for b, n in sorted(cont.items(), key=lambda kv: (-kv[1], kv[0]))]
+    É como a Celesc publica e como a equipe se desloca: o mesmo bairro sai
+    fatiado em várias ruas no mesmo dia, e ir lá é uma viagem só. Uma OS por
+    rua faria a operação abrir quatro chamados para o mesmo deslocamento.
 
-    linhas = _aplicar_filtros(todas, cidade, bairro, risco)
+    O grupo herda o PIOR risco dos seus trechos: um grupo com um trecho crítico
+    é um grupo crítico, ainda que os outros três sejam "sem rede".
+    """
+    grupos = {}
+    for l in linhas:
+        chave = f"{l.get('cidade_id') or l['cidade']}|{_norm(l.get('bairro'))}|{l.get('data') or ''}"
+        g = grupos.get(chave)
+        if not g:
+            g = grupos[chave] = {
+                "chave": chave,
+                "cidade": l["cidade"],
+                "cidade_id": l.get("cidade_id"),
+                "bairro": l.get("bairro"),
+                "data": l.get("data"),
+                "data_br": l.get("data_br"),
+                "itens": [],
+            }
+        g["itens"].append(l)
 
-    kpis = {"total": len(linhas)}
-    for r in ORDEM_RISCO:
-        kpis[r] = sum(1 for l in linhas if l["classificacao"] == r)
-    kpis["cidades"] = len({l["cidade"] for l in linhas})
-    futuros = [l["data"] for l in linhas if l["data"] and l["data"] >= hoje().isoformat()]
-    if futuros:
-        ano, mes, dia = min(futuros).split("-")
-        kpis["proximo"] = f"{dia}/{mes}"
-    else:
-        kpis["proximo"] = None
+    saida = []
+    for g in grupos.values():
+        itens = g["itens"]
+        pior = min((i["classificacao"] for i in itens),
+                   key=lambda c: ORDEM_RISCO.index(c) if c in ORDEM_RISCO else 99)
+        inicios = [i["hora_inicio"] for i in itens if i.get("hora_inicio")]
+        fins = [i["hora_fim"] for i in itens if i.get("hora_fim")]
+        saida.append({**g,
+                      "ids": [i["id"] for i in itens],
+                      "qtd": len(itens),
+                      "classificacao": pior,
+                      "risco_rotulo": ROTULO_RISCO.get(pior, pior),
+                      "hora_inicio": min(inicios) if inicios else None,
+                      "hora_fim": max(fins) if fins else None})
 
-    return {
-        "kpis": kpis,
-        "linhas": linhas,
-        "cidades": lista_cidades,
-        "bairros": bairros,
-        "cidade_valida": cidade_valida,
-        "rotulos_risco": ROTULO_RISCO,
-    }
+    saida.sort(key=lambda g: (ORDEM_RISCO.index(g["classificacao"])
+                              if g["classificacao"] in ORDEM_RISCO else 99,
+                              g["data"] or "", g["cidade"], g["bairro"] or ""))
+    return saida
 
 
 # Acima de tantas cidades os postes não vêm: são ~7,3 mil no total e
@@ -386,7 +392,7 @@ def fila_revisao(limite=200):
     decidir sobre rede seria palpite. Ficam aqui para uma pessoa confirmar.
     """
     params = {
-        "select": "desligamento_id,score,validacao,metodo,dispersao_m,providers_ok,"
+        "select": "desligamento_id,geom,score,validacao,metodo,dispersao_m,providers_ok,"
                   "providers_consultados,evidencias,"
                   "desligamentos(id,endereco_raw,bairro,data_evento,logradouro,"
                   "tipo_via_extenso,numero_inicio,numero_fim,status,cidades(nome))",
@@ -405,77 +411,96 @@ def fila_revisao(limite=200):
         d = r.get("desligamentos") or {}
         if d.get("status") in STATUS_OCULTOS:
             continue
+        # A coordenada SUGERIDA vai junto: é dela que o revisor parte no mapa.
+        # Sem ela ele teria que procurar o endereço do zero, e o trabalho de
+        # confirmar um ponto que o sistema já achou viraria o de achá-lo.
+        coord = _ponto(r.get("geom"))
+        ev = r.get("evidencias") or {}
         out.append({
             "id": r["desligamento_id"],
             "cidade": (d.get("cidades") or {}).get("nome") or "—",
             "bairro": d.get("bairro"),
             "endereco": d.get("endereco_raw") or "",
+            "logradouro": " ".join(x for x in [d.get("tipo_via_extenso"),
+                                               d.get("logradouro")] if x),
             "data_br": "/".join(reversed((d.get("data_evento") or "").split("-"))),
+            "lat": coord[0] if coord else None,
+            "lon": coord[1] if coord else None,
             "score": r.get("score"),
             "metodo": r.get("metodo"),
             "dispersao": r.get("dispersao_m"),
             "providers_ok": r.get("providers_ok"),
             "providers_consultados": r.get("providers_consultados"),
-            "evidencias": r.get("evidencias") or {},
+            # Por que ESTA linha caiu na fila. "Score baixo" e "coordenada
+            # igual à de outra rua" pedem julgamentos diferentes do revisor.
+            "colapso": bool(ev.get("colapso_detectado")),
+            "motivo": ev.get("motivo_revisao"),
+            "evidencias": ev,
         })
     return out
 
 
-def criar_rascunho(desligamento_id, usuario_id, solicitacao, executor,
-                   periodo=None, tipo_tecnico=None, agendamento=None):
-    """Grava o rascunho da OS — **sem enviar nada**.
+def aplicar_revisao(desligamento_id, usuario_id, lat=None, lon=None, reprovar=False):
+    """Grava a decisão do revisor. Uma requisição, três efeitos.
 
-    Cria o agrupamento (mesmo para um desligamento só, para o modelo ser
-    único) e a OS em `status='rascunho'`, `origem='sistema'`. A constraint
+    Quem faz o trabalho é `troca_poste.aplicar_revisao` no banco (migration
+    0012): posição, alias e recálculo do match acontecem na mesma transação.
+    Ver o comentário da função para o porquê de não serem três chamadas daqui.
+
+    Devolve a classificação recalculada — a tela precisa dizer o que mudou, e
+    o payload da página é anterior ao match.
+    """
+    return supa.rpc("aplicar_revisao", {
+        "p_desligamento_id": desligamento_id,
+        "p_lat": lat,
+        "p_lng": lon,
+        "p_usuario": usuario_id,
+        "p_reprovar": bool(reprovar),
+    }, schema=SCHEMA)
+
+
+def dry_run():
+    """O envio é ensaio? Ligado por padrão.
+
+    O ensaio percorre o clique inteiro — fila, payload, tudo — e para antes da
+    requisição ao WVSA. Existe porque um POST em `/relatorios/infra10/save`
+    cria OS de verdade e desloca equipe, e esse caminho nunca rodou ponta a
+    ponta. São dois interruptores separados de propósito:
+    `OS_ENVIO_HABILITADO` faz o botão aparecer, `OS_DRY_RUN=false` faz a OS
+    sair. Um interruptor só faria a liberação do botão liberar o envio junto.
+    """
+    return os.environ.get("OS_DRY_RUN", "true").strip().lower() != "false"
+
+
+def criar_rascunho_grupo(desligamento_ids, usuario_id, solicitacao, executor,
+                         periodo=None, tipo_tecnico=None, agendamento=None):
+    """Grava o rascunho da OS de um bairro/dia — **sem enviar nada**.
+
+    Toda a operação (validar o grupo, encontrar ou criar o agrupamento
+    `bairro_dia`, gravar os itens e a ordem) acontece dentro de
+    `troca_poste.criar_os_bairro_dia`, numa transação só. O porquê está no
+    comentário daquela função — em resumo: a chave do grupo tem que sair do
+    `normalizar_texto` do banco, e três requisições sem transação deixam
+    agrupamento órfão quando a última falha.
+
+    A ordem nasce `status='rascunho'`, `origem='sistema'`. A constraint
     `os_envio_exige_clique_humano` impede que esse registro chegue a 'criada'
     sem passar pelo clique de envio.
-
-    A `chave_idempotencia` nasce aqui, ANTES de existir qualquer POST: é ela
-    que impede OS duplicada se o envio for repetido.
     """
-    d = supa.select_one("desligamentos", {
-        "select": "id,cidade_id,bairro,data_evento,cidades(ibge_codigo)",
-        "id": f"eq.{desligamento_id}",
-    }, schema=SCHEMA)
-    if not d:
-        raise ValueError("desligamento não encontrado")
+    ids = [i for i in (desligamento_ids or []) if i]
+    if not ids:
+        raise ValueError("nenhum desligamento informado")
 
-    data_evento = d.get("data_evento")
-    ag = supa.insert("agrupamentos", {
-        "cidade_id": d["cidade_id"],
-        "data_evento": data_evento,
-        "criterio": "manual",
-        "rotulo": f"{d.get('bairro') or 'sem bairro'} — {data_evento}",
-        "criado_por": usuario_id,
+    return supa.rpc("criar_os_bairro_dia", {
+        "p_desligamento_ids": ids,
+        "p_usuario": usuario_id,
+        "p_solicitacao": solicitacao,
+        "p_executor": executor,
+        "p_periodo": periodo or None,
+        "p_tipo_tecnico": tipo_tecnico or None,
+        "p_agendamento": agendamento or None,
+        "p_dry_run": dry_run(),
     }, schema=SCHEMA)
-    agrupamento_id = ag["id"]
-
-    supa.insert("agrupamento_itens", {
-        "agrupamento_id": agrupamento_id, "desligamento_id": desligamento_id,
-    }, schema=SCHEMA)
-
-    ordem = supa.insert("ordens_servico", {
-        "agrupamento_id": agrupamento_id,
-        "chave_idempotencia": f"os:{agrupamento_id}:{data_evento}",
-        "finalidade": "POST",
-        "cid_codigo": (d.get("cidades") or {}).get("ibge_codigo"),
-        "bairro_id": "",
-        "tipo_tecnico": tipo_tecnico or None,
-        "agendamento": agendamento or None,
-        "categoria_interna": "N",
-        "agendar_os": "N",
-        "data_inicio": data_evento,
-        "data_fim": data_evento,
-        "periodo": periodo or None,
-        "executor": executor,
-        "solicitacao": solicitacao,
-        "status": "rascunho",
-        "origem": "sistema",
-        # O dry-run foi desligado a pedido: o envio é real.
-        "dry_run": False,
-        "criado_por": usuario_id,
-    }, schema=SCHEMA)
-    return ordem
 
 
 def marcar_para_envio(ordem_id, usuario_id):
@@ -485,15 +510,17 @@ def marcar_para_envio(ordem_id, usuario_id):
     autoriza o envio. O processo dentro da VPN só pega ordem nesse estado, e o
     Postgres recusaria 'criada' sem ele.
 
-    Só promove rascunho ou ordem que falhou: reenviar algo já 'criada' ou
-    'enviando' duplicaria OS no WVSA.
+    Só promove rascunho, ensaio ou ordem que falhou: reenviar algo já 'criada'
+    ou 'enviando' duplicaria OS no WVSA. `ensaio` entra na lista porque é
+    exatamente o caminho previsto — conferir o payload sem enviar e, depois de
+    `OS_DRY_RUN=false`, clicar de novo para valer.
     """
     atual = supa.select_one("ordens_servico", {
         "select": "id,status", "id": f"eq.{ordem_id}",
     }, schema=SCHEMA)
     if not atual:
         raise ValueError("ordem não encontrada")
-    if atual["status"] not in ("rascunho", "erro"):
+    if atual["status"] not in ("rascunho", "ensaio", "erro"):
         raise ValueError(f"ordem está em '{atual['status']}' — não pode ser reenviada")
 
     supa.update("ordens_servico", {"id": ordem_id}, {
@@ -505,7 +532,7 @@ def marcar_para_envio(ordem_id, usuario_id):
 def ordem(ordem_id):
     """Estado de uma ordem — a tela faz poll aqui depois de mandar enviar."""
     return supa.select_one("ordens_servico", {
-        "select": "id,status,wvsa_os_numero,erro,tentativas,enviado_em,solicitacao",
+        "select": "id,status,wvsa_os_numero,erro,tentativas,enviado_em,solicitacao,dry_run",
         "id": f"eq.{ordem_id}",
     }, schema=SCHEMA)
 
@@ -577,8 +604,8 @@ def coletas(limite=30):
 def ordens(limite=50):
     """Ordens de serviço geradas a partir dos desligamentos.
 
-    Enquanto o envio real não for liberado, `status` fica em `rascunho` e
-    `dry_run` em `true` — nenhuma OS chega ao WVSA.
+    Uma por bairro/dia. Com `OS_DRY_RUN=true` a ordem para em `ensaio`: o
+    payload foi montado e conferido, e nenhuma OS chegou ao WVSA.
     """
     try:
         return supa.select("ordens_servico", {

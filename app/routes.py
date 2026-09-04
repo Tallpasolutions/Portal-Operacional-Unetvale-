@@ -144,12 +144,13 @@ def troca_poste():
     if not usuario_atual()["ve_troca_poste"]:
         abort(403)
     de, ate = tp.periodo_padrao()
+    linhas = tp.listar()
     pacote = {
-        "linhas": [
-            # O script da OS vai pronto para a tela: o operador lê ANTES de
-            # clicar, não depois de a OS existir.
-            {**l, "script_os": solicitacao.montar(l)} for l in tp.listar()
-        ],
+        "linhas": linhas,
+        # A OS é do bairro/dia, então o script também é: o operador lê o texto
+        # do GRUPO antes de clicar, não um texto por rua que ninguém enviaria.
+        "grupos": [{**g, "script_os": solicitacao.montar(g["itens"])}
+                   for g in tp.agrupar(linhas)],
         "revisao": tp.fila_revisao(),
         "ordens": tp.ordens(),
         "rotulos_risco": tp.ROTULO_RISCO,
@@ -158,6 +159,7 @@ def troca_poste():
         "hoje": tp.hoje().isoformat(),
         "padrao": {"de": de, "ate": ate},
         "envio_os_habilitado": _envio_os_habilitado(),
+        "envio_os_ensaio": tp.dry_run(),
     }
     return render_template("troca-poste.html", ativo="troca-poste", pacote=pacote)
 
@@ -165,33 +167,49 @@ def troca_poste():
 @bp.route("/troca-poste/os", methods=["POST"])
 @login_obrigatorio
 def troca_poste_criar_os():
-    """Cria o RASCUNHO da OS a partir de um desligamento. Não envia nada."""
+    """Cria o RASCUNHO da OS de um bairro/dia. Não envia nada.
+
+    Recebe a lista de desligamentos do grupo. Quem prova que eles são mesmo do
+    mesmo bairro, cidade e dia é o banco (`criar_os_bairro_dia`) — o cliente
+    manda ids, e id vindo do browser não é evidência de nada.
+    """
     if not usuario_atual()["ve_troca_poste"]:
         abort(403)
     corpo = request.get_json(silent=True) or {}
-    deslig_id = (corpo.get("desligamento_id") or "").strip()
+    ids = corpo.get("desligamento_ids")
+    # Um id solto continua valendo: é o grupo de um trecho.
+    if not ids and corpo.get("desligamento_id"):
+        ids = [corpo["desligamento_id"]]
+    ids = [str(i).strip() for i in (ids or []) if str(i or "").strip()]
     executor = (corpo.get("executor") or "infra").strip()
-    if not deslig_id:
-        return jsonify({"erro": "desligamento_id ausente"}), 400
+    if not ids:
+        return jsonify({"erro": "nenhum desligamento informado"}), 400
 
-    linha = next((l for l in tp.listar(incluir_passados=True) if l["id"] == deslig_id), None)
-    if not linha:
+    conhecidas = {l["id"]: l for l in tp.listar(incluir_passados=True)}
+    faltando = [i for i in ids if i not in conhecidas]
+    if faltando:
         return jsonify({"erro": "desligamento não encontrado"}), 404
 
     try:
-        ordem = tp.criar_rascunho(
-            desligamento_id=deslig_id,
+        ordem = tp.criar_rascunho_grupo(
+            desligamento_ids=ids,
             usuario_id=session.get("uid"),
-            solicitacao=corpo.get("solicitacao") or solicitacao.montar(linha),
+            solicitacao=corpo.get("solicitacao")
+                        or solicitacao.montar([conhecidas[i] for i in ids]),
             executor=executor,
             periodo=corpo.get("periodo"),
             tipo_tecnico=corpo.get("tipo_tecnico"),
             agendamento=corpo.get("agendamento"),
         )
+    except ValueError as e:
+        return jsonify({"erro": str(e)}), 400
     except Exception as e:
+        # "não são do mesmo bairro, cidade e dia" é a função recusando um grupo
+        # misturado — entrada ruim, não falha do servidor.
+        if "mesmo bairro" in str(e):
+            return jsonify({"erro": "os desligamentos não são do mesmo bairro, cidade e dia"}), 400
         return jsonify({"erro": str(e)}), 500
-    return jsonify({"ordem_id": ordem["id"], "status": ordem["status"],
-                    "chave": ordem["chave_idempotencia"]})
+    return jsonify(ordem)
 
 
 def _envio_os_habilitado():
@@ -244,6 +262,52 @@ def troca_poste_status_os(ordem_id):
     if not o:
         return jsonify({"erro": "ordem não encontrada"}), 404
     return jsonify(o)
+
+
+# Retângulo de sanidade: Santa Catarina, com folga. As 11 cidades monitoradas
+# ficam todas no litoral/vale do Itajaí. Não é precisão cartográfica — é para
+# um dedo escorregando no mapa, ou um corpo forjado, não gravar um ponto no
+# meio do Atlântico como se fosse revisão humana com score 100.
+_SC_LAT = (-30.0, -25.0)
+_SC_LON = (-54.5, -48.0)
+
+
+@bp.route("/troca-poste/revisao/<deslig_id>", methods=["POST"])
+@login_obrigatorio
+def troca_poste_revisar(deslig_id):
+    """Registra a decisão do revisor sobre a posição de um desligamento.
+
+    Três desfechos, todos por clique humano: confirmar o ponto sugerido,
+    corrigi-lo arrastando o pino, ou reprovar ("não dá para posicionar").
+    Confirmar e corrigir gravam o alias — é o que faz o mesmo endereço nascer
+    resolvido na próxima coleta, em vez de voltar para a fila.
+    """
+    if not usuario_atual()["ve_troca_poste"]:
+        abort(403)
+    corpo = request.get_json(silent=True) or {}
+    reprovar = bool(corpo.get("reprovar"))
+
+    lat = lon = None
+    if not reprovar:
+        try:
+            lat = float(corpo.get("lat"))
+            lon = float(corpo.get("lon"))
+        except (TypeError, ValueError):
+            return jsonify({"erro": "coordenada ausente ou inválida"}), 400
+        if not (_SC_LAT[0] <= lat <= _SC_LAT[1] and _SC_LON[0] <= lon <= _SC_LON[1]):
+            return jsonify({"erro": "coordenada fora de Santa Catarina"}), 400
+
+    # Existência conferida ANTES da chamada: id inexistente é erro de entrada,
+    # e depender de reconhecer a mensagem de exceção do Postgres para devolver
+    # 404 faria qualquer mudança de texto virar um 500.
+    if not any(i["id"] == deslig_id for i in tp.fila_revisao(limite=1000)):
+        return jsonify({"erro": "desligamento não está na fila de revisão"}), 404
+
+    try:
+        resultado = tp.aplicar_revisao(deslig_id, session.get("uid"), lat, lon, reprovar)
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+    return jsonify(resultado or {"ok": True})
 
 
 @bp.route("/troca-poste/rede.json")

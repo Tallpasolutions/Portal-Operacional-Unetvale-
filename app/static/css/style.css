@@ -577,3 +577,18 @@ tr.clicavel{ cursor:pointer; }
   .par-mes > div + div{ border-left:0; border-top:1px solid var(--borda-2); }
   .rank-linha{ grid-template-columns:minmax(90px,1fr) 1fr 44px; font-size:12.5px; }
 }
+
+/* Pino arrastável da revisão de endereço (Troca de Poste).
+   Desenhado em SVG porque o Leaflet vendorizado não traz os PNGs do marcador
+   padrão — ver o comentário em troca_poste_revisao.js. */
+.tp-pino{ cursor:grab; filter:drop-shadow(0 2px 3px rgba(11,23,39,.35)); }
+.tp-pino:active{ cursor:grabbing; }
+.leaflet-dragging .tp-pino{ cursor:grabbing; }
+
+/* Fila de revisão com rolagem própria.
+   Sem isto a lista inteira (178 endereços na medição de 04/09/2026) empurra o
+   mapa para ~15.000px abaixo do topo: no celular, clicar numa linha não
+   mostrava nada, e nem `scrollIntoView` alcançava a tempo. A altura acompanha
+   a do mapa ao lado, para as duas colunas terminarem juntas no desktop. */
+.tp-fila{ max-height:420px; overflow-y:auto; }
+.tp-fila thead th{ position:sticky; top:0; z-index:1; background:var(--fundo); }
