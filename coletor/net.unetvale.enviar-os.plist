@@ -29,6 +29,11 @@
   por queda de rede ou exceção não prevista, ninguém está olhando para
   reiniciá-lo, e a fila para em silêncio.
 
+  Ele também recopia, a cada OS_CATALOGO_HORAS (12), as opções do formulário
+  do WVSA para `troca_poste.wvsa_catalogos` — executor, tipo de técnico,
+  período e os TÉCNICOS. Isso mora aqui, e não num quarto agente, porque este
+  já é residente, já está na rede do WVSA e já sabe logar.
+
   ⚠️ Este processo NÃO lê `OS_DRY_RUN`. Ele obedece à coluna `dry_run` da
   própria ordem, que o portal grava a partir daquela variável no ambiente DELE
   (a Vercel). Ou seja: quem decide entre ensaio e envio real é o app, na hora

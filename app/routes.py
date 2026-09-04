@@ -163,6 +163,7 @@ def troca_poste():
         "padrao": {"de": de, "ate": ate},
         "envio_os_habilitado": _envio_os_habilitado(),
         "envio_os_ensaio": tp.dry_run(),
+        "catalogos": tp.catalogos(),
     }
     return render_template("troca-poste.html", ativo="troca-poste", pacote=pacote)
 
@@ -203,6 +204,7 @@ def troca_poste_criar_os():
             periodo=corpo.get("periodo"),
             tipo_tecnico=corpo.get("tipo_tecnico"),
             agendamento=corpo.get("agendamento"),
+            tecnico_ids=corpo.get("tecnico_ids"),
         )
     except ValueError as e:
         return jsonify({"erro": str(e)}), 400

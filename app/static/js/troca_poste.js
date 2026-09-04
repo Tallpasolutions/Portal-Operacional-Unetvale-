@@ -15,6 +15,7 @@
   const HOJE = TP.hoje;
   const ENVIO_LIGADO = TP.envio_os_habilitado === true;
   const ENSAIO = TP.envio_os_ensaio !== false;
+  const CATALOGO = TP.catalogos || {};
 
   // Cores por risco: seguem o CUSTO DO ERRO, não estética. Crítico é fibra a
   // menos de 25 m — errar para menos ali é cabo rompido e cliente fora do ar.
@@ -343,6 +344,53 @@
   // ---- candidatos a OS ---------------------------------------------------
   // Confirmação obrigatória antes de enviar: o clique cria OS real e desloca
   // equipe. O texto do confirm diz o endereço, para não haver "cliquei errado".
+  /** Monta os campos do modal a partir do catálogo copiado do WVSA.
+   *
+   * Roda uma vez: as listas vêm do servidor e não mudam durante a sessão. Se o
+   * catálogo estiver vazio (o coletor nunca sincronizou), os selects ficam com
+   * a opção neutra e a OS sai como saía antes — sem escolha, não quebrada.
+   */
+  function montarCamposOs() {
+    const opcoes = (lista, vazio) =>
+      `<option value="">${vazio}</option>` +
+      (lista || []).map((o) => `<option value="${o.valor}">${o.rotulo}</option>`).join("");
+
+    $("#tp-os-executor").innerHTML = opcoes(CATALOGO.executor, "— escolher —");
+    $("#tp-os-periodo").innerHTML = opcoes(CATALOGO.periodo, "não definir");
+    $("#tp-os-tipo-tecnico").innerHTML = opcoes(CATALOGO.tipo_tecnico, "não definir");
+    // `infra` é o padrão histórico (era o valor cravado no código), mas agora é
+    // um default visível que dá para trocar, não uma decisão escondida.
+    $("#tp-os-executor").value = "infra";
+
+    const grupos = CATALOGO.tecnicos_por_empresa || [];
+    $("#tp-os-tecnicos").innerHTML = grupos.length
+      ? grupos.map((g) => `
+          <div style="padding:6px 8px 2px;font-size:11.5px;font-weight:700;color:var(--muted);text-transform:uppercase;">${g.empresa}</div>
+          ${g.tecnicos.map((t) => `
+            <label class="linha-marcar">
+              <input type="checkbox" value="${t.valor}">
+              <span>${t.rotulo}</span>
+            </label>`).join("")}`).join("")
+      : `<div style="padding:12px;color:var(--muted);font-size:12.5px">Catálogo do WVSA ainda não sincronizado — a OS sairá sem equipe designada.</div>`;
+
+    const conta = () => {
+      const n = $("#tp-os-tecnicos").querySelectorAll("input:checked").length;
+      $("#tp-os-tec-conta").textContent = n ? `· ${n} selecionado${n > 1 ? "s" : ""}` : "";
+    };
+    $("#tp-os-tecnicos").addEventListener("change", conta);
+    conta();
+  }
+
+  /** O que o operador escolheu no modal. */
+  function camposOs() {
+    return {
+      executor: $("#tp-os-executor").value || "infra",
+      periodo: $("#tp-os-periodo").value || null,
+      tipo_tecnico: $("#tp-os-tipo-tecnico").value || null,
+      tecnico_ids: [...$("#tp-os-tecnicos").querySelectorAll("input:checked")].map((i) => i.value),
+    };
+  }
+
   function confirmarModal(dlg, texto, aoConfirmar) {
     // `.modal`/`<dialog>` no lugar de `confirm()`: a caixa do navegador vem com
     // o domínio no topo e não pertence à tela (CLAUDE.md §5).
@@ -350,18 +398,20 @@
     const ok = dlg.querySelector("#tp-dlg-os-ok");
     const fechar = () => { dlg.close(); ok.onclick = null; };
     dlg.querySelectorAll("[data-fechar]").forEach((b) => { b.onclick = fechar; });
-    ok.onclick = () => { fechar(); aoConfirmar(); };
+    // Lê os campos ANTES de fechar: `<dialog>` fechado não devolve valor de
+    // input, e a OS sairia com tudo vazio sem erro nenhum.
+    ok.onclick = () => { const c = camposOs(); fechar(); aoConfirmar(c); };
     dlg.showModal();
   }
 
-  async function abrirEEnviar(g, botao) {
+  async function abrirEEnviar(g, botao, campos) {
     const marcar = (txt, on) => { botao.textContent = txt; botao.disabled = on; };
     marcar("Criando…", true);
     try {
       const r1 = await fetch("/troca-poste/os", {
         method: "POST", headers: { "Content-Type": "application/json" },
         // O grupo inteiro numa OS: é o que o texto da solicitação descreve.
-        body: JSON.stringify({ desligamento_ids: g.ids, solicitacao: g.script_os, executor: "infra" }),
+        body: JSON.stringify({ desligamento_ids: g.ids, solicitacao: g.script_os, ...campos }),
       });
       const rascunho = await r1.json();
       if (!r1.ok) throw new Error(rascunho.erro || `HTTP ${r1.status}`);
@@ -477,7 +527,7 @@
         (ENSAIO
           ? "Modo ensaio: o payload será montado e registrado, e <b>nenhuma OS</b> será criada no WVSA."
           : "Isso cria a OS de verdade e desloca equipe."),
-        () => abrirEEnviar(g, enviar));
+        (campos) => abrirEEnviar(g, enviar, campos));
     };
   }
 
@@ -637,6 +687,7 @@
   });
 
   // ---- início ------------------------------------------------------------
+  montarCamposOs();
   renderOrdens();
   render();
   abrirAba(new URL(location.href).searchParams.get("aba") || "desligamentos");

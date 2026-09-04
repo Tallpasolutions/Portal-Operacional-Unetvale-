@@ -464,6 +464,58 @@ def aplicar_revisao(desligamento_id, usuario_id, lat=None, lon=None, reprovar=Fa
     }, schema=SCHEMA)
 
 
+# Os campos que o operador escolhe ao abrir a OS. `agendamento` fica de fora:
+# a lista do WVSA cobre poucos dias e muda ao longo do dia (23 slots em 3 dias,
+# medido em 04/09/2026), enquanto a OS é aberta para a data do desligamento,
+# semanas à frente — o slot ainda não existe. É campo opcional lá.
+TIPOS_CATALOGO = ("executor", "tipo_tecnico", "periodo", "tecnico")
+
+
+def catalogos():
+    """Opções dos campos da OS, copiadas do formulário do WVSA.
+
+    Quem preenche `wvsa_catalogos` é o `coletor/enviar_os.py`, que roda dentro
+    da rede: as listas vivem no formulário, num IP privado que a Vercel não
+    alcança. Aqui só se lê.
+
+    Os técnicos vêm agrupados por empresa porque o rótulo do WVSA já traz o
+    prefixo ("INFRA UNET - Fulano") e são 34 numa lista só. O rótulo vai
+    INTEIRO para a tela: há nome repetido em empresas diferentes (Ueliton
+    Patriqui Nicoletti é 522 na INFRA WAVE e 661 na WAVE), e cortar o prefixo
+    transformaria a escolha em adivinhação.
+    """
+    vazio = {t: [] for t in TIPOS_CATALOGO}
+    vazio["tecnicos_por_empresa"] = []
+    try:
+        linhas = supa.select("wvsa_catalogos", {
+            "select": "tipo,valor,rotulo",
+            "tipo": f"in.({','.join(TIPOS_CATALOGO)})",
+            "ativo": "is.true",
+            "order": "tipo.asc,rotulo.asc",
+        }, schema=SCHEMA)
+    except Exception as e:
+        _falhou("catalogos", e)
+        return vazio
+
+    saida = {t: [] for t in TIPOS_CATALOGO}
+    for l in linhas:
+        saida.setdefault(l["tipo"], []).append({"valor": l["valor"], "rotulo": l["rotulo"]})
+
+    empresas = {}
+    for t in saida.get("tecnico", []):
+        rotulo = t["rotulo"]
+        # "INFRA UNET - Fulano" -> empresa "INFRA UNET". Sem hífen, o técnico
+        # não tem empresa no cadastro do WVSA; agrupá-lo como "Sem empresa" é
+        # mais honesto que inventar uma.
+        empresa = rotulo.rsplit(" - ", 1)[0].strip() if " - " in rotulo else "Sem empresa"
+        empresas.setdefault(empresa, []).append(t)
+    saida["tecnicos_por_empresa"] = [
+        {"empresa": e, "tecnicos": ts}
+        for e, ts in sorted(empresas.items(), key=lambda kv: (kv[0] == "Sem empresa", kv[0]))
+    ]
+    return saida
+
+
 def dry_run():
     """O envio é ensaio? Ligado por padrão.
 
@@ -478,7 +530,8 @@ def dry_run():
 
 
 def criar_rascunho_grupo(desligamento_ids, usuario_id, solicitacao, executor,
-                         periodo=None, tipo_tecnico=None, agendamento=None):
+                         periodo=None, tipo_tecnico=None, agendamento=None,
+                         tecnico_ids=None):
     """Grava o rascunho da OS de um bairro/dia — **sem enviar nada**.
 
     Toda a operação (validar o grupo, encontrar ou criar o agrupamento
@@ -504,6 +557,9 @@ def criar_rascunho_grupo(desligamento_ids, usuario_id, solicitacao, executor,
         "p_periodo": periodo or None,
         "p_tipo_tecnico": tipo_tecnico or None,
         "p_agendamento": agendamento or None,
+        # Lista vazia vira NULL na função: gravar `{}` diria que houve escolha
+        # de equipe quando não houve.
+        "p_tecnico_ids": [str(t) for t in (tecnico_ids or []) if str(t).strip()] or None,
         "p_dry_run": dry_run(),
     }, schema=SCHEMA)
 
