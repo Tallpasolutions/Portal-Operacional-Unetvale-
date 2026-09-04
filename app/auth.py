@@ -38,6 +38,42 @@ def _eh_supervisor_cache(uid):
     return g._eh_supervisor
 
 
+# Os módulos cuja visibilidade o admin controla. `usuarios`, `monitoramento` e
+# `configuracoes` ficam de fora: os dois primeiros já são admin, e o terceiro é
+# onde a pessoa troca a própria senha — esconder aquilo trancaria alguém para
+# fora da própria conta.
+MODULOS = ("dashboard", "produtividade", "iqi", "massivas", "troca-poste", "acoes")
+
+ROTULO_MODULO = {
+    "dashboard": "Dashboard",
+    "produtividade": "Produtividade",
+    "iqi": "IQI / IQM",
+    "massivas": "Massivas",
+    "troca-poste": "Troca de Poste",
+    "acoes": "Ações",
+}
+
+
+def _bloqueados_cache(uid):
+    """Módulos escondidos desta pessoa, uma vez por requisição.
+
+    A tabela guarda o que foi TIRADO (ver a migration 0014): ausência de linha
+    é "vê", que é o comportamento de sempre. Falha de leitura devolve conjunto
+    vazio — numa tela de leitura, indisponibilidade do banco não pode virar
+    portal em branco sem explicação; as rotas continuam protegidas pelo login.
+    """
+    if not uid:
+        return set()
+    if not hasattr(g, "_modulos_bloqueados"):
+        try:
+            linhas = supa.select("usuario_modulos_bloqueados",
+                                 {"select": "modulo", "usuario_id": f"eq.{uid}"})
+            g._modulos_bloqueados = {l["modulo"] for l in linhas}
+        except Exception:
+            g._modulos_bloqueados = set()
+    return g._modulos_bloqueados
+
+
 def _areas_gestor_cache(uid):
     """Áreas que a pessoa gerencia no módulo Ações.
 
@@ -58,21 +94,47 @@ def usuario_atual():
     eh_sup = _eh_supervisor_cache(uid)
     eh_admin = bool(email) and email == _admin_email()
     areas_gestor = _areas_gestor_cache(uid)
+    # O admin nunca perde módulo: é ele quem edita esta lista, e trancá-lo para
+    # fora exigiria um UPDATE no banco para destravar.
+    bloqueados = set() if eh_admin else _bloqueados_cache(uid)
+    visiveis = [m for m in MODULOS if m not in bloqueados]
     return {
         "id": session.get("uid"),
         "nome": session.get("nome"),
         "email": email,
         "is_admin": eh_admin,
         "is_supervisor": eh_sup,
-        # Supervisor não enxerga Troca de Poste: o módulo é de infraestrutura
-        # e não tem recorte por equipe operacional.
-        "ve_troca_poste": not eh_sup or eh_admin,
+        "modulos_visiveis": visiveis,
+        "modulos_bloqueados": sorted(bloqueados),
+        # A visibilidade passou a ser configuração, não código. Antes era
+        # `not eh_sup or eh_admin` — supervisor nunca via Troca de Poste, e
+        # mudar isso exigia deploy. O recorte de DADO do supervisor
+        # (ver só o próprio time em Produtividade e IQI) continua no código:
+        # aquilo é sobre quais linhas ele lê, não sobre qual tela ele abre.
+        "ve_troca_poste": "troca-poste" in visiveis,
         # Ações: gestor é papel próprio do módulo, por área. Não se confunde
         # com supervisor, que é de equipe de campo — a pessoa pode ser um,
         # outro, os dois ou nenhum.
         "areas_gestor": areas_gestor,
         "is_gestor_acoes": eh_admin or bool(areas_gestor),
     }
+
+
+def modulo_obrigatorio(modulo):
+    """Recusa a rota inteira quando o módulo está escondido da pessoa.
+
+    Esconder no menu não é permissão: a URL é adivinhável e o dado precisa
+    parar no SERVIDOR (CLAUDE.md §5). 404 e não 403 pelo mesmo motivo do módulo
+    Ações — 403 confirmaria que a tela existe.
+    """
+    def decorador(view):
+        @functools.wraps(view)
+        def wrapped(*args, **kwargs):
+            if modulo not in usuario_atual()["modulos_visiveis"]:
+                abort(404)
+            return view(*args, **kwargs)
+        return wrapped
+    return decorador
 
 
 def login_obrigatorio(view):
@@ -115,7 +177,11 @@ def login():
         # `next` continua ganhando: quem clicou num link direto e caiu no
         # login volta para onde queria ir. Sem ele, o destino é o Dashboard —
         # a visão gerencial é a primeira leitura do dia.
-        destino = request.args.get("next") or url_for("dash.dashboard")
+        # `dash.home` e não `dash.dashboard`: o Dashboard virou módulo que o
+        # admin pode esconder, e mandar alguém direto para lá seria um 404
+        # logo depois de digitar a senha. A raiz escolhe a primeira tela que a
+        # pessoa enxerga.
+        destino = request.args.get("next") or url_for("dash.home")
         return redirect(destino)
     return render_template("login.html")
 

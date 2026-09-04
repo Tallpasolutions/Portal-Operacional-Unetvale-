@@ -12,9 +12,10 @@ from flask import (
     session, url_for
 )
 
-from . import (acoes, supa, dados, gerencial, reuniao_ia, solicitacao,
+from . import (acoes, auth, supa, dados, gerencial, reuniao_ia, solicitacao,
                supervisores, troca_poste as tp)
-from .auth import login_obrigatorio, admin_obrigatorio, usuario_atual
+from .auth import (login_obrigatorio, admin_obrigatorio, modulo_obrigatorio,
+                   usuario_atual)
 
 bp = Blueprint("dash", __name__)
 
@@ -29,16 +30,41 @@ def injeta_status():
     return {"status_upd": st, "usuario": usuario_atual()}
 
 
+# Endpoint de cada módulo, na ordem da sidebar. Serve para a raiz saber para
+# onde mandar quem não tem o Dashboard liberado.
+_ENDPOINT_MODULO = {
+    "dashboard": "dash.dashboard", "produtividade": "dash.produtividade",
+    "iqi": "dash.iqi", "massivas": "dash.massivas",
+    "troca-poste": "dash.troca_poste", "acoes": "dash.acoes_view",
+}
+
+
+def _primeira_tela(u):
+    """Para onde mandar esta pessoa ao entrar.
+
+    O Dashboard é a abertura do dia, mas ele passou a ser um módulo que o admin
+    pode esconder. Sem isto, quem não o tivesse liberado cairia num 404 logo
+    depois de digitar a senha — e sem nenhum módulo, Configurações é a única
+    tela que sempre existe (é onde se troca a própria senha).
+    """
+    for modulo in _ENDPOINT_MODULO:
+        if modulo in u["modulos_visiveis"]:
+            return url_for(_ENDPOINT_MODULO[modulo])
+    return url_for("dash.configuracoes")
+
+
 @bp.route("/")
 @login_obrigatorio
 def home():
     # Sem tela inicial própria: a raiz cai no Dashboard, que é a primeira
-    # entrada da sidebar e a leitura de abertura do dia.
-    return redirect(url_for("dash.dashboard"))
+    # entrada da sidebar e a leitura de abertura do dia — ou no primeiro módulo
+    # que a pessoa de fato enxerga.
+    return redirect(_primeira_tela(usuario_atual()))
 
 
 @bp.route("/dashboard")
 @login_obrigatorio
+@modulo_obrigatorio("dashboard")
 def dashboard():
     """Visão gerencial: qualidade, causa raiz, churn, esteira e atendimento.
 
@@ -52,6 +78,7 @@ def dashboard():
 
 @bp.route("/produtividade")
 @login_obrigatorio
+@modulo_obrigatorio("produtividade")
 def produtividade():
     row = dados.get_modulo("produtividade")
     payload = (row or {}).get("payload") or {"registros": [], "total": 0}
@@ -107,6 +134,7 @@ def _so_operacional(payload):
 
 @bp.route("/iqi")
 @login_obrigatorio
+@modulo_obrigatorio("iqi")
 def iqi():
     iqi_row = dados.get_modulo("iqi")
     iqm_row = dados.get_modulo("iqm")
@@ -124,6 +152,7 @@ def iqi():
 
 @bp.route("/massivas")
 @login_obrigatorio
+@modulo_obrigatorio("massivas")
 def massivas():
     row = dados.get_modulo("massivas")
     payload = (row or {}).get("payload") or {"meses": [], "metricas": [], "diario": [], "cidades": [], "totais_mes": []}
@@ -133,6 +162,7 @@ def massivas():
 
 @bp.route("/troca-poste")
 @login_obrigatorio
+@modulo_obrigatorio("troca-poste")
 def troca_poste():
     """Desligamentos da Celesc cruzados com a rede óptica.
 
@@ -141,8 +171,6 @@ def troca_poste():
     hoje..+7 dias, porque a pergunta do módulo é sobre o que ainda VAI
     acontecer; o filtro permite abrir a janela.
     """
-    if not usuario_atual()["ve_troca_poste"]:
-        abort(403)
     de, ate = tp.periodo_padrao()
     linhas = tp.listar()
     # Antes do pacote: `agrupar` carimba `grupo_chave` em cada linha, e é dela
@@ -157,6 +185,7 @@ def troca_poste():
         "revisao": tp.fila_revisao(),
         "ordens": tp.ordens(),
         "rotulos_risco": tp.ROTULO_RISCO,
+        "rotulos_causa": tp.ROTULO_CAUSA,
         "ordem_risco": tp.ORDEM_RISCO,
         "ultima_coleta": tp.ultima_coleta(),
         "hoje": tp.hoje().isoformat(),
@@ -170,6 +199,7 @@ def troca_poste():
 
 @bp.route("/troca-poste/os", methods=["POST"])
 @login_obrigatorio
+@modulo_obrigatorio("troca-poste")
 def troca_poste_criar_os():
     """Cria o RASCUNHO da OS de um bairro/dia. Não envia nada.
 
@@ -177,8 +207,6 @@ def troca_poste_criar_os():
     mesmo bairro, cidade e dia é o banco (`criar_os_bairro_dia`) — o cliente
     manda ids, e id vindo do browser não é evidência de nada.
     """
-    if not usuario_atual()["ve_troca_poste"]:
-        abort(403)
     corpo = request.get_json(silent=True) or {}
     ids = corpo.get("desligamento_ids")
     # Um id solto continua valendo: é o grupo de um trecho.
@@ -233,6 +261,7 @@ def _envio_os_habilitado():
 
 @bp.route("/troca-poste/os/<ordem_id>/enviar", methods=["POST"])
 @login_obrigatorio
+@modulo_obrigatorio("troca-poste")
 def troca_poste_enviar_os(ordem_id):
     """Autoriza o envio: marca o clique humano e devolve na hora.
 
@@ -240,8 +269,6 @@ def troca_poste_enviar_os(ordem_id):
     onde o WVSA responde. Quem envia é o processo `enviar_os.py`, rodando
     dentro da VPN, que observa esta fila. A tela acompanha por poll.
     """
-    if not usuario_atual()["ve_troca_poste"]:
-        abort(403)
     if not _envio_os_habilitado():
         return jsonify({
             "erro": "O envio de OS ao WVSA está desligado.",
@@ -259,10 +286,9 @@ def troca_poste_enviar_os(ordem_id):
 
 @bp.route("/troca-poste/os/<ordem_id>")
 @login_obrigatorio
+@modulo_obrigatorio("troca-poste")
 def troca_poste_status_os(ordem_id):
     """Estado da ordem — a tela faz poll aqui enquanto o envio acontece."""
-    if not usuario_atual()["ve_troca_poste"]:
-        abort(403)
     o = tp.ordem(ordem_id)
     if not o:
         return jsonify({"erro": "ordem não encontrada"}), 404
@@ -279,6 +305,7 @@ _SC_LON = (-54.5, -48.0)
 
 @bp.route("/troca-poste/revisao/<deslig_id>", methods=["POST"])
 @login_obrigatorio
+@modulo_obrigatorio("troca-poste")
 def troca_poste_revisar(deslig_id):
     """Registra a decisão do revisor sobre a posição de um desligamento.
 
@@ -287,8 +314,6 @@ def troca_poste_revisar(deslig_id):
     Confirmar e corrigir gravam o alias — é o que faz o mesmo endereço nascer
     resolvido na próxima coleta, em vez de voltar para a fila.
     """
-    if not usuario_atual()["ve_troca_poste"]:
-        abort(403)
     corpo = request.get_json(silent=True) or {}
     reprovar = bool(corpo.get("reprovar"))
 
@@ -317,6 +342,7 @@ def troca_poste_revisar(deslig_id):
 
 @bp.route("/troca-poste/rede.json")
 @login_obrigatorio
+@modulo_obrigatorio("troca-poste")
 def troca_poste_rede():
     """Malha óptica das cidades pedidas — carregada sob demanda pelo mapa.
 
@@ -332,6 +358,41 @@ def troca_poste_rede():
     # sessão (a rota exige login).
     resp.headers["Cache-Control"] = "private, max-age=3600"
     return resp
+
+
+@bp.route("/configuracoes/modulos", methods=["POST"])
+@admin_obrigatorio
+def configuracoes_modulos():
+    """Grava quais módulos um usuário NÃO vê.
+
+    Só admin: liberar módulo é poder sobre o que os outros enxergam, e é o
+    mesmo recorte de todos os blocos de gestão desta tela. O formulário manda o
+    que a pessoa PODE ver (as caixas marcadas); aqui se grava o complemento,
+    porque a tabela guarda o que foi tirado — ver a migration 0014.
+    """
+    uid = (request.form.get("usuario_id") or "").strip()
+    if not uid:
+        flash("Usuário não informado.", "erro")
+        return redirect(url_for("dash.configuracoes") + "#modulos-por-usuario")
+
+    permitidos = set(request.form.getlist("modulo"))
+    bloqueados = [m for m in auth.MODULOS if m not in permitidos]
+
+    try:
+        # Reescreve do zero: apagar e inserir mantém a linha do banco igual ao
+        # que a tela mostrou, sem precisar comparar estado anterior.
+        supa.delete("usuario_modulos_bloqueados", {"usuario_id": uid})
+        if bloqueados:
+            supa.insert("usuario_modulos_bloqueados",
+                        [{"usuario_id": uid, "modulo": m,
+                          "bloqueado_por": session.get("uid")} for m in bloqueados])
+    except Exception as e:
+        flash(f"Não foi possível salvar: {e}", "erro")
+        return redirect(url_for("dash.configuracoes") + "#modulos-por-usuario")
+
+    flash("Acesso aos módulos atualizado." if bloqueados
+          else "Acesso liberado a todos os módulos.", "ok")
+    return redirect(url_for("dash.configuracoes") + "#modulos-por-usuario")
 
 
 @bp.route("/usuarios")
@@ -398,6 +459,21 @@ def configuracoes():
                 "usuarios", {"select": "id,nome,email", "order": "nome.asc"})
         except Exception:
             contexto["usuarios"] = []
+    if u["is_admin"]:
+        # Um mapa {usuario_id: [módulos escondidos]} para a tela marcar as
+        # caixas. Uma consulta só para todos: com 12 usuários, uma por linha
+        # seriam 12 idas ao PostgREST a ~0,27s cada.
+        try:
+            bloqueios = supa.select("usuario_modulos_bloqueados",
+                                    {"select": "usuario_id,modulo"})
+        except Exception:
+            bloqueios = []
+        mapa = {}
+        for b in bloqueios:
+            mapa.setdefault(b["usuario_id"], []).append(b["modulo"])
+        contexto["modulos"] = [{"chave": m, "rotulo": auth.ROTULO_MODULO[m]}
+                               for m in auth.MODULOS]
+        contexto["modulos_bloqueados"] = mapa
     return render_template("configuracoes.html", **contexto)
 
 
@@ -709,6 +785,7 @@ def _acao_ou_404(acao_id, u, exigir=None):
 
 @bp.route("/acoes")
 @login_obrigatorio
+@modulo_obrigatorio("acoes")
 def acoes_view():
     u = usuario_atual()
     filtros = {k: (request.args.get(k) or "").strip() or None

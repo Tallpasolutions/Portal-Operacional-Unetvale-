@@ -51,6 +51,18 @@ ROTULO_RISCO = {
 # mas continua no banco para auditoria.
 STATUS_OCULTOS = ("desapareceu", "expirado")
 
+# O tipo de serviço que a Celesc informa. A coluna `causa` vem com o texto cru
+# ("- PROG. - ALTERAÇÃO PARA AMPLIAÇÃO"); o pipeline já a classifica em
+# `causa_categoria`, e é por ela que se filtra — o texto cru muda de pontuação
+# entre avisos e faria o filtro perder linha sem erro na tela.
+ROTULO_CAUSA = {
+    "alteracao_ampliacao": "Alteração para ampliação",
+    "alteracao_melhoria": "Alteração para melhoria",
+    "manutencao_preventiva": "Manutenção preventiva",
+    "manutencao_corretiva": "Manutenção corretiva",
+    "servico_comercial": "Serviço comercial / outros",
+}
+
 _CAMPOS = (
     "id,cidade_id,bairro,bairro_wvsa_id,endereco_raw,tipo_via_extenso,"
     "logradouro,numero_inicio,numero_fim,"
@@ -182,6 +194,7 @@ def _linha(row):
         "hora_inicio": _hhmm(row.get("hora_inicio")),
         "hora_fim": _hhmm(row.get("hora_fim")),
         "causa": row.get("causa"),
+        "causa_categoria": row.get("causa_categoria"),
         "classificacao": classificacao,
         "risco_rotulo": ROTULO_RISCO.get(classificacao, classificacao),
         "dist_cabo": analise.get("dist_cabo_m"),
@@ -285,6 +298,12 @@ def agrupar(linhas):
         fins = [i["hora_fim"] for i in itens if i.get("hora_fim")]
         saida.append({**g,
                       "ids": [i["id"] for i in itens],
+                      # O grupo carrega TODAS as categorias dos seus trechos: o
+                      # filtro mostra o grupo se qualquer trecho casar, senão
+                      # filtrar por "serviço comercial" esconderia o bairro em
+                      # que ele acontece junto de uma manutenção.
+                      "causas": sorted({i["causa_categoria"] for i in itens
+                                        if i.get("causa_categoria")}),
                       "qtd": len(itens),
                       "classificacao": pior,
                       "risco_rotulo": ROTULO_RISCO.get(pior, pior),

@@ -305,7 +305,7 @@ próprias, ambas por clique humano: a revisão de endereço e a abertura de OS.
 |---|---|
 | `desligamentos` | inventário: filtros, KPIs, dois gráficos, tabela **agrupada por bairro/dia** (o trecho abre no clique) |
 | `revisao` | fila + mapa com pino arrastável — confirmar, corrigir, reprovar |
-| `ordens` | candidatos **agrupados por bairro/dia**, script da OS e o botão que monta a OS (executor, tipo de técnico, **equipe**, período) |
+| `ordens` | **todos** os grupos do recorte, script da OS e o botão que monta a OS (executor, tipo de técnico, **equipe**, período) |
 | `mapa` | todos os desligamentos, com a malha óptica sob demanda |
 
 **O bairro/dia é a unidade do módulo inteiro, não só da OS.** A Celesc publica
@@ -326,6 +326,18 @@ linha a linha, que é o formato de quem vai cruzar em planilha. O agrupamento é
 código gravava. Quem monta o grupo de verdade é o banco
 (`troca_poste.criar_os_bairro_dia`) — a tela agrupa só para exibir, e o servidor
 não confia nos ids que o browser manda.
+
+A aba de Ordens mostrava **só os críticos** até 04/09/2026. Passou a mostrar
+todos: a classificação continua ordenando e aparece no badge de cada linha, mas
+esconder o resto tirava da tela desligamento que a operação quer abrir —
+inclusive os `indeterminado`, que são exatamente os que esperam revisão.
+
+**O filtro de tipo de serviço** usa `causa_categoria`, não o texto de `causa`.
+São 5 tipos (ampliação, melhoria, preventiva, corretiva e serviço comercial);
+o texto cru vem com pontuação variável ("- PROG. - ALTERAÇÃO PARA AMPLIAÇÃO") e
+filtrar por ele perderia linha sem erro na tela. O select lista só os tipos
+PRESENTES no recorte, com a contagem: oferecer um tipo que não existe ali leva
+a pessoa a filtrar e ver tabela vazia sem entender por quê.
 
 **A revisão é o que faz a fila encolher.** Confirmar um endereço grava três
 coisas na mesma transação: a posição como `manual`, o **alias** em
@@ -373,8 +385,37 @@ Três, independentes — a pessoa pode ser um, vários ou nenhum:
 
 - **admin** — `email == ADMIN_EMAIL` (variável de ambiente, **não** coluna).
 - **supervisor** — linha em `supervisores`; vê só o time dele em Produtividade
-  e IQI. **Não** enxerga Troca de Poste.
+  e IQI.
 - **gestor de ações** — linha em `acao_gestores`; manda nas ações das áreas dele.
+
+### Quais módulos cada um enxerga
+
+Configuração, não código, desde 04/09/2026 (migration `0014`). O admin marca em
+*Configurações → Acesso aos módulos* o que cada pessoa vê; `auth.MODULOS` lista
+os seis configuráveis.
+
+⚠️ A tabela `usuario_modulos_bloqueados` guarda o que foi **TIRADO**, não o que
+foi liberado. Sem linha = vê — que é como o portal sempre funcionou, e por isso
+subir a mudança não tirou nada de ninguém. Guardar liberações exigiria semear os
+12 usuários na migration e deixaria usuário novo nascendo cego.
+
+Três regras que não se negociam:
+
+* **o admin nunca perde módulo.** É ele quem edita a lista; trancá-lo exigiria
+  um UPDATE no banco para destravar;
+* **esconder no menu não é permissão.** `modulo_obrigatorio()` fecha a rota com
+  **404** — a URL é adivinhável, e 403 confirmaria que a tela existe (mesma
+  razão do módulo Ações);
+* **Configurações nunca entra na lista.** É onde cada um troca a própria senha,
+  e é para onde a raiz manda quem ficou sem módulo nenhum (`_primeira_tela`) —
+  sem isso, o login terminaria num 404.
+
+Antes disso, a única regra era `ve_troca_poste = not eh_sup or eh_admin`:
+supervisor nunca via Troca de Poste e mudar isso exigia deploy. Agora essa
+decisão é da tela. **O recorte de DADO do supervisor continua no código** —
+ver só o próprio time em Produtividade e IQI é sobre quais linhas ele lê, não
+sobre qual tela ele abre, e liberar o módulo não amplia o que ele enxerga
+dentro dele.
 
 Tudo isso é montado em `usuario_atual()` (`app/auth.py`), com cache por
 requisição em `flask.g`.

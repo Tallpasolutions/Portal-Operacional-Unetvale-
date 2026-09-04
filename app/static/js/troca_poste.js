@@ -16,6 +16,7 @@
   const ENVIO_LIGADO = TP.envio_os_habilitado === true;
   const ENSAIO = TP.envio_os_ensaio !== false;
   const CATALOGO = TP.catalogos || {};
+  const ROTULO_CAUSA = TP.rotulos_causa || {};
 
   // Cores por risco: seguem o CUSTO DO ERRO, não estética. Crítico é fibra a
   // menos de 25 m — errar para menos ali é cabo rompido e cliente fora do ar.
@@ -38,7 +39,7 @@
   const dataBR = (iso) => (iso ? iso.split("-").reverse().join("/") : "—");
 
   const estado = { de: TP.padrao.de, ate: TP.padrao.ate, cidade: "", bairro: "",
-                   risco: "", turno: "", ordem: null, desc: false };
+                   risco: "", causa: "", turno: "", ordem: null, desc: false };
 
   // Turno pelo início do desligamento: até 12:00 é manhã, depois é tarde.
   // Sem hora de início não dá para afirmar o turno — a linha fica de fora de
@@ -65,7 +66,8 @@
       (o.semTurno || noTurno(l)) &&
       (o.semCidade || !estado.cidade || l.cidade === estado.cidade) &&
       (o.semBairro || !estado.bairro || l.bairro === estado.bairro) &&
-      (o.semRisco || !estado.risco || l.classificacao === estado.risco));
+      (o.semRisco || !estado.risco || l.classificacao === estado.risco) &&
+      (o.semCausa || !estado.causa || l.causa_categoria === estado.causa));
   }
 
   // ---- selects dependentes do período ------------------------------------
@@ -112,6 +114,27 @@
       [...cont.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
         .map(([b, n]) => `<option value="${b}">${b} (${n})</option>`).join("");
     sel.value = estado.bairro;
+  }
+
+  /** Tipos de serviço PRESENTES no recorte, com a contagem.
+   *
+   * Só os que existem: oferecer "Serviço comercial" quando não há nenhum leva
+   * a pessoa a filtrar e ver tabela vazia sem entender por quê. Ignora o
+   * próprio filtro de causa ao montar a lista, senão escolher um tipo apagaria
+   * os outros e prenderia o usuário na primeira seleção.
+   */
+  function preencherCausas() {
+    const base = aplicar({ semCausa: true });
+    const cont = {};
+    for (const l of base) {
+      if (l.causa_categoria) cont[l.causa_categoria] = (cont[l.causa_categoria] || 0) + 1;
+    }
+    const chaves = Object.keys(cont).sort((a, b) => cont[b] - cont[a]);
+    const sel = $("#tp-causa");
+    sel.innerHTML = `<option value="">Todos (${fmt(base.length)})</option>` +
+      chaves.map((c) => `<option value="${c}">${ROTULO_CAUSA[c] || c} (${fmt(cont[c])})</option>`).join("");
+    if (estado.causa && !cont[estado.causa]) estado.causa = "";
+    sel.value = estado.causa;
   }
 
   function preencherRiscos() {
@@ -482,9 +505,12 @@
     // montado). Aqui só se recorta pelos ids que sobreviveram ao filtro da
     // tela — remontar o agrupamento no cliente daria uma segunda definição da
     // mesma regra, e o script exibido deixaria de ser o script enviado.
+    // TODOS os grupos do recorte, não só os críticos. A classificação continua
+    // ordenando (crítico primeiro) e aparece no badge de cada linha, mas
+    // esconder o resto tirava da tela desligamento que a operação quer abrir —
+    // inclusive os `indeterminado`, que são exatamente os que esperam revisão.
     const visiveis = new Set(linhas.map((l) => l.id));
-    const cand = GRUPOS
-      .filter((g) => g.classificacao === "critico" && g.ids.some((id) => visiveis.has(id)));
+    const cand = GRUPOS.filter((g) => g.ids.some((id) => visiveis.has(id)));
 
     $("#tp-cand-contagem").textContent =
       `${fmt(cand.length)} ${cand.length === 1 ? "grupo" : "grupos"} no recorte`;
@@ -563,8 +589,8 @@
     const conta = (s) => os.filter((o) => o.status === s).length;
     const criticos = GRUPOS.filter((g) => g.classificacao === "critico");
     $("#tp-os-kpis").innerHTML = [
-      `<div class="kpi"><div class="v">${fmt(criticos.length)}</div><div class="l">Grupos candidatos (bairro · dia)</div></div>`,
-      `<div class="kpi"><div class="v">${fmt(criticos.reduce((a, g) => a + g.qtd, 0))}</div><div class="l">Trechos críticos que eles cobrem</div></div>`,
+      `<div class="kpi"><div class="v">${fmt(GRUPOS.length)}</div><div class="l">Grupos candidatos (bairro · dia)</div></div>`,
+      `<div class="kpi"><div class="v">${fmt(criticos.length)}</div><div class="l">Deles, críticos</div></div>`,
       `<div class="kpi"><div class="v">${fmt(conta("rascunho"))}</div><div class="l">Rascunhos</div></div>`,
       `<div class="kpi"><div class="v">${fmt(conta("ensaio"))}</div><div class="l">Ensaios</div></div>`,
       `<div class="kpi"><div class="v">${fmt(conta("criada"))}</div><div class="l">Enviadas ao WVSA</div></div>`,
@@ -601,6 +627,7 @@
     preencherCidades();
     preencherBairros();
     preencherRiscos();
+    preencherCausas();
     const linhas = aplicar();
     renderKpis(linhas);
     renderGraficos(linhas);
@@ -627,6 +654,7 @@
   $("#tp-cidade").addEventListener("change", (e) => { estado.cidade = e.target.value; estado.bairro = ""; render(); });
   $("#tp-bairro").addEventListener("change", (e) => { estado.bairro = e.target.value; render(); });
   $("#tp-risco").addEventListener("change", (e) => { estado.risco = e.target.value; render(); });
+  $("#tp-causa").addEventListener("change", (e) => { estado.causa = e.target.value; render(); });
   $("#tp-turno").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-turno]");
     if (!b) return;
@@ -636,7 +664,7 @@
   });
   $("#tp-limpar").addEventListener("click", () => {
     Object.assign(estado, { de: TP.padrao.de, ate: TP.padrao.ate, cidade: "", bairro: "",
-                            risco: "", turno: "", ordem: null, desc: false });
+                            risco: "", causa: "", turno: "", ordem: null, desc: false });
     [...$("#tp-presets").children].forEach((x) => x.classList.toggle("active", x.dataset.dias === "7"));
     [...$("#tp-turno").children].forEach((x) => x.classList.toggle("active", x.dataset.turno === ""));
     render();
