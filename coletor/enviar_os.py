@@ -17,9 +17,10 @@ Travas:
      for repetido, a mesma chave impede OS duplicada no WVSA.
   3. A ordem vira 'enviando' antes do POST. Se o processo morrer no meio, ela
      fica visível como travada em vez de ser reenviada e duplicar.
-  4. `dry_run` na ordem (env `OS_DRY_RUN`, ligado por padrão) faz a rodada
-     parar em 'ensaio': monta e registra o payload sem tocar no WVSA. É como
-     este caminho se prova sem deslocar equipe.
+  4. A coluna `dry_run` da ordem faz a rodada parar em 'ensaio': monta e
+     registra o payload sem tocar no WVSA. É como este caminho se prova sem
+     deslocar equipe. Quem grava essa coluna é o portal, a partir do
+     `OS_DRY_RUN` do ambiente DELE — aqui não se lê variável nenhuma.
 
 Uso:
   python enviar_os.py            # processa a fila uma vez e sai

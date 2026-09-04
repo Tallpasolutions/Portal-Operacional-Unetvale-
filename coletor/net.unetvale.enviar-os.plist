@@ -29,9 +29,12 @@
   por queda de rede ou exceção não prevista, ninguém está olhando para
   reiniciá-lo, e a fila para em silêncio.
 
-  ⚠️ O envio é ensaio enquanto `OS_DRY_RUN` não for `false` no
-  ~/unetvale-coletor/.env. O ensaio não precisa de VPN — ele para antes da
-  requisição.
+  ⚠️ Este processo NÃO lê `OS_DRY_RUN`. Ele obedece à coluna `dry_run` da
+  própria ordem, que o portal grava a partir daquela variável no ambiente DELE
+  (a Vercel). Ou seja: quem decide entre ensaio e envio real é o app, na hora
+  de criar a ordem — pôr `OS_DRY_RUN` no .env desta máquina não muda nada, e
+  ordem já gravada com `dry_run=true` continua sendo ensaio depois de a
+  variável virar. O ensaio não precisa de VPN: ele para antes da requisição.
 -->
 <plist version="1.0">
 <dict>

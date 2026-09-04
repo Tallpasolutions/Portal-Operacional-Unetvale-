@@ -828,10 +828,15 @@ recusa a segunda. Chave de idempotência tem que sair do FATO, não do registro.
 **Coluna de controle que ninguém lê é pior que coluna inexistente.**
 `ordens_servico.dry_run` existia desde a migration 09 e o `enviar_os.py`
 mandava o POST do mesmo jeito — não havia como conferir o payload sem criar OS
-de verdade num sistema de produção. Hoje ele para em `status='ensaio'` (env
-`OS_DRY_RUN`, ligado por padrão) e o ensaio nem precisa de VPN: ele termina
-antes da requisição. São **dois** interruptores, de propósito:
-`OS_ENVIO_HABILITADO` mostra o botão, `OS_DRY_RUN=false` faz a OS sair.
+de verdade num sistema de produção. Hoje ele para em `status='ensaio'`, e o
+ensaio nem precisa de VPN: termina antes da requisição. São **dois**
+interruptores, de propósito: `OS_ENVIO_HABILITADO` mostra o botão,
+`OS_DRY_RUN=false` faz a OS sair.
+
+⚠️ E os dois são variáveis **do app**, na Vercel. O `enviar_os.py` obedece à
+COLUNA `dry_run` da ordem, nunca à variável — pôr `OS_DRY_RUN` no `.env` do
+coletor não muda nada. A ordem carrega a decisão tomada quando foi criada:
+virar a chave não transforma em envio real o que já está gravado como ensaio.
 
 **Fora da VPN, o envio marcava `erro` no que ninguém tentou enviar.** O login
 no WVSA falhava e a ordem ia para `erro`, obrigando um clique novo — quando a
