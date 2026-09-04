@@ -305,7 +305,7 @@ próprias, ambas por clique humano: a revisão de endereço e a abertura de OS.
 |---|---|
 | `desligamentos` | inventário: filtros, KPIs, dois gráficos, tabela **agrupada por bairro/dia** (o trecho abre no clique) |
 | `revisao` | fila + mapa com pino arrastável — confirmar, corrigir, reprovar |
-| `ordens` | candidatos **agrupados por bairro/dia**, script da OS e o botão |
+| `ordens` | candidatos **agrupados por bairro/dia**, script da OS e o botão que monta a OS (executor, tipo de técnico, **equipe**, período) |
 | `mapa` | todos os desligamentos, com a malha óptica sob demanda |
 
 **O bairro/dia é a unidade do módulo inteiro, não só da OS.** A Celesc publica
@@ -335,6 +335,33 @@ nasce resolvido. Sem o segundo passo, revisar conserta uma linha; com ele,
 conserta o endereço. Reprovar existe para o endereço que não dá para
 posicionar — sai da fila **sem** coordenada e sem alias, em vez de virar
 palpite com score 100.
+
+**Os campos da OS vêm do formulário do WVSA, copiados pelo coletor.** Dos 22
+campos do `/relatorios/infra10`, o contrato marca cinco como escolha do painel
+(§3.1) — e até 04/09/2026 iam todos vazios, com `executor='infra'` cravado no
+JS. As opções vivem dentro do formulário, num IP privado: quem as copia para
+`troca_poste.wvsa_catalogos` é o `enviar_os.py`, a cada `OS_CATALOGO_HORAS`.
+O portal só lê.
+
+Medido em 04/09/2026: `tecnico_id[]` é multi-select **estático** no HTML, com
+34 opções, e não depende do `tipo_tecnico` nem vem por AJAX — o `catalogos()`
+do monorepo não o incluía, era omissão. O rótulo traz a empresa como prefixo
+("INFRA UNET - Fulano") e a tela agrupa por ela; o rótulo vai **inteiro**,
+porque há nome repetido em empresas diferentes (Ueliton Patriqui Nicoletti é
+`522` na INFRA WAVE e `661` na WAVE) e cortar o prefixo viraria adivinhação.
+
+⚠️ **`agendamento` fica de fora da tela, de propósito.** Medido no mesmo dia:
+23 slots cobrindo só 04, 05 e 08/09, e a lista muda ao longo do dia. A OS de
+troca de poste é aberta para a data do desligamento, normalmente semanas à
+frente — o slot ainda não existe. É opcional no WVSA; quem quiser encaixar numa
+agenda faz isso lá, onde a lista está viva. O parâmetro segue existindo na
+função para quando houver um caso.
+
+O `bairro` é autocomplete, não select, e por isso é resolvido no **momento do
+envio**, pelo coletor (é o único ponto que alcança o WVSA). ⚠️ Aquele
+autocomplete rate-limita e falha em silêncio — devolve HTTP 200 com lista
+vazia. Lista vazia é "tente de novo", NUNCA "não existe": aceitar o vazio
+mandaria a OS com bairro em branco justamente quando o WVSA está ocupado.
 
 A correção humana é durável: `marcar_coordenadas_colapsadas` tem
 `and g.validacao <> 'manual'` e o upsert da geocodificação preserva `manual`.
@@ -1017,12 +1044,33 @@ a.run(port=5001, use_reloader=False)"
   * **a revisão pela tela contra o banco** — a função foi provada por script; o
     caminho do botão até ela foi provado só com a função ainda inexistente.
 
-  ⚠️ **`bairro_wvsa_id` é NULL nos 515 desligamentos.** O código deixou de
-  cravar `bairro_id=""` e passou a ler a coluna, mas **nada preenche essa
-  coluna** — o `resolverBairro()` do `WvsaClient` está implementado no monorepo
-  e não tem caller. Na prática o campo `bairro` do formulário do WVSA continua
-  indo vazio, e só se saberá no primeiro envio real se ele é obrigatório. É
-  pendência do pipeline, não do portal.
+  ⚠️ **`bairro_wvsa_id` é NULL nos 515 desligamentos** e nada no pipeline
+  preenche essa coluna. Resolvido por outro caminho na migration `0013`: o
+  nome do bairro viaja com a ordem (`ordens_servico.bairro_nome`) e o coletor
+  resolve o id pelo autocomplete do WVSA no momento do envio — é o único ponto
+  do sistema que alcança aquele endpoint. Falha na resolução não impede a OS:
+  o campo é opcional (contrato §3.1).
+
+- **Escolha de equipe e dos campos da OS** entrou em 04/09/2026, migration
+  `0013` (coluna `bairro_nome`, e `criar_os_bairro_dia` recriada com
+  `p_tecnico_ids`). Antes toda OS saía com `executor='infra'` cravado no JS e
+  os outros quatro campos "de painel" vazios — inclusive a **equipe**.
+
+  O modal de Abrir OS passou a montar a OS: quem executa, tipo de técnico,
+  período e os técnicos em `.lista-marcar` agrupada por empresa. As opções são
+  copiadas do formulário do WVSA para `troca_poste.wvsa_catalogos` pelo
+  `enviar_os.py` — 53 opções na primeira sincronização (executor 3,
+  tipo_tecnico 2, período 3, técnico 34, finalidade 11).
+
+  Provado contra produção em transação com `rollback`: a função grava
+  `tecnico_ids`, `periodo`, `tipo_tecnico` e `bairro_nome`; lista de técnicos
+  vazia vira **NULL**, não `{}` (array vazio diria que houve escolha quando não
+  houve); e o `drop`+`create` deixou **uma** versão viva da função, sem
+  sobrecarga. No navegador, o POST interceptado levava os 17 ids do grupo mais
+  `executor`, `periodo`, `tipo_tecnico` e os dois `tecnico_ids` escolhidos.
+
+  **Ainda não exercitado:** a resolução do bairro por autocomplete (só roda no
+  envio, e nenhum aconteceu) e a inativação de técnico que sai do cadastro.
 
 - **Envio REAL de OS ao WVSA** segue sem nunca ter rodado ponta a ponta. São
   dois interruptores: `OS_ENVIO_HABILITADO=true` mostra o botão e

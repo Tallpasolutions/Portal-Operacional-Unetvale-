@@ -180,9 +180,34 @@
     </div>
   </div>
 
-  <dialog id="tp-dlg-os" class="modal">
-    <h3>Abrir OS no WVSA?</h3>
+  {# O modal deixou de só confirmar: é aqui que se monta a OS. Os campos são os
+     que o contrato do WVSA marca como escolha do painel (§3.1) — antes iam
+     todos vazios, com `executor` cravado em "infra" no JS.
+
+     `agendamento` não está aqui de propósito: a lista do WVSA cobre poucos
+     dias e muda ao longo do dia, e a OS é aberta para a data do desligamento,
+     semanas à frente. É opcional lá. #}
+  <dialog id="tp-dlg-os" class="modal" style="max-width:560px;">
+    <h3>Abrir OS no WVSA</h3>
     <p id="tp-dlg-os-texto"></p>
+
+    <div class="grid" style="grid-template-columns:1fr 1fr;gap:12px;margin-top:16px;">
+      <label class="field">Quem executa
+        <select id="tp-os-executor"></select>
+      </label>
+      <label class="field">Período
+        <select id="tp-os-periodo"></select>
+      </label>
+      <label class="field" style="grid-column:1/-1;">Tipo de técnico
+        <select id="tp-os-tipo-tecnico"></select>
+      </label>
+    </div>
+
+    <label class="field" style="display:block;margin-top:12px;">
+      Equipe <span class="upd" id="tp-os-tec-conta" style="display:inline"></span>
+      <div class="lista-marcar" id="tp-os-tecnicos"></div>
+    </label>
+
     <div class="modal-acoes">
       <button class="btn sec" type="button" data-fechar>Cancelar</button>
       <button class="btn" type="button" id="tp-dlg-os-ok">Abrir OS</button>
