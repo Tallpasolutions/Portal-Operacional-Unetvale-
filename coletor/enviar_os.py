@@ -156,13 +156,19 @@ class Wvsa:
         for tentativa in range(3):
             if tentativa:
                 time.sleep(0.9)
+            # `query`, não `term` — e os dois cabeçalhos são obrigatórios: sem
+            # eles o WVSA devolve HTML da tela em vez do JSON, e a resposta
+            # parece "bairro não encontrado" quando é a requisição que está
+            # errada. Foi exatamente o que aconteceu na primeira tentativa.
             r = self.s.get(f"{self.base}/autocomplete/bairro", timeout=TIMEOUT,
-                           params={"term": nome})
+                           params={"query": nome},
+                           headers={"X-Requested-With": "XMLHttpRequest",
+                                    "Accept": "application/json"})
             try:
-                sug = r.json().get("suggestions") or r.json()
+                sug = (r.json() or {}).get("suggestions") or []
             except ValueError:
                 sug = []
-            for item in sug if isinstance(sug, list) else []:
+            for item in sug:
                 if isinstance(item, dict) and item.get("data"):
                     return str(item["data"])
         return ""
@@ -393,28 +399,35 @@ def rodada(wvsa_cache=None):
         return 0, wvsa_cache
     log("fila", quantidade=len(fila))
 
-    # Ensaio não precisa de sessão nem de rota até o WVSA: ele para antes da
-    # requisição. Separar os dois grupos permite conferir payload de qualquer
-    # lugar, inclusive fora da VPN.
+    ensaios = [o for o in fila if o.get("dry_run")]
+    reais = [o for o in fila if not o.get("dry_run")]
     feitas = 0
-    reais = []
-    for ordem in fila:
-        if ordem.get("dry_run"):
-            processar(ordem, None)
-            feitas += 1
-        else:
-            reais.append(ordem)
-    if not reais:
-        return feitas, wvsa_cache
 
+    # O ensaio NÃO precisa do WVSA — ele para antes da requisição, e é isso que
+    # o deixa rodar fora da VPN. Mas se a rota existe, vale abrir sessão mesmo
+    # para ele: o `bairro` é resolvido por autocomplete, e sem sessão o ensaio
+    # nunca exercitaria justamente o campo que ninguém sabe se o WVSA exige.
+    # Sem rota, o ensaio acontece igual, com o bairro em branco.
     wvsa = wvsa_cache
+    if wvsa is None and alcancavel():
+        try:
+            wvsa = Wvsa().login()
+        except Exception as e:
+            log("login_falhou", erro=str(e)[:160])
+            wvsa = None
+
+    for ordem in ensaios:
+        processar(ordem, wvsa)
+        feitas += 1
+
+    if not reais:
+        return feitas, wvsa
+
     if wvsa is None:
-        if not alcancavel():
-            # Deixa as ordens em `pronta`. A próxima rodada tenta de novo, e a
-            # tela continua dizendo "aguardando o coletor" — que é a verdade.
-            log("aguardando_rota", ordens=len(reais))
-            return feitas, None
-        wvsa = Wvsa().login()
+        # Deixa as ordens em `pronta`. A próxima rodada tenta de novo, e a tela
+        # continua dizendo "aguardando o coletor" — que é a verdade.
+        log("aguardando_rota", ordens=len(reais))
+        return feitas, None
 
     for ordem in reais:
         processar(ordem, wvsa)
