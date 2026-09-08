@@ -99,13 +99,35 @@
 </div>
 {% endif %}
 
+{# `!= False` e não `not`: reunião gravada antes da migration 0015 não traz a
+   coluna, e ausência tem de significar "puxa" — que é o default do banco e o
+   comportamento de sempre. #}
+{% set pauta_ligada = reuniao.puxar_pauta != False %}
 <div class="card" style="margin-top:16px;">
   <div class="card-h">
-    <span>Pauta ({{ pauta|length }})</span>
+    <span>Pauta ({{ pauta|length if pauta_ligada else 0 }})</span>
+    {% if conduz and not reuniao.encerrada_em %}
+    {# Alternável aqui, e não só na criação: o assunto real da reunião nem
+       sempre é conhecido quando ela é agendada, e a escolha vale também
+       depois de gravar — é `montar_ata` quem lê a pauta para o prompt. #}
+    <form method="post" action="{{ url_for('dash.reuniao_pauta', reuniao_id=reuniao.id) }}"
+          style="margin:0;">
+      <input type="hidden" name="ligado" value="{{ '0' if pauta_ligada else '1' }}">
+      <button class="btn-ghost" type="submit">
+        {{ 'Não trazer as ações em aberto' if pauta_ligada else 'Trazer as ações em aberto' }}
+      </button>
+    </form>
+    {% else %}
     <span class="subnote" style="margin:0;">atrasadas e críticas primeiro</span>
+    {% endif %}
   </div>
   <div class="card-b">
-    {% if pauta %}
+    {% if not pauta_ligada %}
+    <div class="vazio">
+      A pauta automática está desligada nesta reunião. As ações em aberto dos participantes
+      não aparecem aqui e <b>não vão para a ata</b> — ela sai só do que foi falado.
+    </div>
+    {% elif pauta %}
     <p class="subnote" style="margin-top:0;">
       Só ações em aberto dos participantes. Concluídas e canceladas ficam fora — a reunião é
       sobre o que está de pé; o histórico mora na própria ação.
