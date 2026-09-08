@@ -292,28 +292,42 @@ def _mapa_codigos():
         return {}
 
 
-def _texto_para_ata(lista):
-    """Escolhe o que mandar ao modelo: transcrição crua, notas, ou notas cortadas.
+def _texto_para_ata(lista, pauta=None, participantes=None, data_reuniao=None):
+    """Escolhe o que mandar ao modelo, e com quanta resposta.
+
+    Devolve `(texto, origem, parcial, max_tokens_da_resposta)`.
 
     Três degraus, do melhor para o pior, e o critério é sempre "cabe na cota do
     minuto" — não a duração da reunião. Vinte minutos de discussão densa
     ocupam mais que quarenta de conversa arrastada.
 
-    O terceiro degrau existe para reunião muito longa, e devolve `parcial=True`
-    para que a ata saia CARIMBADA. Cortar em silêncio produziria uma ata que
-    parece completa e ignora a segunda metade da reunião.
+    🚨 Quem faz a conta é `ia.plano_ata`, e ela conta o PROMPT INTEIRO. Até
+    08/09/2026 este cálculo media só o corpo do texto: as notas de uma reunião
+    de 25 min davam 3.794 tokens, "cabiam" nos 6.800, e a requisição saía com
+    4.581 (o esquema da ata sozinho pesa 709) — recusada pelo próprio guarda,
+    depois de a reunião ter acabado e os 13 trechos terem sido transcritos.
+
+    O terceiro degrau devolve `parcial=True` para que a ata saia CARIMBADA.
+    Cortar em silêncio produziria uma ata que parece completa e ignora a
+    segunda metade da reunião.
     """
+    def plano(t):
+        return ia.plano_ata(t, pauta, participantes, data_reuniao)
+
     inteiro = "\n\n".join(t["texto"] for t in lista if t.get("texto"))
-    if len(inteiro) <= ATA_MAX_CHARS and ia.cabe(inteiro, ia.MAX_TOKENS_ATA):
-        return inteiro, "transcricao", False
+    cabe, resposta = plano(inteiro)
+    if len(inteiro) <= ATA_MAX_CHARS and len(inteiro) <= cabe:
+        return inteiro, "transcricao", False, resposta
 
     notas = "\n\n".join(t["notas"] for t in lista if t.get("notas"))
-    if notas and ia.cabe(notas, ia.MAX_TOKENS_ATA):
-        return notas, "notas", False
+    if notas:
+        cabe, resposta = plano(notas)
+        if len(notas) <= cabe:
+            return notas, "notas", False, resposta
 
     base = notas or inteiro
-    limite = int((ia.ORCAMENTO - ia.MAX_TOKENS_ATA) * ia.CHARS_POR_TOKEN)
-    return base[:limite], ("notas" if notas else "transcricao"), len(base) > limite
+    cabe, resposta = plano(base)
+    return base[:cabe], ("notas" if notas else "transcricao"), len(base) > cabe, resposta
 
 
 def montar_ata(reuniao, usuario, interrompida=False):
@@ -345,13 +359,19 @@ def montar_ata(reuniao, usuario, interrompida=False):
         raise ValueError(
             "Nenhum trecho foi transcrito ainda — não há texto de onde tirar a ata.")
 
-    texto, origem, parcial = _texto_para_ata(lista)
-
     # A pauta serve a dois fins: os códigos que vão no prompt e o mapa
     # codigo->id que liga o item à ação. Buscar o mapa de novo com
     # `_mapa_codigos()` seria uma ida ao banco para reobter o que já está aqui.
+    # Reunião com a pauta desligada devolve lista vazia — e aí nenhum código
+    # entra no prompt, que é justamente o ponto de desligá-la.
     pauta = [(a["codigo"], a["titulo"]) for a in da_pauta]
     codigos = {a["codigo"].upper(): a["id"] for a in da_pauta if a.get("codigo")}
+
+    # A escolha do texto precisa do MESMO contexto que vai ser enviado: é ele
+    # que ocupa o espaço disputado com a transcrição.
+    texto, origem, parcial, resposta = _texto_para_ata(
+        lista, pauta=pauta, participantes=nomes,
+        data_reuniao=reuniao.get("data"))
 
     # Não existe mais um update só para marcar "transcrevendo": ninguém lê esse
     # estado (o cliente fica esperando a resposta desta requisição), e ele
@@ -359,7 +379,8 @@ def montar_ata(reuniao, usuario, interrompida=False):
     # `gravando` e o botão de resgate na tela resolve.
     try:
         dados = ia.gerar_ata(texto, pauta=pauta, participantes=nomes,
-                             data_reuniao=reuniao.get("data"))
+                             data_reuniao=reuniao.get("data"),
+                             max_tokens=resposta)
     except Exception as e:
         supa.update("reunioes", {"id": reuniao_id}, {
             "gravacao_status": "erro", "gravacao_erro": str(e)[:500]})

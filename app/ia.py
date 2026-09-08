@@ -18,6 +18,7 @@ DUAS COISAS QUE NÃO PODEM SER ESQUECIDAS:
    ata pela metade fingindo estar pronta.
 """
 import json
+import math
 import os
 import time
 
@@ -51,9 +52,18 @@ ORCAMENTO = int(TPM * 0.85)
 # mensagem que explica, em vez de tomar 413 no meio da geração da ata.
 CHARS_POR_TOKEN = 3.5
 
-# Reserva para a resposta da ata. Exportada para que `reuniao_ia` decida o que
-# mandar usando o MESMO número — dois orçamentos separados divergem calados.
+# Reserva para a resposta da ata, e o piso abaixo do qual não vale encolher.
+#
+# O piso existe porque a ata volta em JSON: resposta truncada não é ata curta,
+# é ata NENHUMA (o `json.loads` levanta e nada é gravado). Entre apertar a
+# escrita e cortar a reunião, `plano_ata` aperta a escrita primeiro — o que
+# foi dito não volta, e o áudio some em 30 dias.
 MAX_TOKENS_ATA = 2800
+MIN_TOKENS_ATA = int(os.environ.get("GROQ_MIN_TOKENS_ATA", "1600"))
+
+# Folga para o arredondamento de `tokens_aprox` e para as quebras de linha
+# que juntam sistema, contexto e texto. Ver `plano_ata`.
+MARGEM_JUNCAO = 8
 
 
 def tokens_aprox(texto):
@@ -310,12 +320,24 @@ Regras dos campos:
 - Lista sem conteúdo é lista vazia [], nunca item inventado para preencher."""
 
 
-def gerar_ata(texto, pauta=None, participantes=None, data_reuniao=None):
-    """Transcrição -> estrutura da ata (dict). A prosa é montada no Python.
+def _sistema_ata():
+    """A instrução fixa da ata. Uma função, e não duas concatenações soltas,
+    para que quem ORÇA e quem ENVIA meçam exatamente a mesma string."""
+    return REGRA_COMUM + "\n" + ESQUEMA_ATA
 
-    O modelo devolve dados, não Markdown: a formatação da ata é nossa e
-    determinística. Assim duas reuniões saem com a mesma cara, e mudar o
-    layout não depende de reescrever prompt.
+
+def _contexto_ata(texto, pauta=None, participantes=None, data_reuniao=None):
+    """Monta o bloco do usuário: âncora de data, participantes, pauta, texto.
+
+    🚨 ARMADILHA PAGA (08/09/2026): esta montagem morava dentro de `gerar_ata`,
+    e por isso `reuniao_ia._texto_para_ata` orçava só o CORPO do texto enquanto
+    `_conversar` cobrava o pacote inteiro. A diferença — 709 tokens de esquema
+    mais o contexto — reprovava a ata DEPOIS de a reunião acabar: 13 trechos
+    transcritos, notas prontas, e "passam do teto de 8000 tokens por minuto".
+    Pior, o degrau de corte de `_texto_para_ata` cortava em exatamente
+    `ORCAMENTO - MAX_TOKENS_ATA`, sem deixar espaço para o esquema — ou seja,
+    NUNCA passava, e reunião longa jamais produziu ata, nem carimbada como
+    parcial. Chamar isto de fora é o que faz as duas contas serem uma só.
     """
     contexto = []
     if data_reuniao:
@@ -336,9 +358,61 @@ def gerar_ata(texto, pauta=None, participantes=None, data_reuniao=None):
             + "\n".join(f"- {c}: {t}" for c, t in pauta)
         )
     contexto.append("Transcrição:\n" + texto)
+    return "\n\n".join(contexto)
 
-    bruto = _conversar(REGRA_COMUM + "\n" + ESQUEMA_ATA,
-                       "\n\n".join(contexto), json_estrito=True, max_tokens=MAX_TOKENS_ATA)
+
+def plano_ata(texto, pauta=None, participantes=None, data_reuniao=None):
+    """Quanto do texto cabe no minuto, e quanto sobra para a resposta.
+
+    Devolve `(chars_que_cabem, max_tokens_da_resposta)` contando o prompt
+    INTEIRO — esquema, âncora de data, participantes e pauta inclusive.
+
+    A ordem das concessões não é arbitrária: encolhe primeiro a RESPOSTA, até
+    `MIN_TOKENS_ATA`, e só então corta a ENTRADA. Ata mais enxuta ainda cobre
+    a reunião toda; entrada cortada joga fora o fim da conversa, que costuma
+    ser justamente onde se combina o que fazer.
+    """
+    # Medido na string CONCATENADA, do jeitinho que `_conversar` mede — somar
+    # `tokens_aprox` de cada pedaço trunca duas vezes e a conta fecha um token
+    # abaixo da real. Foi exatamente assim que o primeiro teste desta correção
+    # deu 6.801 contra um orçamento de 6.800: reprovada por UM token, com a
+    # reunião inteira já transcrita. A folga cobre isso e as junções.
+    fixo = tokens_aprox(
+        _sistema_ata() + "\n"
+        + _contexto_ata("", pauta, participantes, data_reuniao)) + MARGEM_JUNCAO
+    livre = ORCAMENTO - fixo
+    if livre - MIN_TOKENS_ATA <= 0:
+        # Pauta ou lista de participantes tão grande que não sobra espaço para
+        # a conversa. Recusar dizendo isso é melhor que mandar e tomar 413.
+        raise IAIndisponivel(
+            f"O cabeçalho da ata (esquema, participantes e pauta) já ocupa "
+            f"{fixo} dos {ORCAMENTO} tokens do minuto — não sobra espaço para a "
+            "transcrição. Reduza a pauta da reunião ou aumente GROQ_TPM.")
+    # `ceil` e não `tokens_aprox` aqui: arredondar o texto para BAIXO devolvia
+    # um espaço um a três caracteres menor que ele mesmo, e a ata saía
+    # carimbada como "parcial" por causa de um caractere cortado. Arredondar
+    # para cima só custa um token de resposta.
+    preciso = math.ceil(len(texto or "") / CHARS_POR_TOKEN)
+    resposta = min(MAX_TOKENS_ATA, max(MIN_TOKENS_ATA, livre - preciso))
+    return int((livre - resposta) * CHARS_POR_TOKEN), resposta
+
+
+def gerar_ata(texto, pauta=None, participantes=None, data_reuniao=None,
+              max_tokens=None):
+    """Transcrição -> estrutura da ata (dict). A prosa é montada no Python.
+
+    O modelo devolve dados, não Markdown: a formatação da ata é nossa e
+    determinística. Assim duas reuniões saem com a mesma cara, e mudar o
+    layout não depende de reescrever prompt.
+
+    `max_tokens` vem de `plano_ata` — quem escolheu o texto já sabe quanto
+    sobrou para a resposta, e recalcular aqui seria a segunda conta que
+    divergiria da primeira.
+    """
+    bruto = _conversar(_sistema_ata(),
+                       _contexto_ata(texto, pauta, participantes, data_reuniao),
+                       json_estrito=True,
+                       max_tokens=max_tokens or MAX_TOKENS_ATA)
     try:
         dados = json.loads(bruto)
     except json.JSONDecodeError as e:
