@@ -219,6 +219,23 @@ apareceu, decidir o que é recorrente e formatar a ata. Os três são código em
 `reuniao_ia.py`. O modelo transcreve e redige; todo número na tela veio do
 Postgres.
 
+**A pauta automática é alternável por reunião** (`reunioes.puxar_pauta`,
+migration `0015`). Ela é montada com toda ação em aberto de qualquer
+participante, e isso aparece em dois lugares: o card "Pauta" da tela e o bloco
+"Ações que estavam na pauta" **dentro do prompt da ata** — que empurra o modelo a
+amarrar a conversa nesses códigos. Numa reunião de orçamento de 08/09/2026
+entraram `AC-003` e `AC-004`, que nada tinham a ver com o assunto.
+
+O botão fica no cabeçalho do card, e não na criação da reunião, porque o assunto
+real nem sempre é conhecido no agendamento — e porque a escolha precisa valer
+também **depois** de gravar, na hora de gerar a ata. Desligar tira os dois de uma
+vez: é `acoes.pauta()` quem devolve `[]`, e `montar_ata` lê dela.
+
+⚠️ `default true` no banco e `is False` no Python: ausência da coluna (reunião
+lida antes da migration) significa **puxa**, que é o comportamento de sempre.
+`not reuniao.get("puxar_pauta")` faria a pauta sumir de todas as reuniões
+enquanto a migration não subisse.
+
 Item de ata só vira comentário na ação por **clique humano** — `acao_eventos` é
 append-only por trigger, e texto de IA que entrasse lá sozinho seria
 irreversível.
@@ -647,6 +664,40 @@ trecho — que é justamente por que elas são calculadas durante a reunião, co
 trecho ainda na mão. Reunião muito longa nem com notas cabe: aí a ata sai
 **carimbada como parcial**, nunca cortada em silêncio.
 
+⚠️ Os 8.000 são teto de conta, não de plano mal configurado. Medido nos headers
+em 08/09/2026: `openai/gpt-oss-120b` e `qwen/qwen3.8-27b` dão 8.000 TPM e 1.000
+req/dia; só `groq/compound` e `compound-mini` dão 70.000 — e esses são
+**agênticos**. Forçando, o compound visitou `g1.globo.com`, e
+`compound_custom.tools.enabled_tools: []` é **ignorado em silêncio** (o schema é
+validado, um nome inválido dá 400 listando as ferramentas, mas lista vazia não
+desliga nada). O que desliga a web é restringir a lista a uma ferramenta que não
+navega (`wolfram_alpha`). Enquanto isso não for necessário, transcrição de
+reunião interna não vai para modelo que pode navegar.
+
+**Quem ORÇA e quem COBRA tokens tem de medir a MESMA string.** `_texto_para_ata`
+escolhia o texto medindo só o corpo; `ia._conversar` cobrava sistema + contexto +
+texto. A diferença — 709 tokens só do `ESQUEMA_ATA`, mais data, participantes e
+pauta — reprovava a ata **depois** de a reunião acabar: em 08/09/2026, 13 trechos
+transcritos, notas com 3.794 tokens ("cabem" nos 6.800) e a requisição saindo com
+4.581. Pior, o degrau de corte cortava em exatamente `ORCAMENTO - MAX_TOKENS_ATA`,
+sem espaço para o esquema — ou seja **nunca passava**, e reunião longa jamais
+produziu ata, nem carimbada como parcial.
+
+Hoje a conta é uma só: `ia.plano_ata` mede o prompt inteiro (`_sistema_ata` +
+`_contexto_ata`, as mesmas funções que `gerar_ata` envia) e devolve
+`(chars_que_cabem, max_tokens_da_resposta)`. A ordem das concessões importa:
+encolhe primeiro a **resposta**, até `MIN_TOKENS_ATA` (1.600), e só então corta a
+**entrada** — ata mais enxuta ainda cobre a reunião toda, entrada cortada perde o
+fim da conversa, que é onde se combina o que fazer. Com isso o teto prático subiu
+para ~26 min de reunião no plano gratuito.
+
+⚠️ Dois arredondamentos moram aí, e os dois já morderam. O orçamento fixo é
+medido na string **concatenada** (somar `tokens_aprox` de cada pedaço trunca duas
+vezes e a conta fechou em 6.801 contra 6.800: reprovada por UM token), e a
+reserva do texto usa `math.ceil` (arredondar para baixo devolvia um espaço três
+caracteres menor que o próprio texto, e a ata saía carimbada como "parcial" por
+causa de um caractere).
+
 **`datetime.now()` grava 3 horas no passado.** Ele devolve hora local
 ingênua; numa coluna `timestamptz` o Postgres lê o valor sem fuso como se já
 fosse UTC. `ata_gerada_em`, `encerrada_em` e `atualizado_em` nasciam antes do
@@ -664,12 +715,19 @@ navegador — borda quadrada, fonte do sistema, altura diferente — no meio de
 campos arredondados. Foi o que deixou o filtro das Reuniões e o De/Até da Troca
 de Poste com cara de outro site. Ao usar um tipo novo, acrescente-o à regra.
 
-**Coluna nova vai no conjunto ESTENDIDO, nunca no base.** `acoes.py` lê as
-reuniões com `_select_reunioes(filtro, extras)`: tenta `_COLS_REUNIAO + extras`
-e, se o PostgREST recusar, recua para `_COLS_REUNIAO` sozinho. Esse recuo existe
-porque o deploy e a migration não acontecem no mesmo segundo. Pôr a coluna nova
-no conjunto **base** quebra o recuo junto — e aí, sem a migration, a reunião não
-abre. Já aconteceu com `convidados`.
+**Coluna nova vai no conjunto ESTENDIDO, nunca no base — e o recuo é em
+DEGRAUS.** `acoes.py` lê as reuniões com `_select_reunioes(filtro, extras)`, que
+tenta três conjuntos, do mais novo para o mais antigo: `_COLS_OPCIONAIS`
+(`puxar_pauta`, migration 0015), `extras` (as colunas de gravação, 0006) e o
+base. Esse recuo existe porque o deploy e a migration não acontecem no mesmo
+segundo. Pôr a coluna nova no conjunto **base** quebra o recuo junto — e aí, sem
+a migration, a reunião não abre. Já aconteceu com `convidados`.
+
+⚠️ E ele era tudo-ou-nada até 08/09/2026: bastava a coluna mais nova faltar para
+o estendido INTEIRO cair, e `gravacao_status`/`ata_markdown` sumirem da tela de
+todas as reuniões — a coluna estava no lugar certo, mas levava a ata junto.
+Medido antes de a `0015` subir. Ao acrescentar a próxima coluna opcional, some
+um degrau; não a enfie no `extras`.
 
 **`ignorarMassivas=S` é o padrão do `operacional31` e apaga a segunda maior
 causa.** Medido em 29/08/2026, IQI de 07/2026: com `S` vêm 156 linhas e 2 de
@@ -1135,10 +1193,16 @@ a.run(port=5001, use_reloader=False)"
   Exercitado numa reunião de verdade: gravar pelo navegador, transcrever,
   gerar a ata, editar a ata e o PDF.
 
+  **A rotação de trecho passou no uso real** em 08/09/2026: a reunião
+  "Orçamento - Operações" gravou **13 trechos** de 2 min (~25 min), todos
+  transcritos com sucesso. O que falhou naquele dia foi a montagem da ata, por
+  contabilidade de tokens (§6) — corrigido, e a ata foi gerada dos mesmos 13
+  trechos, com 20 pontos discutidos, sem carimbo de parcial.
+
+  **Pauta alternável por reunião** entrou em 08/09/2026, migration `0015`
+  (`reunioes.puxar_pauta`). O porquê está no §4.
+
   **Ainda não exercitado**, e são justamente os caminhos mais delicados:
-  * **a rotação de trecho** — as gravações de teste tiveram menos de 2 min, e
-    nenhuma passou pelo `stop()`/`start()` que fecha um trecho e abre o
-    seguinte. É a peça de que a ata de reunião longa depende;
   * **`aplicar_item` e `criar_acao_do_item`** — escrevem em `acao_eventos`, que
     é append-only, e por isso não foram testados contra produção;
   * **o expurgo dos 30 dias** — nenhum áudio venceu ainda.
