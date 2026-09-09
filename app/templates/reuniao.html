@@ -187,7 +187,7 @@
        edição" e sem botão para salvar — sai sozinho quando você para de
        digitar. A IA erra nome próprio e sigla, e corrigir não pode custar
        três cliques. #}
-    <div class="ata" id="ata-corpo"
+    <div class="ata larga" id="ata-corpo"
          {% if conduz and not reuniao.encerrada_em %}contenteditable="true" spellcheck="true"{% endif %}>{{ ata_html|safe }}</div>
 
     <div class="ata-rodape">
@@ -206,14 +206,32 @@
 <div class="card" style="margin-top:16px;">
   <div class="card-h">
     <span>Itens da ata ({{ itens_ata|length }})</span>
+    {% if conduz %}
+    {# O texto da ata é o relato; estas são sugestões. O botão decide se elas
+       também aparecem DENTRO da ata — antes apareciam sempre, e a seção
+       ENCAMINHAMENTOS repetia palavra por palavra as linhas daqui. #}
+    <form method="post" action="{{ url_for('dash.reuniao_ata_itens', reuniao_id=reuniao.id) }}"
+          style="margin:0;">
+      <input type="hidden" name="ligado" value="{{ '0' if reuniao.itens_na_ata else '1' }}">
+      <button class="btn-ghost" type="submit">
+        {{ 'Tirar da ata' if reuniao.itens_na_ata else 'Incluir na ata' }}
+      </button>
+    </form>
+    {% else %}
     <span class="subnote" style="margin:0;">vire ação, ou anexe a uma que já existe</span>
+    {% endif %}
   </div>
   <div class="card-b">
     <p class="subnote" style="margin-top:0;">
-      Cada item pode virar uma <b>ação nova</b> ou entrar numa ação que já existe.
-      Nos dois casos ele é registrado na linha do tempo da ação, marcado com esta
-      reunião. Essa linha do tempo é permanente — por isso o registro é sempre por
-      clique, e nada da IA entra lá sozinho.
+      Sugestões que a IA tirou da conversa. Cada uma pode virar uma <b>ação nova</b>,
+      entrar numa ação que já existe, ou ser removida. Nos dois primeiros casos ela é
+      registrada na linha do tempo da ação, marcada com esta reunião — e essa linha do
+      tempo é permanente, por isso o registro é sempre por clique.
+      {% if reuniao.itens_na_ata %}
+      Elas também aparecem dentro do texto da ata.
+      {% else %}
+      Elas <b>não</b> entram no texto da ata; use "Incluir na ata" se quiser as listas lá.
+      {% endif %}
     </p>
     {% for i in itens_ata %}
     <div class="item-pauta">
@@ -274,9 +292,51 @@
           </form>
           {% endif %}
         </details>
+
+        {# Remover MARCA, não apaga: a linha some da tela e do PDF, mas fica no
+           banco com quem recusou — e é essa marca que impede a regeração de
+           trazer a mesma sugestão de volta. Fora do <details> porque recusar
+           não é um caso de "virar ação", é o contrário disso. #}
+        <button class="ata-btn item-remover" type="button"
+                data-item="{{ i.id }}" data-texto="{{ i.texto }}">Remover</button>
       {% endif %}
     </div>
     {% endfor %}
+
+    {% if conduz %}
+    {# Um diálogo só para os N itens: o form tem a action trocada no clique.
+       `confirm()` abre a caixa do sistema, com o domínio no topo, que não
+       pertence à tela — CLAUDE.md §5. #}
+    <dialog id="dlg-remover-item" class="modal">
+      <h3>Remover esta sugestão?</h3>
+      <p id="dlg-remover-texto"></p>
+      <div class="modal-acoes">
+        <button class="btn sec" type="button" data-fechar>Cancelar</button>
+        <form method="post" id="form-remover-item" style="margin:0;">
+          <button class="btn" type="submit" style="background:var(--danger);">Remover</button>
+        </form>
+      </div>
+    </dialog>
+    <script>
+      (function () {
+        var dlg = document.getElementById('dlg-remover-item');
+        if (!dlg) return;
+        var alvo = document.getElementById('form-remover-item');
+        var texto = document.getElementById('dlg-remover-texto');
+        var base = "{{ url_for('dash.reuniao_item_descartar', reuniao_id=reuniao.id, item_id='ITEM') }}";
+        document.querySelectorAll('.item-remover').forEach(function (b) {
+          b.addEventListener('click', function () {
+            alvo.action = base.replace('ITEM', b.dataset.item);
+            texto.textContent = b.dataset.texto;
+            dlg.showModal();
+          });
+        });
+        dlg.querySelector('[data-fechar]').addEventListener('click', function () {
+          dlg.close();
+        });
+      })();
+    </script>
+    {% endif %}
   </div>
 </div>
 {% endif %}

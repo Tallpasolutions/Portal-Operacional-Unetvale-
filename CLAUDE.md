@@ -236,6 +236,30 @@ lida antes da migration) significa **puxa**, que é o comportamento de sempre.
 `not reuniao.get("puxar_pauta")` faria a pauta sumir de todas as reuniões
 enquanto a migration não subisse.
 
+**A ata é o RELATO; os itens são sugestões à parte** (migration `0016`). O
+texto traz resumo e pontos discutidos; decisões, encaminhamentos, pendências e
+riscos vivem só como linhas em `reuniao_ata_itens`, no card abaixo. Antes eles
+apareciam nos dois lugares: medido em 08/09/2026, a seção ENCAMINHAMENTOS da
+ata repetia palavra por palavra as 10 sugestões do card — e o PDF levava as
+duas. `reunioes.itens_na_ata` traz as listas de volta para dentro do texto, por
+botão, quando alguém quiser.
+
+Quem alterna não chama a IA: `reunioes.ata_dados` guarda a estrutura que o
+modelo devolveu, e `_markdown` remonta o texto na hora — determinístico, sem
+cota e sem devolver uma ata diferente da que já foi conferida. Ata gerada antes
+da 0016 não tem essa estrutura: aí a escolha fica registrada, vale na próxima
+geração, e a tela **diz isso** em vez de fingir que aplicou. ⚠️ `ata_dados` fica
+FORA do select padrão de reunião (são ~8 KB de JSON que só interessam a quem vai
+remontar).
+
+**Remover uma sugestão MARCA, não apaga** (`descartado_em`/`descartado_por`).
+Reunião é dado que nasce aqui e não tem de onde recoletar (§2) — mas o motivo
+principal é outro: é a marca que faz a regeração não trazer de volta o que
+alguém já recusou (`_textos_descartados` + `_norma`, que compara sem caixa nem
+espaço dobrado, porque o modelo devolve um texto PARECIDO, não idêntico). Item
+já aplicado não se descarta: ele virou comentário em `acao_eventos`, e sumir com
+a origem deixaria o registro órfão.
+
 Item de ata só vira comentário na ação por **clique humano** — `acao_eventos` é
 append-only por trigger, e texto de IA que entrasse lá sozinho seria
 irreversível.
@@ -533,7 +557,7 @@ Os que nasceram nas Reuniões e servem em qualquer tela:
 |---|---|
 | `.dropdown` | `<details>` que abre um painel; o resumo diz o que foi escolhido |
 | `.modal` | `<dialog>` de confirmação |
-| `.ata` | corpo de texto para leitura, com medida limitada |
+| `.ata` | corpo de texto para leitura, com medida limitada (74ch). `.ata.larga` tira o limite — é o que a ata da reunião usa, porque numa ata de 20 pontos a medida deixava metade do cartão vazia (576px de texto num cartão de 1155px, medido em 09/09/2026). O resumo executivo do módulo Ações segue com a medida |
 | `.grav-pill` | controle único de gravação (Gravar/Pausar/Concluir) |
 | `.btn-pdf` | ação discreta dentro de célula de tabela |
 
@@ -727,7 +751,20 @@ a migration, a reunião não abre. Já aconteceu com `convidados`.
 o estendido INTEIRO cair, e `gravacao_status`/`ata_markdown` sumirem da tela de
 todas as reuniões — a coluna estava no lugar certo, mas levava a ata junto.
 Medido antes de a `0015` subir. Ao acrescentar a próxima coluna opcional, some
-um degrau; não a enfie no `extras`.
+um degrau em `_DEGRAUS_OPCIONAIS`; não a enfie no `extras`.
+
+**Recuo de migration só pode disparar em erro de COLUNA — use
+`supa.coluna_faltando(e)`.** Todos esses recuos tratavam QUALQUER exceção como
+"a migration ainda não subiu". Bastava alguém abrir `/reunioes/xx` — um id que
+não é uuid — para o `except` concluir que a coluna não existia e desligar o
+conjunto estendido do processo INTEIRO: dali até o próximo cold start, todas as
+reuniões eram servidas sem ata, sem gravação e sem itens, para todo mundo. Uma
+URL adivinhada degradava o container.
+
+Medido em 09/09/2026 no corpo do 400 do PostgREST: coluna inexistente devolve
+`code 42703`; uuid inválido, `22P02`. `supa.coluna_faltando` lê esse código e
+devolve **False** quando o corpo não é JSON — recuar "na dúvida" é justamente o
+que causou o problema. Qualquer recuo novo por migration passa por ela.
 
 **`ignorarMassivas=S` é o padrão do `operacional31` e apaga a segunda maior
 causa.** Medido em 29/08/2026, IQI de 07/2026: com `S` vêm 156 linhas e 2 de
@@ -1201,6 +1238,19 @@ a.run(port=5001, use_reloader=False)"
 
   **Pauta alternável por reunião** entrou em 08/09/2026, migration `0015`
   (`reunioes.puxar_pauta`). O porquê está no §4.
+
+  **Ata como relato, itens à parte** — migration `0016` (`itens_na_ata`,
+  `ata_dados`, `descartado_em`/`descartado_por`). A ata passou a ocupar o
+  cartão inteiro (`.ata.larga`), as listas saíram do texto e cada sugestão
+  ganhou "Remover". O porquê está no §4; a armadilha do recuo que isso
+  revelou, no §6.
+
+  ⚠️ **Ainda não exercitado contra o banco:** a migration `0016` não estava
+  aplicada quando o código foi escrito. Provado por script (a montagem do
+  Markdown com e sem as listas, o `_norma`) e pelo `test_client` (as duas
+  rotas novas, com entrada ruim, sem 5xx; a tela e o PDF de pé no caminho de
+  recuo). Falta ver o botão remontando a ata e o descarte sobrevivendo a uma
+  regeração.
 
   **Ainda não exercitado**, e são justamente os caminhos mais delicados:
   * **`aplicar_item` e `criar_acao_do_item`** — escrevem em `acao_eventos`, que

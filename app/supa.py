@@ -39,6 +39,35 @@ def _headers(extra=None, schema=None):
     return h
 
 
+# Códigos do Postgres que o PostgREST devolve no corpo do 400. Só o primeiro
+# significa "a migration ainda não subiu"; os outros são requisição errada.
+_COLUNA_FALTANDO = "42703"
+
+
+def coluna_faltando(erro):
+    """O 400 foi por coluna inexistente — e não por uuid torto, filtro ruim etc.
+
+    🚨 ARMADILHA PAGA (09/09/2026): os recuos de "migration ainda não aplicada"
+    tratavam QUALQUER exceção como coluna faltando. Bastava alguém abrir
+    `/reunioes/xx` — id que não é uuid, code `22P02` — para o recuo achar que a
+    coluna não existia e desligar o conjunto estendido inteiro. A partir dali,
+    e até o próximo cold start, o processo servia TODAS as reuniões sem ata,
+    sem gravação e sem itens, para todo mundo. Uma URL adivinhada degradava o
+    container.
+
+    Medido: coluna inexistente devolve `42703`; uuid inválido, `22P02`.
+    """
+    r = getattr(erro, "response", None)
+    if r is None:
+        return False
+    try:
+        return (r.json() or {}).get("code") == _COLUNA_FALTANDO
+    except Exception:
+        # Corpo que não é JSON não prova nada — e recuar "na dúvida" é
+        # exatamente o que causou o problema acima.
+        return False
+
+
 def select(tabela, params=None, schema=None):
     """GET /rest/v1/<tabela> -> lista de dicts."""
     url, _ = _cfg()

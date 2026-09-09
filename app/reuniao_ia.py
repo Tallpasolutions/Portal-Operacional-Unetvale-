@@ -223,11 +223,20 @@ def estado(reuniao_id, reuniao=None):
 
 
 # ------------------------------------------------------------------ ata
-def _markdown(dados, reuniao, interrompida=False, parcial=False):
+def _markdown(dados, reuniao, interrompida=False, parcial=False, com_itens=False):
     """Estrutura -> Markdown. Determinístico, e é de propósito.
 
     O modelo devolve dados; a formatação é nossa. Assim toda ata sai com a
     mesma cara, e mudar o layout é mexer nesta função — não em prompt.
+
+    `com_itens` decide se decisões, encaminhamentos, pendências e riscos
+    entram no TEXTO. Padrão desligado: eles já existem como linhas em
+    `reuniao_ata_itens`, com botão para virar ação, e imprimi-los aqui
+    também repetia o mesmo conteúdo duas vezes na mesma tela — e no PDF.
+    Medido em 08/09/2026: a seção ENCAMINHAMENTOS repetia, palavra por
+    palavra, as 10 sugestões do card logo abaixo. A ata fica sendo o relato
+    (resumo e pontos discutidos); as listas voltam pelo botão da tela, que é
+    quem grava `reunioes.itens_na_ata`.
     """
     L = [f"# {reuniao.get('titulo') or 'Reunião'}",
          f"_{(reuniao.get('data') or '').replace('-', '/')}_", ""]
@@ -271,10 +280,11 @@ def _markdown(dados, reuniao, interrompida=False, parcial=False):
             L.append(f"- **{titulo}** — {p['detalhe']}" if titulo else f"- {p['detalhe']}")
         L.append("")
 
-    secao("Decisões", "decisoes")
-    secao("Encaminhamentos", "encaminhamentos", com_prazo=True)
-    secao("Pendências", "pendencias")
-    secao("Riscos", "riscos")
+    if com_itens:
+        secao("Decisões", "decisoes")
+        secao("Encaminhamentos", "encaminhamentos", com_prazo=True)
+        secao("Pendências", "pendencias")
+        secao("Riscos", "riscos")
 
     L += ["---",
           "_Ata gerada automaticamente a partir da transcrição do áudio. "
@@ -386,7 +396,8 @@ def montar_ata(reuniao, usuario, interrompida=False):
             "gravacao_status": "erro", "gravacao_erro": str(e)[:500]})
         raise
 
-    markdown = _markdown(dados, reuniao, interrompida, parcial=parcial)
+    markdown = _markdown(dados, reuniao, interrompida, parcial=parcial,
+                         com_itens=reuniao.get("itens_na_ata") is True)
     transcricao = "\n\n".join(t["texto"] for t in lista if t.get("texto"))
 
     # Gravar a ata e gravar os itens não dependem um do outro: em série somavam
@@ -395,6 +406,10 @@ def montar_ata(reuniao, usuario, interrompida=False):
         supa.update("reunioes", {"id": reuniao_id}, {
             "transcricao": transcricao,
             "ata_markdown": markdown,
+            # A estrutura fica guardada para que alternar "itens na ata" possa
+            # remontar o texto sem chamar a IA de novo — que custaria cota e
+            # devolveria uma ata diferente da que já foi conferida.
+            "ata_dados": dados,
             "ata_gerada_em": _agora(),
             "ata_modelo": os.environ.get("GROQ_MODELO_TEXTO", ""),
             "gravacao_status": "pronta",
@@ -410,18 +425,31 @@ def montar_ata(reuniao, usuario, interrompida=False):
 
 
 def _itens_soltos(reuniao_id):
-    """Ids dos itens que uma regeração pode apagar — os que ninguém aplicou.
+    """Ids dos itens que uma regeração pode apagar — os que ninguém tocou.
 
-    Item já aplicado virou comentário em `acao_eventos`, que é append-only:
-    apagar a linha aqui deixaria o comentário órfão.
+    Duas exclusões, por motivos diferentes. Item já **aplicado** virou
+    comentário em `acao_eventos`, que é append-only: apagar a linha aqui
+    deixaria o comentário órfão. Item **descartado** é a memória de que
+    alguém recusou aquela sugestão — apagá-lo faria a regeração seguinte
+    trazê-la de volta, que é justamente o que o descarte promete evitar.
     """
-    try:
-        return [a["id"] for a in supa.select("reuniao_ata_itens", {
-            "select": "id,aplicado_em", "reuniao_id": f"eq.{reuniao_id}"})
-            if not a.get("aplicado_em")]
-    except Exception as e:
-        _falhou("_itens_soltos", e)
-        return []
+    campos = "id,aplicado_em,descartado_em"
+    while True:
+        try:
+            linhas = supa.select("reuniao_ata_itens", {
+                "select": campos, "reuniao_id": f"eq.{reuniao_id}"})
+            break
+        except Exception as e:
+            if campos != "id,aplicado_em" and supa.coluna_faltando(e):
+                # Migration 0016 ainda não aplicada: sem a coluna de descarte
+                # não há o que preservar, e a limpeza antiga segue valendo.
+                _falhou("_itens_soltos (migration 0016 ainda não aplicada?)", e)
+                campos = "id,aplicado_em"
+                continue
+            _falhou("_itens_soltos", e)
+            return []
+    return [a["id"] for a in linhas
+            if not a.get("aplicado_em") and not a.get("descartado_em")]
 
 
 def _gravar_itens(reuniao_id, dados, data_reuniao=None, codigos=None, soltos=None):
@@ -444,6 +472,11 @@ def _gravar_itens(reuniao_id, dados, data_reuniao=None, codigos=None, soltos=Non
     if codigos is None:
         codigos = _mapa_codigos()
 
+    # O que uma pessoa já recusou não volta na regeração seguinte. Sem isto o
+    # botão "Remover" seria um gesto sem memória: a próxima geração da ata
+    # traria a mesma sugestão de novo, e a fila nunca encolheria.
+    recusados = _textos_descartados(reuniao_id)
+
     linhas, ordem = [], 0
     for chave, tipo in (("decisoes", "decisao"),
                         ("encaminhamentos", "encaminhamento"),
@@ -451,6 +484,8 @@ def _gravar_itens(reuniao_id, dados, data_reuniao=None, codigos=None, soltos=Non
                         ("riscos", "risco")):
         for item in (dados.get(chave) or []):
             if not (item or {}).get("texto"):
+                continue
+            if _norma(item["texto"]) in recusados:
                 continue
             codigo = (item.get("acao_codigo") or "").upper().strip()
             linhas.append({
@@ -510,17 +545,111 @@ def _data_iso(v, referencia=None):
 
 
 def itens(reuniao_id):
-    try:
-        # `acoes(codigo,titulo)` é embed do PostgREST pela FK: traz o código
-        # da ação junto, para o botão poder dizer "Registrar na AC-012" em vez
-        # de mostrar um uuid que não significa nada para quem lê.
-        return supa.select("reuniao_ata_itens", {
-            "select": "id,tipo,texto,prazo,acao_id,aplicado_em,aplicado_por,"
+    """As sugestões vivas desta reunião, na ordem em que a ata as trouxe.
+
+    🚨 O filtro de descarte vem num degrau próprio, e não junto do resto:
+    filtrar por uma coluna que a migration ainda não criou devolve 400, e o
+    `except` de baixo transformava isso em lista vazia — o card "Itens da ata"
+    inteiro SUMIA da tela. Aconteceu em 09/09/2026, minutos depois de o filtro
+    entrar. Sem a coluna não há descartado, então o recuo é exato.
+    """
+    # `acoes(codigo,titulo)` é embed do PostgREST pela FK: traz o código da
+    # ação junto, para o botão poder dizer "Registrar na AC-012" em vez de
+    # mostrar um uuid que não significa nada para quem lê.
+    base = {"select": "id,tipo,texto,prazo,acao_id,aplicado_em,aplicado_por,"
                       "ordem,acoes(codigo,titulo)",
-            "reuniao_id": f"eq.{reuniao_id}", "order": "ordem.asc"})
+            "reuniao_id": f"eq.{reuniao_id}", "order": "ordem.asc"}
+    try:
+        return supa.select("reuniao_ata_itens", dict(base, **{"descartado_em": "is.null"}))
+    except Exception as e:
+        if not supa.coluna_faltando(e):
+            _falhou("itens", e)
+            return []
+        _falhou("itens (migration 0016 ainda não aplicada?)", e)
+    try:
+        return supa.select("reuniao_ata_itens", base)
     except Exception as e:
         _falhou("itens", e)
         return []
+
+
+def _norma(t):
+    """Texto comparável: sem espaço dobrado, sem caixa, sem pontuação de borda.
+
+    A regeração recebe do modelo um texto PARECIDO, não idêntico — vírgula a
+    mais, maiúscula diferente. Comparar cru deixaria a sugestão recusada
+    voltar na primeira regeração, que é exatamente o que o descarte promete
+    evitar.
+    """
+    return " ".join((t or "").lower().split()).strip(" .;:-—")
+
+
+def _textos_descartados(reuniao_id):
+    try:
+        linhas = supa.select("reuniao_ata_itens", {
+            "select": "texto", "reuniao_id": f"eq.{reuniao_id}",
+            "descartado_em": "not.is.null"})
+    except Exception as e:
+        # Sem a migration 0016 a coluna não existe. Recusar a geração da ata
+        # por causa disso seria trocar um incômodo por uma tela quebrada.
+        _falhou("_textos_descartados", e)
+        return set()
+    return {_norma(l["texto"]) for l in linhas}
+
+
+def descartar_item(item_id, usuario_id):
+    """Recusa uma sugestão da IA. Marca, não apaga.
+
+    Item já aplicado NÃO se descarta: ele virou comentário em `acao_eventos`,
+    que é append-only. Sumir com a origem deixaria na ação um registro sem
+    de onde ele veio.
+    """
+    item = supa.select_one("reuniao_ata_itens", {
+        "select": "id,aplicado_em,descartado_em", "id": f"eq.{item_id}"})
+    if not item:
+        raise ValueError("Sugestão não encontrada.")
+    if item.get("aplicado_em"):
+        raise ValueError(
+            "Esta sugestão já foi registrada numa ação e não pode ser "
+            "removida — o histórico da ação é permanente.")
+    if item.get("descartado_em"):
+        return  # segundo clique não é erro
+    supa.update("reuniao_ata_itens", {"id": item_id}, {
+        "descartado_em": _agora(), "descartado_por": usuario_id})
+
+
+def definir_itens_na_ata(reuniao, ligado):
+    """Liga/desliga as listas dentro do TEXTO da ata, e remonta na hora.
+
+    Devolve `True` se o texto foi remontado. Ata gerada antes da migration
+    0016 não tem `ata_dados` guardado: aí a escolha fica registrada e vale na
+    próxima geração, mas o texto atual não muda — e a tela diz isso, em vez de
+    fingir que aplicou.
+    """
+    reuniao_id = reuniao["id"]
+    mudancas = {"itens_na_ata": bool(ligado)}
+    remontou = False
+    try:
+        linha = supa.select_one("reunioes", {"select": "ata_dados",
+                                             "id": f"eq.{reuniao_id}"})
+        dados = (linha or {}).get("ata_dados")
+    except Exception as e:
+        # Sem a migration 0016 a coluna não existe: a escolha ainda é gravada
+        # e vale na próxima geração — só o texto atual não muda.
+        _falhou("definir_itens_na_ata/ata_dados", e)
+        dados = None
+    if isinstance(dados, dict) and reuniao.get("ata_markdown"):
+        mudancas["ata_markdown"] = _markdown(
+            dados, reuniao,
+            interrompida=bool(reuniao.get("gravacao_interrompida")),
+            com_itens=bool(ligado))
+        # Remontar é o texto voltando ao que a estrutura diz — não é edição
+        # humana. Zerar o carimbo evita a ata passar a mentir "editada à mão".
+        mudancas["ata_editada_em"] = None
+        mudancas["ata_editada_por"] = None
+        remontou = True
+    supa.update("reunioes", {"id": reuniao_id}, mudancas)
+    return remontou
 
 
 def salvar_ata(reuniao_id, markdown, usuario_id):
