@@ -173,7 +173,8 @@
       `<div class="kpi"><div class="v"${cor ? ` style="color:${cor}"` : ""}>${v}</div><div class="l">${rot}</div></div>`;
 
     $("#tp-kpis").innerHTML = [
-      kpi(fmt(linhas.length), "Desligamentos no período"),
+      kpi(fmt(agruparLinhas(linhas).length), "Deslocamentos (bairro · dia)"),
+      kpi(fmt(linhas.length), "Trechos que eles cobrem"),
       kpi(fmt(cont.critico), "Crítico — fibra a menos de 25 m", COR_RISCO.critico),
       kpi(fmt(cont.alto), "Alto", COR_RISCO.alto),
       kpi(fmt(cont.medio), "Médio"),
@@ -199,15 +200,21 @@
 
   function renderGraficos(linhas) {
     // Por dia, empilhado por risco: mostra QUANDO o problema chega.
-    const dias = [...new Set(linhas.map((l) => l.data))].sort();
-    const riscosPresentes = ORDEM.filter((r) => linhas.some((l) => l.classificacao === r));
+    // Conta DESLOCAMENTO, não trecho. A Celesc fatia o mesmo bairro em várias
+    // ruas para o mesmo desligamento: em 04/09/2026, Areias do Meio tinha 17
+    // trechos num dia — o gráfico mostrava 17 eventos onde há uma viagem só, e
+    // o pico dizia mais sobre como a Celesc redigiu o aviso do que sobre o que
+    // vem pela frente. O total de trechos continua no KPI ao lado.
+    const grupos = agruparLinhas(linhas);
+    const dias = [...new Set(grupos.map((g) => g.data))].sort();
+    const riscosPresentes = ORDEM.filter((r) => grupos.some((g) => g.classificacao === r));
     grafico("g-tp-dia", {
       type: "bar",
       data: {
         labels: dias.map((d) => dataBR(d).slice(0, 5)),
         datasets: riscosPresentes.map((r) => ({
           label: ROTULO[r] || r,
-          data: dias.map((d) => linhas.filter((l) => l.data === d && l.classificacao === r).length),
+          data: dias.map((d) => grupos.filter((g) => g.data === d && g.classificacao === r).length),
           backgroundColor: COR_RISCO[r],
         })),
       },
@@ -217,11 +224,15 @@
       },
     });
 
+    // Também por deslocamento, pela mesma razão do gráfico acima — e aqui o
+    // efeito era pior: a cidade cujo aviso a Celesc escreveu rua a rua subia no
+    // ranking sobre a que escreveu o bairro inteiro numa linha, sem diferença
+    // nenhuma de trabalho.
     const porCidade = new Map();
-    for (const l of linhas) {
-      const c = porCidade.get(l.cidade) || { total: 0, critico: 0 };
-      c.total++; if (l.classificacao === "critico") c.critico++;
-      porCidade.set(l.cidade, c);
+    for (const g of grupos) {
+      const c = porCidade.get(g.cidade) || { total: 0, critico: 0 };
+      c.total++; if (g.classificacao === "critico") c.critico++;
+      porCidade.set(g.cidade, c);
     }
     const rank = [...porCidade.entries()].sort((a, b) => b[1].total - a[1].total).slice(0, 12);
     grafico("g-tp-cidades", {

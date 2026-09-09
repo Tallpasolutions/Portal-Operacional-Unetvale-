@@ -347,7 +347,7 @@ próprias, ambas por clique humano: a revisão de endereço e a abertura de OS.
 | `desligamentos` | inventário: filtros, KPIs, dois gráficos, tabela **agrupada por bairro/dia** (o trecho abre no clique) |
 | `revisao` | fila + mapa com pino arrastável — confirmar, corrigir, reprovar |
 | `ordens` | **todos** os grupos do recorte, script da OS e o botão que monta a OS (executor, tipo de técnico, **equipe**, período) |
-| `mapa` | todos os desligamentos, com a malha óptica sob demanda |
+| `mapa` | todos os desligamentos, agrupados por bairro/dia, com a malha óptica sob demanda |
 
 **O bairro/dia é a unidade do módulo inteiro, não só da OS.** A Celesc publica
 o mesmo bairro fatiado em várias ruas para o mesmo desligamento, e a equipe vai
@@ -367,6 +367,47 @@ linha a linha, que é o formato de quem vai cruzar em planilha. O agrupamento é
 código gravava. Quem monta o grupo de verdade é o banco
 (`troca_poste.criar_os_bairro_dia`) — a tela agrupa só para exibir, e o servidor
 não confia nos ids que o browser manda.
+
+**O mapa NÃO colapsa o grupo num pino, e isso é medido.** Em 09/09/2026, dos
+39 grupos com dois ou mais trechos posicionados, a dispersão MEDIANA era
+**916 m** e a máxima **12,6 km** — só 6 cabiam em 200 m. Um pino no centro
+mandaria a equipe para onde não há obra. Os trechos continuam desenhados um a
+um; o grupo entra como contorno tracejado em volta do NÚCLEO.
+
+⚠️ **E a dispersão virou detector de geocodificação errada — melhor que o
+score.** Em Navegantes · PRTO DAS BALSAS, 13 dos 14 trechos estavam a ~300 m
+uns dos outros e UM, `validacao='revisar'` e score 28, a 7 km: sozinho ele
+criava os 9,2 km de dispersão do grupo. Nos 12 grupos com mais de 2 km, os
+pontos fora do lugar eram **sempre** os `revisar`. Medido no recorte inteiro:
+dos 18 acusados, **15 já estavam marcados para revisão**. "Este endereço está a
+7 km dos outros 13 do mesmo bairro no mesmo dia" é evidência; "score 28" é
+desconfiança.
+
+Três decisões que o desenho carrega, e o porquê de cada uma:
+
+* **o centro é a MEDIANA das coordenadas, não a média.** Com um ponto a 7 km a
+  média é puxada para o meio do nada, e o cluster inteiro passa a parecer longe
+  do centro — a mediana ignora o outlier, que é justamente o que se quer
+  isolar;
+* **o contorno cerca o núcleo, não todos os trechos.** Incluir o suspeito
+  esticaria o círculo até ele e o faria parecer dentro do bairro, apagando o
+  sinal;
+* **com apenas DOIS pontos afastados não se acusa ninguém** a menos que a
+  própria geocodificação já não avalize um deles. Chutar marcaria o certo
+  metade das vezes.
+
+⚠️ O detector diz "não fecha", **não** "está errado". Num grupo em que a
+maioria dos pontos está mal geocodificada, o centro sai errado e o ponto BOM é
+que aparece fora do lugar — foi o caso de `PEDRO ROMAO` (score 92, aceita) em
+Alto Pereque. Por isso o aviso do popup muda de texto quando a posição tinha
+sido aceita: ali ele pede conferência, não denuncia.
+
+**Os gráficos e KPIs contam DESLOCAMENTO** (bairro·dia), com o total de trechos
+ao lado. Antes contavam trecho, e o dia 04/09 aparecia como 17 eventos onde há
+uma viagem só a Areias do Meio: o pico dizia mais sobre como a Celesc redigiu o
+aviso do que sobre o que vem pela frente. No ranking de cidades o efeito era
+pior — a cidade cujo aviso foi escrito rua a rua subia sobre a que descreveu o
+bairro numa linha, sem diferença nenhuma de trabalho.
 
 A aba de Ordens mostrava **só os críticos** até 04/09/2026. Passou a mostrar
 todos: a classificação continua ordenando e aparece no badge de cada linha, mas
@@ -1044,6 +1085,24 @@ vocabulário do Geogrid, e quem está no poste não identifica ativo por sigla. 
 classificação continua escolhendo os candidatos — ela só não é impressa. Ao
 mexer num dos dois arquivos, saiba que o outro não acompanha.
 
+**`invalidateSize` do Leaflet NÃO reenquadra.** Ele avisa o mapa do novo
+tamanho e para por aí: o `fitBounds` que rodou com o container menor continua
+valendo, e os pontos ficam apertados num canto do mapa já redimensionado. Quem
+redimensiona depois precisa guardar os limites e reaplicá-los — é o
+`reenquadrar()` do `troca_poste_mapa.js`.
+
+Corolário que custou tempo: **observar o CONTAINER para saber quando remedir
+não funciona**. Se a altura errada já foi escrita, ele não muda mais de tamanho
+e o `ResizeObserver` nunca dispara — a medida errada se protege. Quem muda é a
+página em volta (a legenda da malha só ganha altura quando o `rede.json`
+responde), e é `document.body` que se observa.
+
+⚠️ E há uma armadilha de MEDIÇÃO em cima dessa: com o painel do navegador
+oculto, `requestAnimationFrame` não roda e o layout fica adiado, então o mapa
+parece travado num estado que se resolve sozinho assim que a página é pintada.
+Ao investigar layout pelo preview, force a pintura (um screenshot serve) antes
+de concluir que há defeito.
+
 **Pooler do Supabase: `aws-1-us-west-2`.** A região está no hostname; a errada
 dá "tenant not found".
 
@@ -1217,6 +1276,24 @@ a.run(port=5001, use_reloader=False)"
 
   **Ainda não exercitado:** a resolução do bairro por autocomplete (só roda no
   envio, e nenhum aconteceu) e a inativação de técnico que sai do cadastro.
+
+- **Agrupamento por bairro no mapa e nos gráficos** entrou em 09/09/2026, sem
+  migration — é tudo cliente, a partir do `grupo_chave` que o servidor já
+  carimbava. Fecha o que faltava do agrupamento: a tabela e a aba de OS já
+  agrupavam desde 04/09; mapa, gráficos e KPIs ainda contavam trecho.
+
+  O achado do dia foi a **dispersão como detector de geocodificação errada**
+  (§4 e §6): 15 dos 18 acusados já estavam na fila de revisão, e os 3 restantes
+  tinham score alto — casos que o score sozinho nunca levantaria.
+
+  Exercitado no navegador contra produção, desktop e mobile, console limpo:
+  36 bairros/dia, 15 fora do lugar e 6 sem posição no recorte de 7 dias; 183
+  marcadores, 26 contornos, 15 anéis e 15 raios tracejados no DOM; e o filtro
+  por Navegantes mostrando o raio saindo do aglomerado até o ponto a 7 km.
+
+  **Ainda não exercitado:** o comportamento com o painel do navegador visível
+  em tela real — a verificação correu com o painel oculto, onde o layout é
+  adiado (§6).
 
 - **Envio REAL de OS ao WVSA** segue sem nunca ter rodado ponta a ponta. São
   dois interruptores: `OS_ENVIO_HABILITADO=true` mostra o botão e
