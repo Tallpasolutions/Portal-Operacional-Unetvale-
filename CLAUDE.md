@@ -252,6 +252,15 @@ geração, e a tela **diz isso** em vez de fingir que aplicou. ⚠️ `ata_dados
 FORA do select padrão de reunião (são ~8 KB de JSON que só interessam a quem vai
 remontar).
 
+**Regerar a ata tem botão** ("Gerar de novo", no rodapé da ata), com `<dialog>`
+de confirmação. A rota sempre permitiu regerar — inclusive depois de encerrada,
+porque o que "ata congelada" protege são os comentários do dia, não o texto
+derivado do áudio —, mas o botão só existia enquanto NÃO houvesse ata. Sem ele,
+"Incluir na ata" não tinha como aplicar em nenhuma ata anterior à `0016`, que é
+onde `ata_dados` passou a ser guardado. ⚠️ Regerar chama a IA e a saída varia:
+medido em 09/09/2026, a mesma reunião saiu com 13 pontos discutidos onde antes
+tinha 20. A ata anterior não volta — o modal diz isso antes.
+
 **Remover uma sugestão MARCA, não apaga** (`descartado_em`/`descartado_por`).
 Reunião é dado que nasce aqui e não tem de onde recoletar (§2) — mas o motivo
 principal é outro: é a marca que faz a regeração não trazer de volta o que
@@ -259,6 +268,15 @@ alguém já recusou (`_textos_descartados` + `_norma`, que compara sem caixa nem
 espaço dobrado, porque o modelo devolve um texto PARECIDO, não idêntico). Item
 já aplicado não se descarta: ele virou comentário em `acao_eventos`, e sumir com
 a origem deixaria o registro órfão.
+
+⚠️ **O filtro do que foi recusado precisa valer no TEXTO e nas LINHAS, e é um
+só** (`_sem_recusados`, aplicado em `montar_ata` e na remontagem). A primeira
+versão filtrava só em `_gravar_itens`: medido em 09/09/2026, a sugestão removida
+não voltava ao card e VOLTAVA ao texto da ata na regeração seguinte — pior que
+não ter filtro, porque some justamente do lugar onde há botão para removê-la de
+novo e reaparece no documento. `ata_dados` continua guardando a estrutura
+íntegra: filtrar é decisão de montagem, e uma recusa desfeita precisa ter de
+onde voltar.
 
 Item de ata só vira comentário na ação por **clique humano** — `acao_eventos` é
 append-only por trigger, e texto de IA que entrasse lá sozinho seria
@@ -1245,12 +1263,16 @@ a.run(port=5001, use_reloader=False)"
   ganhou "Remover". O porquê está no §4; a armadilha do recuo que isso
   revelou, no §6.
 
-  ⚠️ **Ainda não exercitado contra o banco:** a migration `0016` não estava
-  aplicada quando o código foi escrito. Provado por script (a montagem do
-  Markdown com e sem as listas, o `_norma`) e pelo `test_client` (as duas
-  rotas novas, com entrada ruim, sem 5xx; a tela e o PDF de pé no caminho de
-  recuo). Falta ver o botão remontando a ata e o descarte sobrevivendo a uma
-  regeração.
+  Migration `0016` aplicada em 09/09/2026 e exercitada contra produção, pela
+  tela: descartar tirou a sugestão do card (10 → 9), com o `<dialog>` levando o
+  texto certo; a regeração gravou `ata_dados` e **não** trouxe de volta o que
+  fora recusado; e o botão alternou o texto três vezes seguidas sem chamar a
+  IA (seções somem, voltam sem o item recusado, somem de novo). A ata daquela
+  reunião ficou como relato (`itens_na_ata=false`), e o item usado no teste
+  foi restaurado.
+
+  Foi nessa passagem que apareceram o furo do filtro em um lugar só (§4) e a
+  falta do botão de regerar.
 
   **Ainda não exercitado**, e são justamente os caminhos mais delicados:
   * **`aplicar_item` e `criar_acao_do_item`** — escrevem em `acao_eventos`, que

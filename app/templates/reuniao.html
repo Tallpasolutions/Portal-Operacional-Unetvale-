@@ -198,6 +198,43 @@
           editada à mão
         {%- endif -%}
       </span>
+
+      {# Regerar já era permitido pela rota (o que "ata congelada" protege são
+         os comentários do dia, não o texto derivado do áudio), mas não havia
+         botão depois que a ata existia — só o de gerar a primeira vez. Sem
+         ele, "Incluir na ata" não tinha como aplicar em nenhuma ata anterior
+         à migration 0016, que é onde a estrutura passou a ser guardada. #}
+      {% if conduz and estado.ok %}
+      <button class="ata-btn" type="button" id="abrir-regerar">Gerar de novo</button>
+      <dialog id="dlg-regerar" class="modal">
+        <h3>Gerar a ata de novo?</h3>
+        <p>
+          O texto atual é substituído pelo que a IA escrever dos
+          {{ estado.ok }} trecho(s) transcritos.
+          {% if reuniao.ata_editada_em %}<b>As correções feitas à mão se perdem.</b>{% endif %}
+          As sugestões já removidas não voltam.
+        </p>
+        <div class="modal-acoes">
+          <button class="btn sec" type="button" data-fechar>Cancelar</button>
+          <form method="post" action="{{ url_for('dash.reuniao_ata', reuniao_id=reuniao.id) }}"
+                style="margin:0;">
+            <button class="btn" type="submit">Gerar de novo</button>
+          </form>
+        </div>
+      </dialog>
+      <script>
+        (function () {
+          var dlg = document.getElementById('dlg-regerar');
+          if (!dlg) return;
+          document.getElementById('abrir-regerar').addEventListener('click', function () {
+            dlg.showModal();
+          });
+          dlg.querySelector('[data-fechar]').addEventListener('click', function () {
+            dlg.close();
+          });
+        })();
+      </script>
+      {% endif %}
     </div>
   </div>
 </div>
