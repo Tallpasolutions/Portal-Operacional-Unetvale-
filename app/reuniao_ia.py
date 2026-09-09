@@ -396,7 +396,10 @@ def montar_ata(reuniao, usuario, interrompida=False):
             "gravacao_status": "erro", "gravacao_erro": str(e)[:500]})
         raise
 
-    markdown = _markdown(dados, reuniao, interrompida, parcial=parcial,
+    # Uma consulta, um filtro: o que foi recusado não entra no texto NEM vira
+    # linha nova. `dados` segue íntegro para ir para `ata_dados`.
+    limpos = _sem_recusados(dados, _textos_descartados(reuniao_id))
+    markdown = _markdown(limpos, reuniao, interrompida, parcial=parcial,
                          com_itens=reuniao.get("itens_na_ata") is True)
     transcricao = "\n\n".join(t["texto"] for t in lista if t.get("texto"))
 
@@ -419,7 +422,7 @@ def montar_ata(reuniao, usuario, interrompida=False):
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         f = pool.submit(salvar_reuniao)
-        _gravar_itens(reuniao_id, dados, _data(reuniao.get("data")), codigos, soltos)
+        _gravar_itens(reuniao_id, limpos, _data(reuniao.get("data")), codigos, soltos)
         f.result()   # propaga a falha de gravar a ata, que é a que importa
     return markdown
 
@@ -472,11 +475,6 @@ def _gravar_itens(reuniao_id, dados, data_reuniao=None, codigos=None, soltos=Non
     if codigos is None:
         codigos = _mapa_codigos()
 
-    # O que uma pessoa já recusou não volta na regeração seguinte. Sem isto o
-    # botão "Remover" seria um gesto sem memória: a próxima geração da ata
-    # traria a mesma sugestão de novo, e a fila nunca encolheria.
-    recusados = _textos_descartados(reuniao_id)
-
     linhas, ordem = [], 0
     for chave, tipo in (("decisoes", "decisao"),
                         ("encaminhamentos", "encaminhamento"),
@@ -484,8 +482,6 @@ def _gravar_itens(reuniao_id, dados, data_reuniao=None, codigos=None, soltos=Non
                         ("riscos", "risco")):
         for item in (dados.get(chave) or []):
             if not (item or {}).get("texto"):
-                continue
-            if _norma(item["texto"]) in recusados:
                 continue
             codigo = (item.get("acao_codigo") or "").upper().strip()
             linhas.append({
@@ -584,6 +580,30 @@ def _norma(t):
     return " ".join((t or "").lower().split()).strip(" .;:-—")
 
 
+_LISTAS_DE_ITENS = ("decisoes", "encaminhamentos", "pendencias", "riscos")
+
+
+def _sem_recusados(dados, recusados):
+    """Cópia da estrutura sem o que alguém já recusou.
+
+    🚨 Medido em 09/09/2026: `_gravar_itens` filtrava os recusados, mas
+    `_markdown` imprimia `dados` inteiro. Resultado — a sugestão removida não
+    voltava ao card e VOLTAVA ao texto da ata, o que é pior que não ter
+    filtro nenhum: some do lugar onde há botão para removê-la de novo e
+    reaparece no documento. O filtro é um só e vale para os dois.
+
+    A estrutura guardada em `ata_dados` continua íntegra: filtrar é decisão de
+    montagem, e uma recusa desfeita no futuro precisa ter de onde voltar.
+    """
+    if not recusados:
+        return dados
+    saida = dict(dados)
+    for chave in _LISTAS_DE_ITENS:
+        saida[chave] = [i for i in (dados.get(chave) or [])
+                        if _norma((i or {}).get("texto")) not in recusados]
+    return saida
+
+
 def _textos_descartados(reuniao_id):
     try:
         linhas = supa.select("reuniao_ata_itens", {
@@ -640,7 +660,7 @@ def definir_itens_na_ata(reuniao, ligado):
         dados = None
     if isinstance(dados, dict) and reuniao.get("ata_markdown"):
         mudancas["ata_markdown"] = _markdown(
-            dados, reuniao,
+            _sem_recusados(dados, _textos_descartados(reuniao_id)), reuniao,
             interrompida=bool(reuniao.get("gravacao_interrompida")),
             com_itens=bool(ligado))
         # Remontar é o texto voltando ao que a estrutura diz — não é edição
