@@ -925,6 +925,25 @@ def reuniao_nova():
         return redirect(url_for("dash.acoes_view", aba="reunioes"))
 
 
+def _reuniao_ou_404(reuniao_id, u, exigir_conduz=False, exigir_aberta=False):
+    """Mesma lógica de `_acao_ou_404`: 404 para quem não pode ver.
+
+    404 e não 403 porque 403 confirmaria que a reunião existe — e reunião
+    tem participante, assunto e data que ninguém precisa poder sondar.
+    """
+    r = acoes.obter_reuniao(reuniao_id)
+    if not r:
+        abort(404)
+    if not (u["is_admin"] or r.get("criada_por") == u["id"]
+            or u["id"] in r["participantes"]):
+        abort(404)
+    if exigir_conduz and not acoes.pode_gerir(u):
+        abort(403)
+    if exigir_aberta and r.get("encerrada_em"):
+        abort(409)
+    return r
+
+
 @bp.route("/reunioes/<reuniao_id>")
 @login_obrigatorio
 def reuniao_detalhe(reuniao_id):
@@ -951,6 +970,73 @@ def reuniao_detalhe(reuniao_id):
         trecho_segundos=int(os.environ.get("REUNIAO_TRECHO_SEGUNDOS", "120")))
 
 
+@bp.route("/reunioes/<reuniao_id>/pauta", methods=["POST"])
+@login_obrigatorio
+def reuniao_pauta(reuniao_id):
+    """Liga/desliga a pauta automática desta reunião.
+
+    Form comum e redirect, não JSON: o resto da tela da reunião muda junto
+    (o card da pauta, o contexto anterior) e recarregar é mais simples e mais
+    honesto do que remontar dois blocos no JS.
+    """
+    u = usuario_atual()
+    r = _reuniao_ou_404(reuniao_id, u, exigir_conduz=True, exigir_aberta=True)
+    try:
+        acoes.definir_puxar_pauta(reuniao_id, request.form.get("ligado") == "1")
+    except Exception as e:
+        flash(str(e), "erro")
+    return redirect(url_for("dash.reuniao_detalhe", reuniao_id=reuniao_id))
+
+
+@bp.route("/reunioes/<reuniao_id>/ata/itens", methods=["POST"])
+@login_obrigatorio
+def reuniao_ata_itens(reuniao_id):
+    """Liga/desliga as listas de itens DENTRO do texto da ata.
+
+    Não exige reunião aberta, pelo mesmo motivo que regerar a ata não exige:
+    o que "ata congelada" protege são os comentários do dia. O texto derivado
+    da transcrição pode ser reformatado — e aqui nem se chama a IA, é
+    `_markdown` remontando a estrutura já guardada.
+    """
+    u = usuario_atual()
+    r = _reuniao_ou_404(reuniao_id, u, exigir_conduz=True)
+    ligado = request.form.get("ligado") == "1"
+    try:
+        remontou = reuniao_ia.definir_itens_na_ata(r, ligado)
+    except Exception as e:
+        flash(f"Não foi possível aplicar: {e}", "erro")
+        return redirect(url_for("dash.reuniao_detalhe", reuniao_id=reuniao_id))
+
+    if remontou:
+        flash("Ata remontada com as decisões e encaminhamentos."
+              if ligado else
+              "Ata remontada: só o relato. As sugestões seguem no card abaixo.",
+              "ok")
+    else:
+        # Ata gerada antes da 0016 não tem a estrutura guardada. Dizer isso é
+        # melhor que deixar a pessoa clicando num botão que não muda a tela.
+        flash("Escolha registrada, mas esta ata foi gerada antes de o portal "
+              "guardar a estrutura — para o texto mudar é preciso gerar a ata "
+              "de novo.", "ok")
+    return redirect(url_for("dash.reuniao_detalhe", reuniao_id=reuniao_id))
+
+
+@bp.route("/reunioes/<reuniao_id>/itens/<item_id>/descartar", methods=["POST"])
+@login_obrigatorio
+def reuniao_item_descartar(reuniao_id, item_id):
+    """Recusa uma sugestão da IA. Ela some da tela e não volta na regeração."""
+    u = usuario_atual()
+    _reuniao_ou_404(reuniao_id, u, exigir_conduz=True)
+    try:
+        reuniao_ia.descartar_item(item_id, u["id"])
+        flash("Sugestão removida.", "ok")
+    except ValueError as e:
+        flash(str(e), "erro")
+    except Exception as e:
+        flash(f"Não foi possível remover: {e}", "erro")
+    return redirect(url_for("dash.reuniao_detalhe", reuniao_id=reuniao_id))
+
+
 @bp.route("/reunioes/<reuniao_id>/encerrar", methods=["POST"])
 @login_obrigatorio
 def reuniao_encerrar(reuniao_id):
@@ -972,25 +1058,6 @@ def reuniao_encerrar(reuniao_id):
 # Todas devolvem JSON: quem chama é o `reuniao.js`, não um <form>. O fluxo
 # inteiro está desenhado em app/reuniao_ia.py — em resumo, quem orquestra é o
 # navegador, porque a Vercel não tem processo em background.
-
-def _reuniao_ou_404(reuniao_id, u, exigir_conduz=False, exigir_aberta=False):
-    """Mesma lógica de `_acao_ou_404`: 404 para quem não pode ver.
-
-    404 e não 403 porque 403 confirmaria que a reunião existe — e reunião
-    tem participante, assunto e data que ninguém precisa poder sondar.
-    """
-    r = acoes.obter_reuniao(reuniao_id)
-    if not r:
-        abort(404)
-    if not (u["is_admin"] or r.get("criada_por") == u["id"]
-            or u["id"] in r["participantes"]):
-        abort(404)
-    if exigir_conduz and not acoes.pode_gerir(u):
-        abort(403)
-    if exigir_aberta and r.get("encerrada_em"):
-        abort(409)
-    return r
-
 
 @bp.route("/reunioes/<reuniao_id>/gravacao/iniciar", methods=["POST"])
 @login_obrigatorio

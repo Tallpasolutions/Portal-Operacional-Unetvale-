@@ -487,20 +487,64 @@ _COLS_GRAVACAO = ("gravacao_status,gravacao_iniciada_em,consentimento_em,"
                   "transcricao,ata_markdown,ata_gerada_em,ata_modelo,"
                   "gravacao_interrompida,gravacao_erro,convidados")
 
+# Degraus opcionais, do MAIS NOVO para o mais antigo. Cada entrada é uma
+# migration que pode ainda não ter subido; pede-se todos e recua-se um por
+# vez, para que a coluna de ontem não caia junto com a de hoje.
+_DEGRAUS_OPCIONAIS = [
+    # `ata_dados` fica de FORA: é a estrutura inteira da ata (~8 KB de JSON) e
+    # só interessa a quem vai remontar o texto. Trazê-la em toda abertura de
+    # reunião engordaria a resposta para nada — `reuniao_ia` a busca sozinha.
+    "itens_na_ata",             # 0016
+    "puxar_pauta",              # 0015
+]
+
 # None = ainda não sabemos. Fica em memória do processo; na Vercel cada cold
 # start reavalia, então depois da migration o selo volta sozinho.
 _tem_colunas_gravacao = None
+# Índice do primeiro degrau opcional que o banco aceita. 0 = todos; igual ao
+# tamanho da lista = nenhum. Fica em memória do processo, e cada cold start da
+# Vercel reavalia, então depois da migration as colunas voltam sozinhas.
+_desde_degrau = 0
 
 
 def _select_reunioes(filtro, extras):
-    global _tem_colunas_gravacao
+    """Lê reuniões recuando UM degrau por vez enquanto a migration não sobe.
+
+    Do mais novo para o mais antigo: os degraus de `_DEGRAUS_OPCIONAIS`, as
+    colunas de gravação (0006) e o base. O recuo é em degraus, e não
+    tudo-ou-nada, porque perder a coluna mais nova não pode custar a ata:
+    medido em 08/09/2026, com um recuo só, subir a 0015 antes de aplicar o SQL
+    apagava `gravacao_status` e `ata_markdown` da tela de TODAS as reuniões —
+    a coluna nova estava no conjunto estendido, como manda o CLAUDE.md, mas o
+    estendido inteiro caía junto com ela.
+    """
+    global _tem_colunas_gravacao, _desde_degrau
     if _tem_colunas_gravacao is not False:
+        while _desde_degrau < len(_DEGRAUS_OPCIONAIS):
+            cols = ",".join([_COLS_REUNIAO, extras]
+                            + _DEGRAUS_OPCIONAIS[_desde_degrau:])
+            try:
+                linhas = supa.select("reunioes", dict(filtro, select=cols))
+                _tem_colunas_gravacao = True
+                return linhas
+            except Exception as e:
+                # Só recua por COLUNA faltando. Qualquer outro 400 (um id que
+                # não é uuid, por exemplo) é requisição errada e sobe — recuar
+                # ali desligava o conjunto estendido do processo inteiro.
+                if not supa.coluna_faltando(e):
+                    raise
+                _falhou(f"_select_reunioes (degrau "
+                        f"'{_DEGRAUS_OPCIONAIS[_desde_degrau]}' ainda não "
+                        f"migrado?)", e)
+                _desde_degrau += 1
         try:
             linhas = supa.select("reunioes", dict(
                 filtro, select=f"{_COLS_REUNIAO},{extras}"))
             _tem_colunas_gravacao = True
             return linhas
         except Exception as e:
+            if not supa.coluna_faltando(e):
+                raise
             _falhou("_select_reunioes (migration 0006 ainda não aplicada?)", e)
             _tem_colunas_gravacao = False
     return supa.select("reunioes", dict(filtro, select=_COLS_REUNIAO))
@@ -619,6 +663,13 @@ def pauta(reuniao, usuario, marcar_comentadas=True):
     Concluídas e canceladas ficam de fora — a reunião é sobre o que está em
     aberto; o histórico está na ação.
     """
+    # `is False` e não `not ...`: reunião lida antes da migration 0015 não
+    # traz a coluna, e ausência tem de significar "puxa", que é o default do
+    # banco e o comportamento de sempre. `not None` seria "não puxa", e a
+    # pauta sumiria de todas as reuniões enquanto a migration não subisse.
+    if reuniao.get("puxar_pauta") is False:
+        return []
+
     alvo = set(reuniao.get("participantes") or [])
     itens = [a for a in listar(usuario)
              if (a["responsavel_id"] in alvo or alvo & set(a.get("apoio_ids") or []))
@@ -637,6 +688,17 @@ def pauta(reuniao, usuario, marcar_comentadas=True):
     for a in itens:
         a["comentada"] = a["id"] in vistos
     return itens
+
+
+def definir_puxar_pauta(reuniao_id, ligado):
+    """Liga ou desliga a pauta automática desta reunião.
+
+    Alternável a qualquer momento, e não só na criação, porque o assunto real
+    da reunião nem sempre é conhecido quando ela é agendada — e porque a
+    escolha precisa valer também DEPOIS de gravar, na hora de gerar a ata:
+    é `montar_ata` quem lê a pauta para montar o prompt.
+    """
+    supa.update("reunioes", {"id": reuniao_id}, {"puxar_pauta": bool(ligado)})
 
 
 def encerrar_reuniao(reuniao_id, notas=None):

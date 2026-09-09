@@ -439,6 +439,11 @@ tr.clicavel{ cursor:pointer; }
 /* Ata: texto para ler, não tabela. Medida de leitura limitada de propósito —
    linha muito longa cansa e faz reler. */
 .ata{ font-size:14px; line-height:1.62; color:var(--ink); max-width:74ch; }
+/* A ata da REUNIÃO ocupa o cartão inteiro. A medida de leitura (74ch) continua
+   valendo para o resumo executivo do módulo Ações, que é texto corrido curto;
+   numa ata de 20 pontos discutidos ela deixava metade do cartão vazia —
+   medido em 09/09/2026: 576px de texto dentro de um cartão de 1155px. */
+.ata.larga{ max-width:none; }
 .ata h3{ font-size:16px; color:var(--ink-d); margin:0 0 2px; }
 .ata h4{ font-size:13px; text-transform:uppercase; letter-spacing:.04em;
   color:var(--muted); margin:20px 0 8px; }
@@ -599,3 +604,9 @@ tr.clicavel{ cursor:pointer; }
 .tp-grupo:hover{ background:var(--brand-l); }
 .tp-grupo .tp-seta{ font-size:11px; margin-left:4px; }
 .tp-trecho > td{ background:var(--fundo); }
+
+/* "Remover" da sugestão de ata: discreto e embaixo, porque recusar não é a
+   ação principal do bloco — virar ação é. Fica no fluxo, e não ao lado do
+   summary, para não competir com ele no toque do celular. */
+.item-remover{ margin-top:10px; }
+.item-remover:hover{ border-color:var(--danger); color:var(--danger); }

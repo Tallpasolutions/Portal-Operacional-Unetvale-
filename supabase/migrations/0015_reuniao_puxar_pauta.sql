@@ -1,0 +1,22 @@
+-- =====================================================================
+-- A reunião escolhe se puxa as ações em aberto dos participantes.
+-- Rode no Supabase: SQL Editor -> cole -> Run.
+--
+-- Até aqui a pauta era montada sozinha, sempre: qualquer ação em aberto de
+-- qualquer participante entrava na tela E no prompt da ata. Numa reunião de
+-- orçamento (08/09/2026) isso trouxe "Itinga - Estudo de área" e "Processo de
+-- Vistoria", que nada tinham a ver com o assunto — e o bloco "Ações que
+-- estavam na pauta" empurrava o modelo a amarrar a conversa nesses códigos.
+--
+-- `default true` porque é como o portal sempre funcionou: subir isto não muda
+-- nada em reunião nenhuma até alguém clicar. Mesma escolha da
+-- `usuario_modulos_bloqueados` (0014) — o estado de repouso é o de antes.
+--
+-- `not null` para que a coluna seja legível como booleano de verdade; quem
+-- lê no Python trata NULL (coluna ainda não migrada) como "puxa", que é o
+-- mesmo default.
+--
+-- Aditiva: `add column if not exists`.
+-- =====================================================================
+alter table public.reunioes
+  add column if not exists puxar_pauta boolean not null default true;
