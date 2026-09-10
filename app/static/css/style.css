@@ -610,3 +610,8 @@ tr.clicavel{ cursor:pointer; }
    summary, para não competir com ele no toque do celular. */
 .item-remover{ margin-top:10px; }
 .item-remover:hover{ border-color:var(--danger); color:var(--danger); }
+
+/* Linha de candidato a OS, clicável: abre o script e o mini-mapa do grupo.
+   Sem o realce nada diz que ali tem mais coisa — e o que tem é justamente
+   onde a equipe vai encostar. */
+.tp-cand:hover{ background:var(--brand-l); }

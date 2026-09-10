@@ -444,6 +444,25 @@ E o grupo sai da lista **na hora do clique**, sem esperar recarregar
 (`marcarAberto`): é exatamente na janela entre o clique e o próximo
 carregamento que alguém clica de novo.
 
+**Clicar na linha abre "onde é" e "o que vai".** Um mini-mapa com os trechos
+daquele grupo, de perto, e o script ao lado — em dois blocos ROTULADOS. O mapa
+não tem como entrar no texto da OS (o envio manda `g.script_os`, do pacote do
+servidor; o JS nunca lê o `<pre>`), mas empilhados sem rótulo eles parecem uma
+coisa só, e quem olha fica sem saber o que exatamente vai para o WVSA.
+
+É acordeão: abrir um fecha o outro. O mini-mapa é **uma instância de Leaflet**
+movida para a linha aberta — criar e destruir um mapa por linha vazaria
+listeners e refaria o download dos tiles a cada clique.
+
+⚠️ A célula do detalhe é tão larga quanto a TABELA, que no celular já rola de
+lado. Sem `max-width` pelo viewport o mapa nascia com 597px numa tela de 375, e
+os pontos ficavam atrás da borda até alguém arrastar a tabela.
+
+**`grupos[].itens` NÃO vai no pacote.** Ele repetia `linhas` inteiro dentro dos
+grupos: 209 kB de 719 kB, **29% da página**, para um dado que o cliente já
+tinha. O grupo carrega os `ids` e a tela procura os trechos no `linhas` que já
+está lá (`trechosDo`). Medido em 10/09/2026: o pacote caiu para 509 kB.
+
 A aba de Ordens mostrava **só os críticos** até 04/09/2026. Passou a mostrar
 todos: a classificação continua ordenando e aparece no badge de cada linha, mas
 esconder o resto tirava da tela desligamento que a operação quer abrir —

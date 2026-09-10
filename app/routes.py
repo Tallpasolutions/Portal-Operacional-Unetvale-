@@ -185,7 +185,11 @@ def troca_poste():
         "linhas": linhas,
         # A OS é do bairro/dia, então o script também é: o operador lê o texto
         # do GRUPO antes de clicar, não um texto por rua que ninguém enviaria.
-        "grupos": [{**g, "script_os": solicitacao.montar(g["itens"])}
+        # `itens` NÃO vai no pacote: ele repetia `linhas` inteiro dentro dos
+        # grupos — 209 kB de 719 kB, 29% da página, para um dado que o cliente
+        # já tem. O grupo carrega os `ids`, e a tela monta a lista por eles.
+        "grupos": [{**{k: v for k, v in g.items() if k != "itens"},
+                    "script_os": solicitacao.montar(g["itens"])}
                    for g in grupos],
         "revisao": tp.fila_revisao(),
         "ordens": tp.ordens(),

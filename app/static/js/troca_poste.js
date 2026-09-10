@@ -18,6 +18,11 @@
   const CATALOGO = TP.catalogos || {};
   const ROTULO_CAUSA = TP.rotulos_causa || {};
 
+  // O grupo vem do servidor só com os `ids` — os trechos são procurados aqui,
+  // no `linhas` que a página já tem. Mandar os dois seria repetir 209 kB.
+  const PORID = new Map(LINHAS.map((l) => [l.id, l]));
+  const trechosDo = (g) => (g.ids || []).map((id) => PORID.get(id)).filter(Boolean);
+
   // Cores por risco: seguem o CUSTO DO ERRO, não estética. Crítico é fibra a
   // menos de 25 m — errar para menos ali é cabo rompido e cliente fora do ar.
   const COR_RISCO = {
@@ -558,6 +563,62 @@
            "Verifique se o coletor está rodando na rede Unetvale — a OS não foi perdida.");
   }
 
+  // ---- mini-mapa dos candidatos -----------------------------------------
+  //
+  // UMA instância de Leaflet, movida para a linha aberta. Criar e destruir um
+  // mapa por linha vazaria listeners e refaria o download dos tiles a cada
+  // clique; mover o container e chamar `invalidateSize` reaproveita os dois.
+  let mapaOS = null, caixaOS = null;
+
+  function caixaDoMapa() {
+    if (!caixaOS) {
+      caixaOS = document.createElement("div");
+      // `max-width` pelo viewport: a célula do detalhe é tão larga quanto a
+      // TABELA, que no celular já rola de lado. Sem a trava, o mapa nascia com
+      // 597px numa tela de 375 e só se via metade dele — os pontos ficavam
+      // atrás da borda até alguém arrastar a tabela.
+      caixaOS.style.cssText = "height:280px;border-radius:8px;overflow:hidden;" +
+        "border:1px solid var(--borda-2);max-width:min(100%, calc(100vw - 72px));";
+    }
+    return caixaOS;
+  }
+
+  /** Desenha os trechos DAQUELE grupo, de perto. */
+  function mapaDoGrupo(g, destino) {
+    destino.appendChild(caixaDoMapa());
+    if (!mapaOS) {
+      // Sem zoom por rolagem: o mapa vive dentro de uma página que rola, e
+      // capturar a roda faria a página travar sob o cursor.
+      mapaOS = L.map(caixaOS, { scrollWheelZoom: false, attributionControl: false });
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(mapaOS);
+      mapaOS.__camada = L.layerGroup().addTo(mapaOS);
+    }
+    mapaOS.__camada.clearLayers();
+
+    const pts = trechosDo(g).filter((l) => l.lat != null && l.lon != null);
+    for (const l of pts) {
+      const via = [l.tipo_via, l.logradouro].filter(Boolean).join(" ") || l.endereco;
+      L.circleMarker([l.lat, l.lon], {
+        radius: 7, color: "#fff", weight: 2,
+        fillColor: COR_RISCO[l.classificacao] || COR_RISCO.indeterminado, fillOpacity: 0.95,
+      }).bindTooltip(via, { direction: "top" }).addTo(mapaOS.__camada);
+    }
+
+    // `invalidateSize` antes de enquadrar: o container acabou de aparecer e o
+    // Leaflet ainda o considera do tamanho anterior — enquadrar antes disso
+    // deixaria os pontos apertados num canto (§6).
+    setTimeout(() => {
+      mapaOS.invalidateSize();
+      if (!pts.length) { mapaOS.setView([-27.1, -48.75], 9); return; }
+      if (pts.length === 1) { mapaOS.setView([pts[0].lat, pts[0].lon], 17); return; }
+      // `maxZoom` para não colar demais quando os trechos são vizinhos: a
+      // pergunta aqui é "onde é isso", e a rua ao lado precisa aparecer.
+      mapaOS.fitBounds(L.latLngBounds(pts.map((l) => [l.lat, l.lon])).pad(0.25), { maxZoom: 17 });
+    }, 60);
+
+    return pts.length;
+  }
+
   function renderCandidatos(linhas) {
     // Os grupos vêm prontos do servidor (com o script do bairro/dia já
     // montado). Aqui só se recorta pelos ids que sobreviveram ao filtro da
@@ -595,34 +656,69 @@
           }).join("")
         : "";
     }
+    // No detalhe, o mapa vem ANTES do script: em tela estreita a `.charts-2`
+    // vira uma coluna, e com o script em cima seria preciso rolar o texto
+    // inteiro para chegar ao que se clicou para ver.
+    //
+    // Os dois ficam em blocos ROTULADOS e separados de propósito. O mapa não
+    // tem como entrar no texto da OS — o envio manda `g.script_os`, que vem do
+    // pacote do servidor, e o JS nunca lê o `<pre>` da tela —, mas empilhados
+    // sem rótulo eles PARECEM uma coisa só, e quem olha fica sem saber o que
+    // exatamente vai para o WVSA.
     const corpo = $("#tp-candidatos").querySelector("tbody");
     corpo.innerHTML = cand.map((g, i) => `
-      <tr data-i="${i}">
+      <tr data-i="${i}" class="tp-cand" style="cursor:pointer">
         <td><span class="badge ${BADGE[g.classificacao]}">${g.risco_rotulo}</span></td>
         <td><b>${g.cidade}</b><div style="font-size:12px;color:var(--muted)">${g.bairro || "sem bairro"}</div></td>
         <td style="white-space:nowrap">${g.data_br}<div style="font-size:12px;color:var(--muted)">${g.hora_inicio || ""}${g.hora_fim ? "–" + g.hora_fim : ""}</div></td>
         <td class="num">${g.qtd}</td>
-        <td><button class="btn-ghost" data-script="${i}">Ver script</button></td>
+        <td><button class="btn-ghost" data-script="${i}">Ver no mapa</button></td>
         <td>${ENVIO_LIGADO
           ? `<button class="btn" data-enviar="${i}">${ENSAIO ? "Abrir OS (ensaio)" : "Abrir OS no WVSA"}</button>`
           : `<button class="btn sec" disabled title="O envio ao WVSA está desligado no ambiente (OS_ENVIO_HABILITADO).">Envio desligado</button>`}</td>
       </tr>
       <tr data-script-de="${i}" hidden>
         <td colspan="6" style="background:var(--fundo);">
-          <pre style="margin:0;white-space:pre-wrap;font-size:12.5px;line-height:1.5;">${(g.script_os || "").replace(/</g, "&lt;")}</pre>
+          <div class="grid charts-2" style="gap:14px;">
+            <div>
+              <div class="upd" style="margin-bottom:6px;">Onde é — ${g.qtd} ${g.qtd === 1 ? "trecho" : "trechos"}</div>
+              <div data-mapa-de="${i}"></div>
+            </div>
+            <div>
+              <div class="upd" style="margin-bottom:6px;">Script que vai para a OS — só este texto é enviado</div>
+              <pre style="margin:0;white-space:pre-wrap;font-size:12.5px;line-height:1.5;background:#fff;border:1px solid var(--borda-2);border-radius:8px;padding:12px;">${(g.script_os || "").replace(/</g, "&lt;")}</pre>
+            </div>
+          </div>
         </td>
       </tr>`).join("") ||
       `<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--muted)">Nenhum crítico no recorte atual.</td></tr>`;
 
+    /** Abre o detalhe de UM grupo e fecha o que estava aberto.
+     *
+     * Acordeão, e não vários abertos: o mini-mapa é uma instância só, movida
+     * para a linha aberta. Dois detalhes abertos disputariam o mesmo elemento
+     * e um deles ficaria com um buraco onde o mapa estava.
+     */
+    function abrirDetalhe(i) {
+      const alvo = corpo.querySelector(`tr[data-script-de="${i}"]`);
+      const jaAberto = !alvo.hidden;
+      corpo.querySelectorAll("tr[data-script-de]").forEach((tr) => { tr.hidden = true; });
+      corpo.querySelectorAll("button[data-script]").forEach((b) => { b.textContent = "Ver no mapa"; });
+      if (jaAberto) return;                       // clicar de novo fecha
+      alvo.hidden = false;
+      const botao = corpo.querySelector(`button[data-script="${i}"]`);
+      if (botao) botao.textContent = "Ocultar";
+      const n = mapaDoGrupo(cand[Number(i)], alvo.querySelector(`[data-mapa-de="${i}"]`));
+      if (!n) avisar("Nenhum trecho deste grupo tem posição — não há o que mostrar no mapa.");
+    }
+
     corpo.onclick = (e) => {
       const verScript = e.target.closest("button[data-script]");
-      if (verScript) {
-        const i = verScript.dataset.script;
-        const lin = corpo.querySelector(`tr[data-script-de="${i}"]`);
-        lin.hidden = !lin.hidden;
-        verScript.textContent = lin.hidden ? "Ver script" : "Ocultar";
-        return;
-      }
+      if (verScript) { abrirDetalhe(verScript.dataset.script); return; }
+      // A linha inteira abre o detalhe: procurar o botão para ver onde é a
+      // obra é um clique a mais em cima de um alvo pequeno.
+      const linha = e.target.closest("tr.tp-cand");
+      if (linha && !e.target.closest("button")) { abrirDetalhe(linha.dataset.i); return; }
       const enviar = e.target.closest("button[data-enviar]");
       // Sem ENVIO_LIGADO o botão nem é renderizado com `data-enviar`, então
       // este caminho não existe. A recusa de verdade está no servidor.
