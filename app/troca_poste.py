@@ -557,6 +557,54 @@ def catalogos():
     return saida
 
 
+def ordens_por_desligamento():
+    """Mapa desligamento_id -> a OS que já cobre aquele desligamento.
+
+    A ligação é pela tabela `agrupamento_itens`, e não por recalcular a
+    `chave_idempotencia`: a chave depende de `normalizar_texto(bairro)`, que é
+    do banco, e reimplementá-la aqui só para comparar traria de volta a
+    armadilha dos dois normalizadores (§6). O vínculo real já está gravado.
+
+    Serve para a tela TIRAR dos candidatos o grupo que já tem OS. Sem isso, o
+    grupo continua com o botão e o operador clica de novo — a
+    `chave_idempotencia` recusa a duplicata no banco, mas o risco não é o
+    banco: é a pessoa achar que abriu duas e ir conferir no WVSA, ou clicar
+    achando que a primeira falhou.
+    """
+    try:
+        ordens_ = supa.select("ordens_servico", {
+            "select": "id,status,wvsa_os_numero,agrupamento_id,dry_run",
+        }, schema=SCHEMA)
+    except Exception as e:
+        _falhou("ordens_por_desligamento/ordens", e)
+        return {}
+    ordens_ = [o for o in ordens_ if o.get("agrupamento_id")]
+    if not ordens_:
+        return {}
+
+    ids = ",".join(o["agrupamento_id"] for o in ordens_)
+    try:
+        itens = supa.select("agrupamento_itens", {
+            "select": "agrupamento_id,desligamento_id",
+            "agrupamento_id": f"in.({ids})",
+        }, schema=SCHEMA)
+    except Exception as e:
+        _falhou("ordens_por_desligamento/itens", e)
+        return {}
+
+    por_agrupamento = {o["agrupamento_id"]: o for o in ordens_}
+    mapa = {}
+    for i in itens:
+        o = por_agrupamento.get(i["agrupamento_id"])
+        if o:
+            mapa[i["desligamento_id"]] = {
+                "ordem_id": o["id"], "status": o["status"],
+                "wvsa_os_numero": o.get("wvsa_os_numero"),
+                "ensaio": bool(o.get("dry_run")),
+            }
+    return mapa
+
+
 def dry_run():
     """O envio é ensaio? Ligado por padrão.
 
@@ -634,7 +682,11 @@ def marcar_para_envio(ordem_id, usuario_id):
 def ordem(ordem_id):
     """Estado de uma ordem — a tela faz poll aqui depois de mandar enviar."""
     return supa.select_one("ordens_servico", {
-        "select": "id,status,wvsa_os_numero,erro,tentativas,enviado_em,solicitacao,dry_run",
+        # `executor`, `periodo` e `agendamento` entram porque a tela monta a
+        # linha da OS na hora, sem recarregar: sem eles a linha nasceria com
+        # três traços e só ficaria correta no próximo carregamento.
+        "select": "id,status,wvsa_os_numero,erro,tentativas,enviado_em,solicitacao,"
+                  "dry_run,executor,periodo,agendamento",
         "id": f"eq.{ordem_id}",
     }, schema=SCHEMA)
 
@@ -712,7 +764,12 @@ def ordens(limite=50):
     try:
         return supa.select("ordens_servico", {
             "select": "id,status,origem,dry_run,wvsa_os_numero,agendamento,executor,"
-                      "periodo,data_inicio,data_fim,solicitacao,criado_em,erro",
+                      "periodo,data_inicio,data_fim,solicitacao,criado_em,erro,"
+                      # O rótulo do agrupamento ("DOM JOAQUIM — 10/09/2026") é o
+                      # que identifica a OS na tabela: sem ele só havia executor,
+                      # período e número, e o bairro ficava escondido dentro do
+                      # texto da solicitação.
+                      "agrupamentos(rotulo)",
             "order": "criado_em.desc", "limit": str(limite),
         }, schema=SCHEMA)
     except Exception as e:

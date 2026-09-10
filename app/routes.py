@@ -176,6 +176,11 @@ def troca_poste():
     # Antes do pacote: `agrupar` carimba `grupo_chave` em cada linha, e é dela
     # que a tabela de Desligamentos monta os grupos.
     grupos = tp.agrupar(linhas)
+    # Cada grupo passa a saber se JÁ tem OS. A tela usa isso para tirá-lo dos
+    # candidatos — o botão não pode continuar convidando ao clique.
+    ja_aberta = tp.ordens_por_desligamento()
+    for g in grupos:
+        g["ordem"] = next((ja_aberta[i] for i in g["ids"] if i in ja_aberta), None)
     pacote = {
         "linhas": linhas,
         # A OS é do bairro/dia, então o script também é: o operador lê o texto

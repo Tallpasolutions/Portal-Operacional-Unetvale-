@@ -427,6 +427,23 @@ aviso do que sobre o que vem pela frente. No ranking de cidades o efeito era
 pior — a cidade cujo aviso foi escrito rua a rua subia sobre a que descreveu o
 bairro numa linha, sem diferença nenhuma de trabalho.
 
+**Grupo que já tem OS sai dos candidatos.** A `chave_idempotencia` sempre
+impediu a duplicata no banco, mas o risco nunca foi o banco: era o botão
+continuar convidando ao clique num lugar já resolvido — e a pessoa clicar de
+novo achando que a primeira vez não pegou, ou ir conferir no WVSA se abriu
+duas. Eles não somem: viram chip acima da tabela, com o número da OS, e a
+tabela de Ordens passou a mostrar o rótulo do agrupamento
+("DOM JOAQUIM — 10/09/2026") em vez de só executor e número.
+
+⚠️ A ligação grupo → OS é pela tabela `agrupamento_itens`, **não** por
+recalcular a `chave_idempotencia`: a chave depende de `normalizar_texto`, que é
+do banco, e reimplementá-la no Python só para comparar traria de volta a
+armadilha dos dois normalizadores. O vínculo real já está gravado.
+
+E o grupo sai da lista **na hora do clique**, sem esperar recarregar
+(`marcarAberto`): é exatamente na janela entre o clique e o próximo
+carregamento que alguém clica de novo.
+
 A aba de Ordens mostrava **só os críticos** até 04/09/2026. Passou a mostrar
 todos: a classificação continua ordenando e aparece no badge de cada linha, mas
 esconder o resto tirava da tela desligamento que a operação quer abrir —
@@ -1389,8 +1406,13 @@ a.run(port=5001, use_reloader=False)"
   listagem do `/relatorios/infra10/dados`. Foram gravados: é a listagem que
   prova. Conferir pela ficha levaria a concluir, errado, que não foram.
 
-  O envio foi feito pelo portal LOCAL, com `OS_DRY_RUN=false` só ali — a Vercel
-  seguiu em ensaio. Para liberar em produção é virar a variável lá.
+  **Liberado em produção no mesmo dia**, e usado: em poucos minutos saíram mais
+  duas — `#586438` (DOM JOAQUIM, 10 trechos) e `#586440` (PEREQUE, 14 trechos).
+
+  ⚠️ **Todos os 12 usuários enxergam Troca de Poste** e, portanto, podem abrir
+  OS. Os 4 supervisores incluídos — eles NÃO viam o módulo antes do `#30`, e
+  passaram a ver porque a regra saiu do código e o padrão da configuração é
+  "vê tudo". Restringir é em *Configurações → Acesso aos módulos*.
 
   ⚠️ **A ordem carrega o `dry_run` de quando foi criada.** As duas ordens de
   ensaio no banco (AZAMBUJA 10/09 e AREIAS DO MEIO 04/09) continuarão sendo

@@ -477,9 +477,13 @@
 
       // Já existia OS para este bairro/dia — é o desfecho normal de dois
       // operadores na mesma tela, não um erro.
-      if (rascunho.ja_existia && ["criada", "enviando", "pronta"].includes(rascunho.status)) {
-        marcar(rascunho.status === "criada" ? "OS já criada" : "OS já na fila", true);
-        botao.classList.add("on");
+      if (rascunho.ja_existia) {
+        // Já havia OS para este bairro/dia — o desfecho normal de dois
+        // operadores na mesma tela, e agora também de uma tela aberta antes de
+        // o grupo ter sido resolvido em outra aba.
+        avisar(`Este bairro/dia já tem OS (${rascunho.status}). Nada foi criado em duplicidade.`);
+        const r = await fetch(`/troca-poste/os/${rascunho.ordem_id}`);
+        marcarAberto(g, await r.json());
         return;
       }
 
@@ -488,7 +492,7 @@
       const env = await r2.json();
       if (!r2.ok) throw new Error(env.erro || `HTTP ${r2.status}`);
 
-      await acompanhar(rascunho.ordem_id, botao);
+      await acompanhar(rascunho.ordem_id, botao, g);
     } catch (e) {
       marcar("Erro — tentar de novo", false);
       avisar(`Não foi possível enviar: ${e.message}`);
@@ -496,7 +500,26 @@
   }
 
   /** Poll do resultado. O envio roda dentro da VPN, então leva alguns segundos. */
-  async function acompanhar(ordemId, botao) {
+  /** Marca o grupo como resolvido e o tira da lista NA HORA.
+   *
+   * Sem isto o grupo só sai no próximo carregamento da página — e é exatamente
+   * na janela entre o clique e o recarregar que alguém clica de novo achando
+   * que a primeira vez não pegou.
+   */
+  function marcarAberto(g, o) {
+    if (!g) return;
+    g.ordem = { ordem_id: o.id, status: o.status,
+                wvsa_os_numero: o.wvsa_os_numero, ensaio: o.dry_run === true };
+    TP.ordens = [{ status: o.status, wvsa_os_numero: o.wvsa_os_numero,
+                   executor: o.executor, periodo: o.periodo, agendamento: o.agendamento,
+                   criado_em: new Date().toISOString(),
+                   agrupamentos: { rotulo: `${g.bairro || "SEM BAIRRO"} — ${g.data_br}` } },
+                 ...(TP.ordens || [])];
+    renderOrdens();
+    renderCandidatos(aplicar());
+  }
+
+  async function acompanhar(ordemId, botao, grupo) {
     const limite = Date.now() + 90000;
     while (Date.now() < limite) {
       await new Promise((r) => setTimeout(r, 1500));
@@ -509,16 +532,15 @@
       // nenhuma requisição saiu. Sem reconhecê-lo aqui, todo ensaio terminaria
       // nos 90 s de timeout, dizendo que o coletor não respondeu.
       if (o.status === "ensaio") {
-        botao.textContent = "Ensaio OK";
-        botao.disabled = true;
-        botao.classList.add("on");
         avisar("Ensaio concluído: payload registrado, nenhuma OS criada no WVSA.");
+        marcarAberto(grupo, o);
         return;
       }
       if (o.status === "criada") {
-        botao.textContent = o.wvsa_os_numero ? `OS ${o.wvsa_os_numero}` : "OS criada";
-        botao.disabled = true;
-        botao.classList.add("on");
+        avisar(o.wvsa_os_numero
+          ? `OS ${o.wvsa_os_numero} criada no WVSA.`
+          : "OS criada no WVSA.");
+        marcarAberto(grupo, o);
         return;
       }
       if (o.status === "erro") {
@@ -546,10 +568,33 @@
     // esconder o resto tirava da tela desligamento que a operação quer abrir —
     // inclusive os `indeterminado`, que são exatamente os que esperam revisão.
     const visiveis = new Set(linhas.map((l) => l.id));
-    const cand = GRUPOS.filter((g) => g.ids.some((id) => visiveis.has(id)));
+    const noRecorte = GRUPOS.filter((g) => g.ids.some((id) => visiveis.has(id)));
+
+    // Grupo que JÁ tem OS sai da lista. A `chave_idempotencia` impede a
+    // duplicata no banco, mas o risco nunca foi o banco: é o botão continuar
+    // convidando ao clique num lugar já resolvido — e a pessoa clicar achando
+    // que a primeira tentativa falhou, ou ir conferir no WVSA se abriu duas.
+    // Eles não somem da tela: estão logo abaixo, na tabela de Ordens de
+    // serviço, agora identificados pelo bairro e pelo dia.
+    const cand = noRecorte.filter((g) => !g.ordem);
+    const abertos = noRecorte.filter((g) => g.ordem);
 
     $("#tp-cand-contagem").textContent =
-      `${fmt(cand.length)} ${cand.length === 1 ? "grupo" : "grupos"} no recorte`;
+      `${fmt(cand.length)} ${cand.length === 1 ? "grupo" : "grupos"} no recorte` +
+      (abertos.length ? ` · ${fmt(abertos.length)} já com OS` : "");
+
+    const nota = $("#tp-cand-abertos");
+    if (nota) {
+      nota.innerHTML = abertos.length
+        ? abertos.map((g) => {
+            const o = g.ordem;
+            const marca = o.ensaio
+              ? `<span class="badge badge-ambar">ensaio</span>`
+              : `<span class="badge badge-verde">OS ${o.wvsa_os_numero || o.status}</span>`;
+            return `<span class="chip">${g.cidade} · ${g.bairro || "sem bairro"} · ${g.data_br} ${marca}</span>`;
+          }).join("")
+        : "";
+    }
     const corpo = $("#tp-candidatos").querySelector("tbody");
     corpo.innerHTML = cand.map((g, i) => `
       <tr data-i="${i}">
@@ -635,10 +680,10 @@
     $("#tp-os-tabela").querySelector("tbody").innerHTML = os.map((o) => `
       <tr>
         <td><span class="badge ${o.status === "criada" ? "badge-verde" : o.status === "erro" ? "badge-vermelho" : o.status === "ensaio" ? "badge-ambar" : "badge-cinza"}">${o.status}</span></td>
+        <td><b>${(o.agrupamentos && o.agrupamentos.rotulo) || "—"}</b></td>
         <td>${o.criado_em ? dataBR((o.criado_em || "").slice(0, 10)) : "—"}</td>
         <td>${o.executor || "—"}</td><td>${o.periodo || "—"}</td>
         <td>${o.agendamento || "—"}</td><td>${o.wvsa_os_numero || "—"}</td>
-        <td style="max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(o.solicitacao || "").slice(0, 120)}</td>
       </tr>`).join("") ||
       `<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted)">Nenhuma OS criada ainda.</td></tr>`;
   }

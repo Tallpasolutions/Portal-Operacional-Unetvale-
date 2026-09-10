@@ -170,6 +170,9 @@
       <span>Candidatos a OS — <span id="tp-cand-contagem"></span></span>
       <span class="upd">agrupados por bairro e dia · todo o recorte atual</span>
     </div>
+    {# Os que saíram da lista aparecem aqui como chip, com o número da OS: sumir
+       em silêncio faria parecer que o grupo desapareceu do recorte. #}
+    <div class="chips" id="tp-cand-abertos" style="padding:12px 18px 0;margin:0;"></div>
     <div class="card-b tabela-wrap">
       <table class="tbl" id="tp-candidatos">
         <thead><tr>
@@ -228,8 +231,8 @@
     <div class="card-b tabela-wrap">
       <table class="tbl" id="tp-os-tabela">
         <thead><tr>
-          <th>Status</th><th>Criada em</th><th>Executor</th><th>Período</th>
-          <th>Agendamento</th><th>Nº no WVSA</th><th>Solicitação</th>
+          <th>Status</th><th>Bairro · dia</th><th>Criada em</th><th>Executor</th>
+          <th>Período</th><th>Agendamento</th><th>Nº no WVSA</th>
         </tr></thead>
         <tbody></tbody>
       </table>
