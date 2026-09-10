@@ -1368,10 +1368,36 @@ a.run(port=5001, use_reloader=False)"
   em tela real — a verificação correu com o painel oculto, onde o layout é
   adiado (§6).
 
-- **Envio REAL de OS ao WVSA** segue sem nunca ter rodado ponta a ponta. São
-  dois interruptores: `OS_ENVIO_HABILITADO=true` mostra o botão e
-  `OS_DRY_RUN=false` faz a OS sair. Enquanto o segundo não virar, todo clique
-  para em `ensaio` — que é como este caminho se prova sem deslocar equipe.
+- ✅ **A primeira OS real saiu em 10/09/2026: `#586420` no WVSA.**
+  Governador Celso Ramos · GANCHOS DO MEIO · 14/09, 1 trecho, crítico. HTTP 200,
+  resposta `{"actions":[{"action":"location","value":"/os/586420"}]}` — o WVSA
+  redirecionando para a OS nova. O caminho inteiro fechou: clique no portal →
+  `criar_os_bairro_dia` → fila → coletor dentro da VPN → POST em
+  `/relatorios/infra10/save` → número de volta.
+
+  **Conferido na tela da OS e na listagem**, campo a campo:
+
+  | Onde | O que apareceu |
+  |---|---|
+  | título | `OS: #586420 - Troca de Poste` |
+  | listagem | `Governador Celso Ramos` · `Ganchos do Meio` · `Infra` |
+  | agendamento | `14/09/2026 no Período da Tarde` |
+  | técnico | `INFRA UNET - Carlos Henrique de Souza Vargas` |
+  | descrição | o script completo, com endereço e coordenada |
+
+  ⚠️ **Cidade e bairro NÃO aparecem na ficha da OS** (`/os/<n>`) — só na
+  listagem do `/relatorios/infra10/dados`. Foram gravados: é a listagem que
+  prova. Conferir pela ficha levaria a concluir, errado, que não foram.
+
+  O envio foi feito pelo portal LOCAL, com `OS_DRY_RUN=false` só ali — a Vercel
+  seguiu em ensaio. Para liberar em produção é virar a variável lá.
+
+  ⚠️ **A ordem carrega o `dry_run` de quando foi criada.** As duas ordens de
+  ensaio no banco (AZAMBUJA 10/09 e AREIAS DO MEIO 04/09) continuarão sendo
+  ensaio para sempre, mesmo com a variável virada — e, pela
+  `chave_idempotencia`, um clique novo naqueles bairros/dias devolve a ordem
+  antiga em vez de criar uma real. Para enviar aqueles dois de verdade seria
+  preciso virar o `dry_run` daquelas linhas no banco.
 - **Reuniões com gravação** está em produção desde 29/08/2026. Migrations
   `0006` (gravação e ata), `0007` (ata editável) e `0008` (convidados). Bucket
   privado `reuniao-audio`; chave e modelos no `.env`
