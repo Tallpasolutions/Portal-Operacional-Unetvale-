@@ -1404,6 +1404,29 @@ a.run(port=5001, use_reloader=False)"
   em tela real — a verificação correu com o painel oculto, onde o layout é
   adiado (§6).
 
+- **Anexar ao WVSA uma foto do mapa da troca** foi pedido em 10/09/2026 e
+  ficou para depois. O que já se sabe, para a próxima tentativa não repetir a
+  sondagem:
+
+  * o botão é *Fotos/Anexos → Incluir Fotos/Anexos*, um `<a class="abrir-form"
+    data-u-botao-id="anexos" data-u-url="anexos">`;
+  * **o padrão de rota é `/os/{acao}`, não `/os/{id}/{acao}`**: `/os/anexos`
+    responde **500** (a rota existe, falta parâmetro) enquanto
+    `/os/586420/anexos` responde **404** (rota inexistente). `/os/editar` se
+    comporta igual, então vale para todos os botões daquele menu;
+  * `os`, `id`, `os_id` e `OS` na query string: todos 500;
+  * o JS que monta a requisição **não está** em nenhum dos 60 scripts da
+    página nem no `app.js` (1,4 MB) — procurei por `abrir-form`, `u-url` e
+    `anexo`, zero ocorrências.
+
+  O caminho barato é capturar UM envio real pelo DevTools (aba Network →
+  Payload) em vez de adivinhar parâmetro contra produção.
+
+  A outra metade é gerar a imagem: precisa de **Pillow**, que não está em
+  nenhum dos dois venvs, para costurar tiles do OpenStreetMap em zoom 17-18
+  (onde o nome da rua fica legível). Enquanto isso não existe, o técnico tem o
+  link do Google Maps que já vai no script.
+
 - ✅ **A primeira OS real saiu em 10/09/2026: `#586420` no WVSA.**
   Governador Celso Ramos · GANCHOS DO MEIO · 14/09, 1 trecho, crítico. HTTP 200,
   resposta `{"actions":[{"action":"location","value":"/os/586420"}]}` — o WVSA
