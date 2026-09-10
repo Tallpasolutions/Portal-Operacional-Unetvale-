@@ -129,7 +129,9 @@ def montar(grupo):
                   if referencia and referencia.get("geo_validacao") == "manual"
                   else "POSICAO OBTIDA AUTOMATICAMENTE - CONFIRMAR NO LOCAL.")
 
-    linhas.append("")
-    linhas.append("Levar equipe para acompanhar a troca e preservar a rede.")
+    # A frase "Levar equipe para acompanhar a troca e preservar a rede" saiu em
+    # 10/09/2026, a pedido: a OS já É o pedido de equipe, e repetir a intenção
+    # no fim do texto não dizia nada a quem vai executar — o técnico lê para
+    # saber ONDE e QUANDO, não por quê.
 
     return "\n".join(linhas)

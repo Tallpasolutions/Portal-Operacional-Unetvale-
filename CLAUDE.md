@@ -427,6 +427,42 @@ aviso do que sobre o que vem pela frente. No ranking de cidades o efeito era
 pior — a cidade cujo aviso foi escrito rua a rua subia sobre a que descreveu o
 bairro numa linha, sem diferença nenhuma de trabalho.
 
+**Grupo que já tem OS sai dos candidatos.** A `chave_idempotencia` sempre
+impediu a duplicata no banco, mas o risco nunca foi o banco: era o botão
+continuar convidando ao clique num lugar já resolvido — e a pessoa clicar de
+novo achando que a primeira vez não pegou, ou ir conferir no WVSA se abriu
+duas. Eles não somem: viram chip acima da tabela, com o número da OS, e a
+tabela de Ordens passou a mostrar o rótulo do agrupamento
+("DOM JOAQUIM — 10/09/2026") em vez de só executor e número.
+
+⚠️ A ligação grupo → OS é pela tabela `agrupamento_itens`, **não** por
+recalcular a `chave_idempotencia`: a chave depende de `normalizar_texto`, que é
+do banco, e reimplementá-la no Python só para comparar traria de volta a
+armadilha dos dois normalizadores. O vínculo real já está gravado.
+
+E o grupo sai da lista **na hora do clique**, sem esperar recarregar
+(`marcarAberto`): é exatamente na janela entre o clique e o próximo
+carregamento que alguém clica de novo.
+
+**Clicar na linha abre "onde é" e "o que vai".** Um mini-mapa com os trechos
+daquele grupo, de perto, e o script ao lado — em dois blocos ROTULADOS. O mapa
+não tem como entrar no texto da OS (o envio manda `g.script_os`, do pacote do
+servidor; o JS nunca lê o `<pre>`), mas empilhados sem rótulo eles parecem uma
+coisa só, e quem olha fica sem saber o que exatamente vai para o WVSA.
+
+É acordeão: abrir um fecha o outro. O mini-mapa é **uma instância de Leaflet**
+movida para a linha aberta — criar e destruir um mapa por linha vazaria
+listeners e refaria o download dos tiles a cada clique.
+
+⚠️ A célula do detalhe é tão larga quanto a TABELA, que no celular já rola de
+lado. Sem `max-width` pelo viewport o mapa nascia com 597px numa tela de 375, e
+os pontos ficavam atrás da borda até alguém arrastar a tabela.
+
+**`grupos[].itens` NÃO vai no pacote.** Ele repetia `linhas` inteiro dentro dos
+grupos: 209 kB de 719 kB, **29% da página**, para um dado que o cliente já
+tinha. O grupo carrega os `ids` e a tela procura os trechos no `linhas` que já
+está lá (`trechosDo`). Medido em 10/09/2026: o pacote caiu para 509 kB.
+
 A aba de Ordens mostrava **só os críticos** até 04/09/2026. Passou a mostrar
 todos: a classificação continua ordenando e aparece no badge de cada linha, mas
 esconder o resto tirava da tela desligamento que a operação quer abrir —
@@ -1368,6 +1404,29 @@ a.run(port=5001, use_reloader=False)"
   em tela real — a verificação correu com o painel oculto, onde o layout é
   adiado (§6).
 
+- **Anexar ao WVSA uma foto do mapa da troca** foi pedido em 10/09/2026 e
+  ficou para depois. O que já se sabe, para a próxima tentativa não repetir a
+  sondagem:
+
+  * o botão é *Fotos/Anexos → Incluir Fotos/Anexos*, um `<a class="abrir-form"
+    data-u-botao-id="anexos" data-u-url="anexos">`;
+  * **o padrão de rota é `/os/{acao}`, não `/os/{id}/{acao}`**: `/os/anexos`
+    responde **500** (a rota existe, falta parâmetro) enquanto
+    `/os/586420/anexos` responde **404** (rota inexistente). `/os/editar` se
+    comporta igual, então vale para todos os botões daquele menu;
+  * `os`, `id`, `os_id` e `OS` na query string: todos 500;
+  * o JS que monta a requisição **não está** em nenhum dos 60 scripts da
+    página nem no `app.js` (1,4 MB) — procurei por `abrir-form`, `u-url` e
+    `anexo`, zero ocorrências.
+
+  O caminho barato é capturar UM envio real pelo DevTools (aba Network →
+  Payload) em vez de adivinhar parâmetro contra produção.
+
+  A outra metade é gerar a imagem: precisa de **Pillow**, que não está em
+  nenhum dos dois venvs, para costurar tiles do OpenStreetMap em zoom 17-18
+  (onde o nome da rua fica legível). Enquanto isso não existe, o técnico tem o
+  link do Google Maps que já vai no script.
+
 - ✅ **A primeira OS real saiu em 10/09/2026: `#586420` no WVSA.**
   Governador Celso Ramos · GANCHOS DO MEIO · 14/09, 1 trecho, crítico. HTTP 200,
   resposta `{"actions":[{"action":"location","value":"/os/586420"}]}` — o WVSA
@@ -1389,8 +1448,13 @@ a.run(port=5001, use_reloader=False)"
   listagem do `/relatorios/infra10/dados`. Foram gravados: é a listagem que
   prova. Conferir pela ficha levaria a concluir, errado, que não foram.
 
-  O envio foi feito pelo portal LOCAL, com `OS_DRY_RUN=false` só ali — a Vercel
-  seguiu em ensaio. Para liberar em produção é virar a variável lá.
+  **Liberado em produção no mesmo dia**, e usado: em poucos minutos saíram mais
+  duas — `#586438` (DOM JOAQUIM, 10 trechos) e `#586440` (PEREQUE, 14 trechos).
+
+  ⚠️ **Todos os 12 usuários enxergam Troca de Poste** e, portanto, podem abrir
+  OS. Os 4 supervisores incluídos — eles NÃO viam o módulo antes do `#30`, e
+  passaram a ver porque a regra saiu do código e o padrão da configuração é
+  "vê tudo". Restringir é em *Configurações → Acesso aos módulos*.
 
   ⚠️ **A ordem carrega o `dry_run` de quando foi criada.** As duas ordens de
   ensaio no banco (AZAMBUJA 10/09 e AREIAS DO MEIO 04/09) continuarão sendo

@@ -176,11 +176,20 @@ def troca_poste():
     # Antes do pacote: `agrupar` carimba `grupo_chave` em cada linha, e é dela
     # que a tabela de Desligamentos monta os grupos.
     grupos = tp.agrupar(linhas)
+    # Cada grupo passa a saber se JÁ tem OS. A tela usa isso para tirá-lo dos
+    # candidatos — o botão não pode continuar convidando ao clique.
+    ja_aberta = tp.ordens_por_desligamento()
+    for g in grupos:
+        g["ordem"] = next((ja_aberta[i] for i in g["ids"] if i in ja_aberta), None)
     pacote = {
         "linhas": linhas,
         # A OS é do bairro/dia, então o script também é: o operador lê o texto
         # do GRUPO antes de clicar, não um texto por rua que ninguém enviaria.
-        "grupos": [{**g, "script_os": solicitacao.montar(g["itens"])}
+        # `itens` NÃO vai no pacote: ele repetia `linhas` inteiro dentro dos
+        # grupos — 209 kB de 719 kB, 29% da página, para um dado que o cliente
+        # já tem. O grupo carrega os `ids`, e a tela monta a lista por eles.
+        "grupos": [{**{k: v for k, v in g.items() if k != "itens"},
+                    "script_os": solicitacao.montar(g["itens"])}
                    for g in grupos],
         "revisao": tp.fila_revisao(),
         "ordens": tp.ordens(),
