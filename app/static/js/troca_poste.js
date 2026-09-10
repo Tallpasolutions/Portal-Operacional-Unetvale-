@@ -415,12 +415,37 @@
     conta();
   }
 
+  /** Preenche a agenda com os slots DO DIA daquele grupo.
+   *
+   * Depende do grupo, então roda ao abrir o modal — e não uma vez no início,
+   * como os selects fixos. A agenda do WVSA cobre poucos dias à frente
+   * (medido em 10/09/2026: 35 slots em três dias) e o desligamento costuma
+   * estar semanas à frente, então o normal é NÃO haver slot: a tela diz isso,
+   * em vez de mostrar uma lista de outro dia.
+   */
+  function montarAgenda(g) {
+    const sel = $("#tp-os-agendamento");
+    const nota = $("#tp-os-agenda-nota");
+    const doDia = (CATALOGO.agendamento_por_data || {})[g.data] || [];
+
+    sel.innerHTML = `<option value="">não agendar</option>` +
+      doDia.map((a) => {
+        const m = a.metadados || {};
+        return `<option value="${a.valor}">${m.turno || ""} · ${m.tecnico || a.rotulo}</option>`;
+      }).join("");
+    sel.disabled = !doDia.length;
+    nota.textContent = doDia.length
+      ? `${doDia.length} horário${doDia.length > 1 ? "s" : ""} livre${doDia.length > 1 ? "s" : ""} em ${g.data_br}.`
+      : `Nenhum horário na agenda do WVSA para ${g.data_br}. A OS é criada sem agendamento — dá para encaixar depois, no próprio WVSA.`;
+  }
+
   /** O que o operador escolheu no modal. */
   function camposOs() {
     return {
       executor: $("#tp-os-executor").value || "infra",
       periodo: $("#tp-os-periodo").value || null,
       tipo_tecnico: $("#tp-os-tipo-tecnico").value || null,
+      agendamento: $("#tp-os-agendamento").value || null,
       tecnico_ids: [...$("#tp-os-tecnicos").querySelectorAll("input:checked")].map((i) => i.value),
     };
   }
@@ -558,6 +583,7 @@
       // este caminho não existe. A recusa de verdade está no servidor.
       if (!enviar) return;
       const g = cand[Number(enviar.dataset.enviar)];
+      montarAgenda(g);
       const trechos = g.ids.length === 1 ? "1 trecho" : `${g.ids.length} trechos`;
       confirmarModal($("#tp-dlg-os"),
         `<b>${g.cidade} — ${g.bairro || "sem bairro"}</b><br>${g.data_br} · ${trechos}<br><br>` +

@@ -462,12 +462,39 @@ do monorepo não o incluía, era omissão. O rótulo traz a empresa como prefixo
 porque há nome repetido em empresas diferentes (Ueliton Patriqui Nicoletti é
 `522` na INFRA WAVE e `661` na WAVE) e cortar o prefixo viraria adivinhação.
 
-⚠️ **`agendamento` fica de fora da tela, de propósito.** Medido no mesmo dia:
-23 slots cobrindo só 04, 05 e 08/09, e a lista muda ao longo do dia. A OS de
-troca de poste é aberta para a data do desligamento, normalmente semanas à
-frente — o slot ainda não existe. É opcional no WVSA; quem quiser encaixar numa
-agenda faz isso lá, onde a lista está viva. O parâmetro segue existindo na
-função para quando houver um caso.
+**`agendamento` tem cadência PRÓPRIA — 15 min, contra 12 h dos demais.** Ele
+não é catálogo, é a AGENDA: muda ao longo do dia conforme a operação marca.
+Medido em 10/09/2026, uma sincronização trocou **21 slots vencidos por 35
+novos**, cobrindo três dias. Copiado de 12 em 12 h, o portal ofereceria um
+horário que já foi ocupado.
+
+O rótulo (`149140-M1` → "10/09/2026 - M1 - INFRA UNET - Alexandre de Oliveira")
+é quebrado em `metadados {data, turno, tecnico}` no coletor. ⚠️ Divida em no
+MÁXIMO três pedaços: o nome do técnico contém " - " quando ele tem empresa no
+cadastro, e um split cego corta o nome ao meio.
+
+A tela só oferece os slots **do dia daquele grupo** — mostrar o de outro dia
+faria o operador marcar um horário que não existe para aquela obra. Como o
+desligamento costuma estar semanas à frente, o normal é não haver slot: aí o
+select fica desabilitado e a nota explica, em vez de a tela parecer quebrada.
+
+⚠️ A trava de "catálogo vazio é sessão expirada" **não** vale para a agenda:
+ela pode estar legitimamente vazia (ninguém agendou nada), e recusar isso
+deixaria slots cancelados vivos no portal para sempre.
+
+⚠️ **`DATA` e `DATAFIM` vão em ISO, não em DD/MM/AAAA.** São
+`<input type="date">` no formulário — conferido no HTML em 09/09/2026, com o
+servidor renderizando `value="2026-09-09"` —, e campo assim só submete ISO: o
+navegador não tem como mandar outra coisa, e não há JS na página reformatando
+antes do envio. O `montar_payload` convertia para BR, o que faria a OS nascer
+com data errada em vez de dar erro. A versão TypeScript do monorepo sempre
+mandou ISO; era o Python que divergia.
+
+**O contrato do formulário foi conferido campo a campo** em 09/09/2026, pelo
+HTML do `<form action="/relatorios/infra10/save">`: os 22 nomes batem com o que
+o `montar_payload` envia, e `SOLICITACAO` é o único `required` do form. As 11
+cidades monitoradas têm `ibge_codigo` idêntico ao que o autocomplete devolve —
+zero divergência.
 
 O `bairro` é autocomplete, não select, e por isso é resolvido no **momento do
 envio**, pelo coletor (é o único ponto que alcança o WVSA).
@@ -484,6 +511,12 @@ vazio.
 ⚠️ E ele rate-limita, falhando em silêncio do mesmo jeito: HTTP 200 com lista
 vazia. Lista vazia é "tente de novo", NUNCA "não existe" — aceitar o vazio
 mandaria a OS com bairro em branco justamente quando o WVSA está ocupado.
+
+Medido em 09/09/2026 contra as 11 cidades: com intervalo FIXO de ~0,95 s, 4
+delas voltaram vazias; com espera CRESCENTE, todas responderam, duas só na
+terceira tentativa. Por isso são 4 tentativas com `0,95 s × tentativa`. E o
+sintoma engana: rodando duas vezes, cidades diferentes falham — foi o que quase
+me fez concluir que 6 das 11 não existiam no cadastro do WVSA.
 
 A correção humana é durável: `marcar_coordenadas_colapsadas` tem
 `and g.validacao <> 'manual'` e o upsert da geocodificação preserva `manual`.
@@ -1292,8 +1325,30 @@ a.run(port=5001, use_reloader=False)"
   sobrecarga. No navegador, o POST interceptado levava os 17 ids do grupo mais
   `executor`, `periodo`, `tipo_tecnico` e os dois `tecnico_ids` escolhidos.
 
-  **Ainda não exercitado:** a resolução do bairro por autocomplete (só roda no
-  envio, e nenhum aconteceu) e a inativação de técnico que sai do cadastro.
+  **A inativação de técnico foi exercitada em 10/09/2026**: o formulário passou
+  de 34 para 33 opções e a sincronização marcou `661 WAVE - Ueliton Patriqui
+  Nicoletti` como inativo — justamente o duplicado (ele também é `522` na INFRA
+  WAVE). O rodízio de slots também: 21 vencidos saíram, 35 entraram.
+
+  **Ainda não exercitado:** a resolução do bairro por autocomplete — ela só roda
+  no envio, e nenhum aconteceu.
+
+- **Agendamento no modal e data em ISO** entrou em 10/09/2026, sem migration.
+  Fecha o contrato do formulário do WVSA, conferido campo a campo pelo HTML do
+  `<form action="/relatorios/infra10/save">`: os 22 nomes batem, `SOLICITACAO` é
+  o único `required`, e as 11 cidades têm `ibge_codigo` idêntico ao do
+  autocomplete (zero divergência).
+
+  Duas correções que só apareceram nessa conferência: **`DATA`/`DATAFIM` iam em
+  DD/MM/AAAA para um `<input type="date">`**, que só aceita ISO; e o
+  autocomplete precisava de espera CRESCENTE, não fixa (§6).
+
+  Exercitado no navegador contra produção, desktop e mobile, console limpo: o
+  grupo de 10/09 abre com 27 horários e a nota certa; o de 12/09 tem o select
+  desabilitado e a explicação; e o POST interceptado levava
+  `agendamento: "149140-M1"`, o slot escolhido, sem nenhuma requisição real.
+
+  **Ainda não exercitado:** o envio REAL — que é o próximo passo.
 
 - **Agrupamento por bairro no mapa e nos gráficos** entrou em 09/09/2026, sem
   migration — é tudo cliente, a partir do `grupo_chave` que o servidor já

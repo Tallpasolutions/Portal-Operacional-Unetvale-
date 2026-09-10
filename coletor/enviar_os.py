@@ -153,9 +153,13 @@ class Wvsa:
         nome = (ordem.get("bairro_nome") or "").strip()
         if not nome:
             return ""
-        for tentativa in range(3):
+        # Espera CRESCENTE e quatro tentativas: medido em 09/09/2026 contra as 11
+        # cidades, duas só responderam na terceira, com as esperas subindo
+        # (0,95s / 1,9s / 2,85s). Com intervalo fixo de 0,9s elas teriam voltado
+        # vazias — e vazio aqui vira OS sem bairro.
+        for tentativa in range(4):
             if tentativa:
-                time.sleep(0.9)
+                time.sleep(0.95 * tentativa)
             # `query`, não `term` — e os dois cabeçalhos são obrigatórios: sem
             # eles o WVSA devolve HTML da tela em vez do JSON, e a resposta
             # parece "bairro não encontrado" quando é a requisição que está
@@ -220,6 +224,13 @@ def alcancavel():
 # validade de horas produz tela que mente.
 CATALOGO_HORAS = float(os.environ.get("OS_CATALOGO_HORAS", "12"))
 
+# O `agendamento` tem cadência PRÓPRIA, e muito mais curta, porque não é um
+# catálogo: é a agenda. Medido em 09/09/2026, o select trazia 28 slots do tipo
+# `149163-M1` -> "09/09/2026 - M1 - Juvenal da Silva", cobrindo poucos dias e
+# mudando ao longo do dia conforme a operação agenda. Copiado de 12 em 12 h ele
+# mostraria no portal um técnico que já foi ocupado.
+AGENDAMENTO_MINUTOS = float(os.environ.get("OS_AGENDAMENTO_MINUTOS", "15"))
+
 # `tecnico_id[]` é multi-select ESTÁTICO no HTML (34 opções em 04/09/2026), não
 # depende do tipo_tecnico e não vem por AJAX. O `catalogos()` do monorepo não o
 # incluía — era omissão, não impedimento.
@@ -230,6 +241,31 @@ _CAMPOS_CATALOGO = {
     "tecnico_id[]": "tecnico",
     "finalidade": "finalidade",
 }
+
+# Só este, na cadência curta.
+_CAMPO_AGENDAMENTO = {"agendamento": "agendamento"}
+
+
+def _metadados_agendamento(rotulo):
+    """"09/09/2026 - M1 - Juvenal da Silva" -> {data, turno, tecnico}.
+
+    A tela precisa da DATA para só oferecer os slots do dia do desligamento —
+    mostrar o slot de outro dia seria pior que não mostrar nenhum.
+
+    ⚠️ Divide em no MÁXIMO três pedaços: o nome do técnico contém " - " quando
+    ele tem empresa no cadastro ("INFRA SCHISTEL - Jefferson Julio da Silva"),
+    e um split cego cortaria o nome ao meio.
+    """
+    partes = rotulo.split(" - ", 2)
+    if len(partes) < 3:
+        return None
+    data, turno, tecnico = (p.strip() for p in partes)
+    try:
+        d, m, a = data.split("/")
+        iso = f"{a}-{m.zfill(2)}-{d.zfill(2)}"
+    except ValueError:
+        return None
+    return {"data": iso, "turno": turno, "tecnico": tecnico}
 
 
 def _opcoes(html, nome):
@@ -249,32 +285,49 @@ def _opcoes(html, nome):
     return saida
 
 
-def sincronizar_catalogos(wvsa):
-    """Copia as opções do formulário para `troca_poste.wvsa_catalogos`."""
+def sincronizar_catalogos(wvsa, campos=None):
+    """Copia as opções do formulário para `troca_poste.wvsa_catalogos`.
+
+    `campos` restringe o que é copiado — é como o `agendamento` roda de 15 em
+    15 min sem arrastar junto os 33 técnicos e as 11 finalidades, que mudam
+    quando alguém entra ou sai da equipe.
+    """
     url, _ = _cfg()
+    campos = campos or _CAMPOS_CATALOGO
     r = wvsa.s.get(f"{wvsa.base}/relatorios/infra10", timeout=TIMEOUT)
     r.raise_for_status()
     html = r.text
 
     linhas, por_tipo = [], {}
-    for campo, tipo in _CAMPOS_CATALOGO.items():
+    for campo, tipo in campos.items():
         opcoes = _opcoes(html, campo)
         por_tipo[tipo] = len(opcoes)
         for valor, rotulo in opcoes:
-            linhas.append({"tipo": tipo, "valor": valor, "rotulo": rotulo,
-                           "ativo": True, "sincronizado_em": _agora()})
+            linha = {"tipo": tipo, "valor": valor, "rotulo": rotulo,
+                     "ativo": True, "sincronizado_em": _agora()}
+            if tipo == "agendamento":
+                linha["metadados"] = _metadados_agendamento(rotulo)
+            linhas.append(linha)
 
-    if not linhas or not por_tipo.get("tecnico"):
+    # A trava do catálogo vazio vale para o conjunto ESTÁVEL: lista vazia ali é
+    # quase sempre sessão expirada devolvendo a tela de login. Já a agenda pode
+    # estar legitimamente vazia (ninguém agendou nada), e recusar isso deixaria
+    # slots cancelados vivos no portal para sempre.
+    if campos is _CAMPO_AGENDAMENTO:
+        if not linhas:
+            log("agenda_vazia", nota="nenhum slot no WVSA — inativando os antigos")
+    elif not linhas or not por_tipo.get("tecnico"):
         # Lista vazia é quase sempre sessão expirada devolvendo a tela de login,
         # não "a empresa ficou sem técnico". Gravar isso apagaria o catálogo bom
         # e deixaria a tela sem opção nenhuma — o erro do `ger_idf` zerado.
         log("catalogo_vazio_recusado", campos=por_tipo)
         return 0
 
-    resp = requests.post(f"{url}/rest/v1/wvsa_catalogos", headers={
-        **_headers(), "Prefer": "resolution=merge-duplicates"},
-        params={"on_conflict": "tipo,valor"}, json=linhas, timeout=TIMEOUT)
-    resp.raise_for_status()
+    if linhas:
+        resp = requests.post(f"{url}/rest/v1/wvsa_catalogos", headers={
+            **_headers(), "Prefer": "resolution=merge-duplicates"},
+            params={"on_conflict": "tipo,valor"}, json=linhas, timeout=TIMEOUT)
+        resp.raise_for_status()
 
     # Quem sumiu do formulário vira inativo, não some do banco: OS antiga
     # aponta para o técnico que saiu, e apagar a linha deixaria a auditoria
@@ -282,7 +335,7 @@ def sincronizar_catalogos(wvsa):
     vivos = {(l["tipo"], l["valor"]) for l in linhas}
     atuais = requests.get(f"{url}/rest/v1/wvsa_catalogos", headers=_headers(),
                           params={"select": "tipo,valor", "ativo": "is.true",
-                                  "tipo": f"in.({','.join(_CAMPOS_CATALOGO.values())})"},
+                                  "tipo": f"in.({','.join(campos.values())})"},
                           timeout=TIMEOUT)
     atuais.raise_for_status()
     sumidos = [a for a in atuais.json() if (a["tipo"], a["valor"]) not in vivos]
@@ -295,6 +348,11 @@ def sincronizar_catalogos(wvsa):
     return len(linhas)
 
 
+def sincronizar_agendamento(wvsa):
+    """Só a agenda. Roda de `AGENDAMENTO_MINUTOS` em `AGENDAMENTO_MINUTOS`."""
+    return sincronizar_catalogos(wvsa, _CAMPO_AGENDAMENTO)
+
+
 # ----------------------------------------------------------------- payload
 def montar_payload(o):
     """Monta os campos do formulário a partir da ordem gravada.
@@ -304,8 +362,14 @@ def montar_payload(o):
     chuva?" e `agendar_os` é "pré agendar OS?". Nenhum dos dois é o campo de
     agendamento, que é `agendamento`.
     """
-    def br(iso):
-        return "/".join(reversed(iso.split("-"))) if iso else ""
+    # ⚠️ ISO, não DD/MM/AAAA. `DATA` e `DATAFIM` são `<input type="date">` no
+    # formulário (conferido no HTML em 09/09/2026, com o servidor renderizando
+    # `value="2026-09-09"`), e campo assim só submete ISO — o navegador não tem
+    # como mandar outra coisa, e não há JS na página reformatando antes do
+    # envio. Mandávamos BR, o que faria a OS nascer com data errada em vez de
+    # dar erro. A versão TypeScript do monorepo sempre mandou ISO.
+    def iso(d):
+        return d or ""
 
     return {
         "FINALIDADE": o.get("finalidade") or "POST",
@@ -323,8 +387,8 @@ def montar_payload(o):
         "agendamento": o.get("agendamento") or "",
         "categoria_interna": o.get("categoria_interna") or "N",
         "agendar_os": o.get("agendar_os") or "N",
-        "DATA": br(o.get("data_inicio")),
-        "DATAFIM": br(o.get("data_fim")),
+        "DATA": iso(o.get("data_inicio")),
+        "DATAFIM": iso(o.get("data_fim")),
         "periodo": o.get("periodo") or "",
         "executor": o.get("executor") or "",
         "SOLICITACAO": o.get("solicitacao") or "",
@@ -441,10 +505,14 @@ def main():
                     help=f"fica observando a fila a cada {INTERVALO}s")
     ap.add_argument("--catalogos", action="store_true",
                     help="sincroniza as opções do formulário e sai")
+    ap.add_argument("--agenda", action="store_true",
+                    help="sincroniza só os slots de agendamento e sai")
     args = ap.parse_args()
 
-    if args.catalogos:
-        n = sincronizar_catalogos(Wvsa().login())
+    if args.catalogos or args.agenda:
+        sessao = Wvsa().login()
+        n = (sincronizar_agendamento(sessao) if args.agenda
+             else sincronizar_catalogos(sessao))
         log("fim", opcoes=n)
         return
 
@@ -453,22 +521,37 @@ def main():
         log("fim", processadas=n)
         return
 
-    log("observando", intervalo_s=INTERVALO, catalogo_h=CATALOGO_HORAS)
+    log("observando", intervalo_s=INTERVALO, catalogo_h=CATALOGO_HORAS,
+        agenda_min=AGENDAMENTO_MINUTOS)
     wvsa = None
     proximo_catalogo = 0.0
+    proxima_agenda = 0.0
     while True:
         try:
             # O catálogo entra AQUI, e não num quarto LaunchAgent: este processo
             # já é residente, já está na rede do WVSA e já sabe logar. Um agente
             # só para copiar sete listas seria mais coisa para quebrar.
-            if time.time() >= proximo_catalogo:
+            agora = time.time()
+            vence_catalogo = agora >= proximo_catalogo
+            vence_agenda = agora >= proxima_agenda
+            if vence_catalogo or vence_agenda:
                 try:
-                    sincronizar_catalogos(Wvsa().login())
+                    # Uma sessão serve para os dois: `sincronizar_catalogos`
+                    # baixa a mesma página, e abrir dois logins seguidos só
+                    # gastaria uma volta a mais no WVSA.
+                    sessao = Wvsa().login()
+                    if vence_catalogo:
+                        sincronizar_catalogos(sessao)
+                    if vence_agenda:
+                        sincronizar_agendamento(sessao)
                 except Exception as e:
                     log("catalogo_erro", erro=str(e)[:160])
                 # Reagenda mesmo em erro: insistir de 5 em 5 s contra um WVSA
                 # fora do ar é o que transforma indisponibilidade em enxurrada.
-                proximo_catalogo = time.time() + CATALOGO_HORAS * 3600
+                if vence_catalogo:
+                    proximo_catalogo = agora + CATALOGO_HORAS * 3600
+                if vence_agenda:
+                    proxima_agenda = agora + AGENDAMENTO_MINUTOS * 60
 
             n, wvsa = rodada(wvsa)
             if n == 0:

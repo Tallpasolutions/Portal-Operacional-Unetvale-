@@ -202,6 +202,14 @@
       <label class="field" style="grid-column:1/-1;">Tipo de técnico
         <select id="tp-os-tipo-tecnico"></select>
       </label>
+      {# Os slots são da AGENDA do WVSA, não um catálogo: mudam ao longo do dia
+         e cobrem poucos dias à frente. Por isso só aparecem os do dia do
+         desligamento — oferecer o de outro dia faria o operador marcar um
+         horário que não existe para aquela obra. #}
+      <label class="field" style="grid-column:1/-1;">Agendar nova OS
+        <select id="tp-os-agendamento"></select>
+        <span class="subnote" id="tp-os-agenda-nota" style="margin:4px 0 0;display:block;"></span>
+      </label>
     </div>
 
     <label class="field" style="display:block;margin-top:12px;">

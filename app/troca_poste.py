@@ -487,7 +487,7 @@ def aplicar_revisao(desligamento_id, usuario_id, lat=None, lon=None, reprovar=Fa
 # a lista do WVSA cobre poucos dias e muda ao longo do dia (23 slots em 3 dias,
 # medido em 04/09/2026), enquanto a OS é aberta para a data do desligamento,
 # semanas à frente — o slot ainda não existe. É campo opcional lá.
-TIPOS_CATALOGO = ("executor", "tipo_tecnico", "periodo", "tecnico")
+TIPOS_CATALOGO = ("executor", "tipo_tecnico", "periodo", "tecnico", "agendamento")
 
 
 def catalogos():
@@ -497,17 +497,23 @@ def catalogos():
     da rede: as listas vivem no formulário, num IP privado que a Vercel não
     alcança. Aqui só se lê.
 
+    O `agendamento` tem cadência própria no coletor (15 min contra 12 h dos
+    demais): ele não é catálogo, é a agenda — muda ao longo do dia conforme a
+    operação marca. Medido em 10/09/2026, uma sincronização trocou 21 slots
+    vencidos por 35 novos, cobrindo três dias.
+
     Os técnicos vêm agrupados por empresa porque o rótulo do WVSA já traz o
-    prefixo ("INFRA UNET - Fulano") e são 34 numa lista só. O rótulo vai
+    prefixo ("INFRA UNET - Fulano") e são 33 numa lista só. O rótulo vai
     INTEIRO para a tela: há nome repetido em empresas diferentes (Ueliton
     Patriqui Nicoletti é 522 na INFRA WAVE e 661 na WAVE), e cortar o prefixo
     transformaria a escolha em adivinhação.
     """
     vazio = {t: [] for t in TIPOS_CATALOGO}
     vazio["tecnicos_por_empresa"] = []
+    vazio["agendamento_por_data"] = {}
     try:
         linhas = supa.select("wvsa_catalogos", {
-            "select": "tipo,valor,rotulo",
+            "select": "tipo,valor,rotulo,metadados",
             "tipo": f"in.({','.join(TIPOS_CATALOGO)})",
             "ativo": "is.true",
             "order": "tipo.asc,rotulo.asc",
@@ -518,7 +524,23 @@ def catalogos():
 
     saida = {t: [] for t in TIPOS_CATALOGO}
     for l in linhas:
-        saida.setdefault(l["tipo"], []).append({"valor": l["valor"], "rotulo": l["rotulo"]})
+        item = {"valor": l["valor"], "rotulo": l["rotulo"]}
+        if l.get("metadados"):
+            item["metadados"] = l["metadados"]
+        saida.setdefault(l["tipo"], []).append(item)
+
+    # A agenda vai indexada por DATA porque a tela só pode oferecer o slot do
+    # dia do desligamento: mostrar o de outro dia é pior que não mostrar
+    # nenhum — o operador escolheria um horário que não existe para aquela obra.
+    por_data = {}
+    for a in saida.get("agendamento", []):
+        data = (a.get("metadados") or {}).get("data")
+        if data:
+            por_data.setdefault(data, []).append(a)
+    for lista in por_data.values():
+        lista.sort(key=lambda x: ((x.get("metadados") or {}).get("turno", ""),
+                                  (x.get("metadados") or {}).get("tecnico", "")))
+    saida["agendamento_por_data"] = por_data
 
     empresas = {}
     for t in saida.get("tecnico", []):
