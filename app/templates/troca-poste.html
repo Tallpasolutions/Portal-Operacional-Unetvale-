@@ -27,6 +27,9 @@
   <div class="toolbar">
     <label>Período
       <span class="toggle" id="tp-presets">
+        {# Para trás: o histórico vem do servidor (a página recarrega com o
+           período), porque o pacote padrão só traz de hoje em diante. #}
+        <button data-dias="-30">Últimos 30 dias</button>
         <button data-dias="0">Hoje</button>
         <button data-dias="1">Amanhã</button>
         <button data-dias="7" class="active">7 dias</button>

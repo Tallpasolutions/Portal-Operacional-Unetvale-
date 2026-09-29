@@ -43,7 +43,12 @@
   const fmt = (n) => (n == null ? "—" : Number(n).toLocaleString("pt-BR"));
   const dataBR = (iso) => (iso ? iso.split("-").reverse().join("/") : "—");
 
-  const estado = { de: TP.padrao.de, ate: TP.padrao.ate, cidade: "", bairro: "",
+  // O pacote padrão traz de hoje em diante. Um período pedido na URL
+  // (`?de=&ate=`) é o que a página abre mostrando — é assim que o histórico
+  // chega, e o link com o período continua valendo se for mandado a alguém.
+  const PEDIDO = TP.pedido || TP.padrao;
+  const CARREGADO = TP.carregado || { de: HOJE, ate: null };
+  const estado = { de: PEDIDO.de, ate: PEDIDO.ate, cidade: "", bairro: "",
                    risco: "", causa: "", turno: "", ordem: null, desc: false };
 
   // Turno pelo início do desligamento: até 12:00 é manhã, depois é tarde.
@@ -194,6 +199,7 @@
       `${fmt(linhas.length)} desligamentos • ${cidades} cidades • ${dataBR(estado.de)} a ${dataBR(estado.ate)}` +
       (estado.turno ? ` • ${estado.turno === "manha" ? "manhã" : "tarde"}` : "") +
       (prox ? ` • próximo em ${prox}` : "") +
+      (estado.de && estado.de < HOJE ? " • inclui desligamentos já realizados" : "") +
       (TP.ultima_coleta ? ` • coletado em <b>${TP.ultima_coleta}</b>` : "");
   }
 
@@ -637,12 +643,17 @@
     // que a primeira tentativa falhou, ou ir conferir no WVSA se abriu duas.
     // Eles não somem da tela: estão logo abaixo, na tabela de Ordens de
     // serviço, agora identificados pelo bairro e pelo dia.
-    const cand = noRecorte.filter((g) => !g.ordem);
+    // Grupo do passado não é candidato: o histórico está aqui para consulta,
+    // e OS de obra que já aconteceu não desloca ninguém. O servidor recusa
+    // também — isto só evita o botão convidando ao clique.
+    const passados = noRecorte.filter((g) => (g.data || "") < HOJE).length;
+    const cand = noRecorte.filter((g) => !g.ordem && (g.data || "") >= HOJE);
     const abertos = noRecorte.filter((g) => g.ordem);
 
     $("#tp-cand-contagem").textContent =
       `${fmt(cand.length)} ${cand.length === 1 ? "grupo" : "grupos"} no recorte` +
-      (abertos.length ? ` · ${fmt(abertos.length)} já com OS` : "");
+      (abertos.length ? ` · ${fmt(abertos.length)} já com OS` : "") +
+      (passados ? ` · ${fmt(passados)} já realizados, fora da lista` : "");
 
     const nota = $("#tp-cand-abertos");
     if (nota) {
@@ -817,18 +828,47 @@
   }
 
   // ---- eventos -----------------------------------------------------------
+  // Negativo é para trás: "-30" são os 30 dias ANTERIORES a hoje, sem hoje.
+  function periodoDoPreset(dias) {
+    if (dias < 0) return { de: somaDias(HOJE, dias), ate: somaDias(HOJE, -1) };
+    if (dias === 1) return { de: somaDias(HOJE, 1), ate: somaDias(HOJE, 1) };
+    return { de: HOJE, ate: somaDias(HOJE, dias) };
+  }
+  function marcarPreset() {
+    [...$("#tp-presets").children].forEach((x) => {
+      const p = periodoDoPreset(Number(x.dataset.dias));
+      x.classList.toggle("active", p.de === estado.de && p.ate === estado.ate);
+    });
+  }
+
+  /** Aplica o período; recarrega quando ele sai do que o servidor mandou.
+   *
+   * Filtrar no cliente um pacote que só tem de hoje em diante devolvia tabela
+   * vazia para qualquer data passada, sem aviso — parecia que não havia
+   * histórico, e ele estava todo no banco. Dentro do que veio, segue sem
+   * round-trip, como antes.
+   */
+  function mudouPeriodo() {
+    marcarPreset();
+    const cobre = estado.de && estado.de >= CARREGADO.de &&
+                  (!CARREGADO.ate || (estado.ate && estado.ate <= CARREGADO.ate));
+    if (cobre) { render(); return; }
+    const u = new URL(location.href);
+    u.searchParams.set("de", estado.de || HOJE);
+    if (estado.ate) u.searchParams.set("ate", estado.ate);
+    else u.searchParams.delete("ate");
+    $("#tp-subnote").textContent = "Carregando o período…";
+    location.assign(u);
+  }
+
   $("#tp-presets").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-dias]");
     if (!b) return;
-    const dias = Number(b.dataset.dias);
-    estado.de = HOJE;
-    estado.ate = dias <= 1 ? somaDias(HOJE, dias) : somaDias(HOJE, dias);
-    if (dias === 1) estado.de = somaDias(HOJE, 1);
-    [...$("#tp-presets").children].forEach((x) => x.classList.toggle("active", x === b));
-    render();
+    Object.assign(estado, periodoDoPreset(Number(b.dataset.dias)));
+    mudouPeriodo();
   });
-  $("#tp-de").addEventListener("change", (e) => { estado.de = e.target.value; marcarPresetLivre(); render(); });
-  $("#tp-ate").addEventListener("change", (e) => { estado.ate = e.target.value; marcarPresetLivre(); render(); });
+  $("#tp-de").addEventListener("change", (e) => { estado.de = e.target.value; mudouPeriodo(); });
+  $("#tp-ate").addEventListener("change", (e) => { estado.ate = e.target.value; mudouPeriodo(); });
   $("#tp-cidade").addEventListener("change", (e) => { estado.cidade = e.target.value; estado.bairro = ""; render(); });
   $("#tp-bairro").addEventListener("change", (e) => { estado.bairro = e.target.value; render(); });
   $("#tp-risco").addEventListener("change", (e) => { estado.risco = e.target.value; render(); });
@@ -843,15 +883,11 @@
   $("#tp-limpar").addEventListener("click", () => {
     Object.assign(estado, { de: TP.padrao.de, ate: TP.padrao.ate, cidade: "", bairro: "",
                             risco: "", causa: "", turno: "", ordem: null, desc: false });
-    [...$("#tp-presets").children].forEach((x) => x.classList.toggle("active", x.dataset.dias === "7"));
     [...$("#tp-turno").children].forEach((x) => x.classList.toggle("active", x.dataset.turno === ""));
-    render();
+    mudouPeriodo();
   });
   $("#tp-exportar").addEventListener("click", () => exportarCsv(aplicar()));
 
-  function marcarPresetLivre() {
-    [...$("#tp-presets").children].forEach((x) => x.classList.remove("active"));
-  }
 
   $("#tp-tabela").querySelector("thead").addEventListener("click", (e) => {
     const th = e.target.closest("th[data-col]");
@@ -895,6 +931,7 @@
   // ---- início ------------------------------------------------------------
   montarCamposOs();
   renderOrdens();
+  marcarPreset();
   render();
   abrirAba(new URL(location.href).searchParams.get("aba") || "desligamentos");
 })();

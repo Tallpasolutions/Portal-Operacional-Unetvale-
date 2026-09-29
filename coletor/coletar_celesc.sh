@@ -21,6 +21,77 @@
 # =====================================================================
 set -uo pipefail
 
+LOG="$HOME/unetvale-coletor/celesc.log"
+# Carimbo (epoch) da última rodada que terminou INTEIRA. É ele, e não o
+# relógio, que decide se há coleta a fazer.
+ULTIMA_OK="$HOME/unetvale-coletor/celesc.ultima_ok"
+HORARIOS="7 13"
+
+carimbo() { date "+[%d/%m %H:%M:%S]"; }
+registrar() { echo "$(carimbo) $*" >> "$LOG"; }
+# O agendamento tenta a cada 15 min e a maioria das tentativas é adiada:
+# registrar a mesma linha a cada dark wake enterraria o log. Só escreve se
+# a última linha não for o mesmo aviso.
+registrar_uma_vez() {
+  tail -1 "$LOG" 2>/dev/null | grep -qF -- "$*" || registrar "$*"
+}
+
+# ---------------------------------------------------------------------
+# Horário fixo NÃO serve para esta máquina, e isso foi medido.
+#
+# Até 29/09/2026 o plist disparava às 07h e 13h. De 15/09 a 29/09 a rodada
+# das 07h falhou TODOS os dias, e a das 13h de 27 e 28/09 também: três dias
+# sem dado novo na Troca de Poste. O `pmset -g log` mostra o porquê — nos
+# horários o Mac estava na bateria com a tampa fechada. O launchd dispara num
+# dark wake, o `caffeinate` cria a asserção e o macOS dorme assim mesmo (é a
+# ressalva do CLAUDE.md §6). Saía `getaddrinfo ENOTFOUND` do pooler do
+# Supabase 1 s depois de começar — a rede nem tinha voltado —, ou a rodada
+# andava aos pedaços e morria com `Connection terminated`. E o horário
+# perdido estava perdido: a próxima chance era 6 h depois.
+#
+# Agora o launchd chama a cada 15 min (StartInterval) e o script decide:
+#   1. já saiu a rodada do último horário da grade? então não há o que fazer;
+#   2. tampa fechada na bateria? o Mac vai dormir no meio — adia;
+#   3. sem rota até a Celesc e o banco? adia.
+# O horário da grade vira "a partir de": se às 07h a máquina está fechada, a
+# coleta sai no primeiro tique depois que alguém abre a tampa.
+#
+# `CELESC_FORCAR=1` pula as três conferências (rodar na mão, para teste).
+# ---------------------------------------------------------------------
+if [ -z "${CELESC_ACORDADO:-}" ] && [ -z "${CELESC_FORCAR:-}" ]; then
+  agora=$(date +%s)
+  # Último horário da grade que já passou. Antes do primeiro do dia, vale o
+  # último de ONTEM — é o que a madrugada fechada deixou pendente.
+  devido=0
+  for h in $HORARIOS; do
+    t=$(date -j -f "%Y-%m-%d %H:%M:%S" "$(date +%Y-%m-%d) $(printf %02d "$h"):00:00" +%s)
+    [ "$t" -le "$agora" ] && devido=$t
+  done
+  if [ "$devido" -eq 0 ]; then
+    ultimo=$(echo $HORARIOS | awk '{print $NF}')
+    devido=$(( $(date -j -f "%Y-%m-%d %H:%M:%S" "$(date +%Y-%m-%d) $(printf %02d "$ultimo"):00:00" +%s) - 86400 ))
+  fi
+  feito=$(cat "$ULTIMA_OK" 2>/dev/null || echo 0)
+  # Em dia: sai calado. É o caso de quase todo tique.
+  [ "${feito:-0}" -ge "$devido" ] && exit 0
+
+  # Tampa fechada com carregador e monitor externo é o modo "clamshell" e
+  # fica acordado de verdade; na bateria, não há asserção que segure.
+  if ioreg -r -k AppleClamshellState -d 4 2>/dev/null | grep -q '"AppleClamshellState" = Yes' &&
+     pmset -g batt 2>/dev/null | head -1 | grep -q "Battery Power"; then
+    registrar_uma_vez "coleta adiada: tampa fechada na bateria (o Mac dormiria no meio)"
+    exit 0
+  fi
+
+  # Rede de pé para as DUAS pontas. Sem o banco a rodada morre no primeiro
+  # INSERT; sem a Celesc ela "conclui" com as cidades falhando.
+  if ! /usr/bin/nc -z -G 5 aws-1-us-west-2.pooler.supabase.com 5432 >/dev/null 2>&1 ||
+     ! /usr/bin/curl -s -o /dev/null -m 15 https://avisodesligamento.celesc.com.br/; then
+    registrar_uma_vez "coleta adiada: sem rota até a Celesc ou o banco"
+    exit 0
+  fi
+fi
+
 # O launchd dispara o job num DARK WAKE e a maquina volta a dormir logo depois.
 # Sem segurar uma assercao de energia, a rodada anda so nas frestas de 2-6 s de
 # dark wake: em 02/09/2026 o job das 07h comecou as 07:06:57, o Mac voltou a
@@ -51,9 +122,24 @@ fi
 # do dia 01/09 simplesmente nao rodou, e o /monitoramento seguiu verde porque
 # o limiar de la e 26 h.
 #
-# A rodada inteira leva ~4 min. 20 min por etapa e folga larga e continua bem
-# abaixo das 6 h entre 07h e 13h.
+# A rodada inteira leva ~4 min. 20 min por etapa e folga larga; o tique de
+# 15 min que cair com ela rodando simplesmente nao comeca (o launchd nao
+# sobrepoe), e o seguinte encontra o carimbo em dia.
 LIMITE_ETAPA=${LIMITE_ETAPA:-1200}
+
+# Quantos endereços a geocodificação resolve por rodada. O padrão do job é 25,
+# e com ele a fila NUNCA zerava: a Celesc publica de 30 a 100 avisos novos por
+# dia, e só rodada que dá certo geocodifica. Em 29/09/2026 havia 389 na fila e
+# nenhum dos 305 desligamentos da tela tinha posição — todos "indeterminado".
+# A ~3 s por endereço (medido: 25 em 76 s), 150 cabem em ~8 min, bem dentro
+# do LIMITE_ETAPA. Endereço repetido sai do cache e custa menos.
+GEO_LIMITE=${GEO_LIMITE:-150}
+
+# Teto de células do Geogrid por rodada. São 3 chamadas por célula com 1,5 s
+# de intervalo (GEOGRID_RATE_LIMIT_MS): ~4,5 s cada, 150 em ~11 min. Sobra
+# para o dia em que a Celesc publica muito de uma vez; o que não couber sai
+# na rodada seguinte, e o que fica para trás é o mais distante no calendário.
+SYNC_LIMITE=${SYNC_LIMITE:-150}
 
 # Cada etapa em seu proprio grupo de processo. Sem isto o cao de guarda mataria
 # so o `pnpm`, e o `tsx`/`node` filho — que e justamente quem trava — ficaria
@@ -65,10 +151,6 @@ set -m
 export PATH="/opt/homebrew/opt/node@20/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 REPO="$HOME/Documents/Dashboard Operacional"
-LOG="$HOME/unetvale-coletor/celesc.log"
-
-carimbo() { date "+[%d/%m %H:%M:%S]"; }
-registrar() { echo "$(carimbo) $*" >> "$LOG"; }
 
 mkdir -p "$(dirname "$LOG")"
 
@@ -84,13 +166,26 @@ falhas=0
 # A ordem importa e é a cadeia mínima para um desligamento novo chegar ao mapa:
 #   coletar      -> traz os avisos da Celesc para troca_poste.coletas/desligamentos
 #   geocodificar -> resolve o endereço em coordenada (sem isto o ponto não existe)
+#   sync-rede    -> baixa do Geogrid a rede em volta dos pontos de hoje em diante
 #   match        -> cruza com a rede e classifica o risco
-# `sync-rede` (espelho da malha) fica de fora: é semanal e pesado, e no monorepo
-# tem cron próprio (CRON_SYNC_REDE, domingo 03h). Continua manual por ora.
+#
+# `sync-rede` entrou em 29/09/2026. Era manual e rodou UMA vez (27/08): um mês
+# depois, as 142 células ainda valiam como cobertas e cabo novo não existia
+# para o match. Agora a cobertura expira em 7 dias (migration 20 do monorepo),
+# e é esta etapa que a mantém em dia. Ela só varre células de desligamento
+# futuro, as mais próximas primeiro (~80 células, ~6 min por dia); a mesma
+# célula não é refeita antes de 24 h, então a rodada das 13h quase não paga.
+#
+# Coletar é a única etapa DURA. Geocodificar e sincronizar dependem de
+# serviços externos (três geocodificadores, Geogrid) e a falha delas não pode
+# travar o match: em 29/09/2026 a rede caiu no endereço 213 de 320, o match
+# não rodou, e 213 posições novas ficaram sem classificação até a rodada
+# seguinte. O que já foi gravado vale — o match roda, a rodada sai COM FALHA,
+# o carimbo não é gravado e o próximo tique tenta de novo.
 # Roda uma etapa com prazo. Devolve o codigo dela; >= 128 quer dizer que foi
 # derrubada por sinal, que aqui e sempre o cao de guarda.
 executar_com_limite() {
-  pnpm --filter @portal/api "$1" >> "$LOG" 2>&1 &
+  pnpm --filter @portal/api "$@" >> "$LOG" 2>&1 &
   local pid=$!
   # O prazo e por RELOGIO DE PAREDE, nao por `sleep "$LIMITE_ETAPA"`: `sleep`
   # nao anda enquanto a maquina dorme. Em 02/09/2026 a etapa arrastou 58 min e
@@ -110,10 +205,13 @@ executar_com_limite() {
   return "$st"
 }
 
-for etapa in tp:coletar tp:geocodificar tp:match; do
+for etapa in tp:coletar tp:geocodificar tp:sync-rede tp:match; do
   registrar "-> $etapa"
   st=0
-  executar_com_limite "$etapa" || st=$?
+  args=("$etapa")
+  [ "$etapa" = "tp:geocodificar" ] && args+=("$GEO_LIMITE")
+  [ "$etapa" = "tp:sync-rede" ] && args+=("$SYNC_LIMITE")
+  executar_com_limite "${args[@]}" || st=$?
   if [ "$st" -eq 0 ]; then
     # O `tp:coletar` sai com 0 mesmo quando TODAS as cidades falham: ele trata
     # a falha por cidade e segue. Em 01/09/2026, 12:32 UTC, as 11 cidades
@@ -140,12 +238,16 @@ for etapa in tp:coletar tp:geocodificar tp:match; do
     registrar "   $etapa FALHOU (código $st)"
   fi
   falhas=$((falhas + 1))
-  # Não segue adiante: geocodificar sem ter coletado, ou casar sem ter
-  # geocodificado, só produz uma rodada vazia que parece sucesso.
-  break
+  # Coleta que falhou para a rodada: não há o que geocodificar nem casar, e
+  # seguir só produziria uma rodada vazia com cara de sucesso. As outras
+  # etapas seguem (ver o comentário da ordem, acima).
+  [ "$etapa" = "tp:coletar" ] && break
 done
 
 if [ "$falhas" -eq 0 ]; then
+  # Só a rodada INTEIRA (as quatro etapas) conta como feita.
+  # Falhou no meio? O carimbo fica velho e o próximo tique tenta de novo.
+  date +%s > "$ULTIMA_OK"
   registrar "coleta da Celesc concluída"
 else
   registrar "coleta da Celesc terminou COM FALHA"

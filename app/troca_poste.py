@@ -12,10 +12,11 @@ relacionamentos embutidos sai mais barata que criar views e mantê-las em
 sincronia, e não exige DDL novo em produção.
 """
 import os
+import re
 import struct
 import sys
 import unicodedata
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from . import supa
 
@@ -207,30 +208,103 @@ def _linha(row):
     }
 
 
-def listar(de=None, ate=None, incluir_passados=False, limite=2000):
-    """Desligamentos ativos no intervalo, já achatados e ordenados por risco."""
+MAX_DIAS_PERIODO = 93
+
+_UUID = re.compile(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}")
+
+
+def periodo_pedido(de, ate):
+    """Valida o `?de=&ate=` da URL. Devolve (de, ate) ou (None, None).
+
+    `(None, None)` quer dizer "sem pedido": a tela carrega de hoje em diante,
+    que é a pergunta do módulo. Entrada ruim cai no padrão em vez de virar 500
+    — a URL é editável e um `?de=ontem` não é motivo para a tela quebrar.
+
+    O intervalo tem teto (`MAX_DIAS_PERIODO`): cada linha leva geometria e
+    análise, e um ano inteiro numa função serverless é página de megabytes
+    para uma pergunta que se responde por mês.
+    """
+    try:
+        d = date.fromisoformat((de or "").strip())
+    except ValueError:
+        return None, None
+    try:
+        a = date.fromisoformat((ate or "").strip())
+    except ValueError:
+        a = d + timedelta(days=MAX_DIAS_PERIODO)
+    if a < d:
+        d, a = a, d
+    # Estourou o teto: o corte é no COMEÇO. Quem pede um intervalo largo quer
+    # o recente; cortar pelo fim mostraria o trecho mais antigo.
+    d = max(d, a - timedelta(days=MAX_DIAS_PERIODO))
+    return d.isoformat(), a.isoformat()
+
+
+def _aconteceu(row):
+    """O `desapareceu` de uma data PASSADA é desligamento que aconteceu?
+
+    A Celesc tira o aviso da lista no dia do desligamento, então no histórico
+    `desapareceu` é o estado NORMAL de quem aconteceu — escondê-lo apagava do
+    passado justamente o que foi realizado. Medido em 29/09/2026: dos 283
+    `desapareceu`, 197 sumiram no próprio dia do evento. Os outros 86 sumiram
+    ANTES da data: cancelamento ou aviso republicado com outro texto (e aí o
+    mesmo lugar já está de volta com outro fingerprint). Esses ficam fora —
+    contá-los inventaria obra que não houve, ou a mostraria duas vezes.
+    """
+    sumiu = row.get("desapareceu_em")
+    evento = row.get("data_evento")
+    if not sumiu or not evento or evento >= hoje().isoformat():
+        return False
+    try:
+        dia = datetime.fromisoformat(sumiu.replace("Z", "+00:00")).astimezone(BR_TZ).date()
+    except ValueError:
+        return False
+    return dia.isoformat() >= evento
+
+
+def listar(de=None, ate=None, incluir_passados=False, ids=None, limite=5000):
+    """Desligamentos no intervalo, já achatados e ordenados por risco.
+
+    Paginado: um mês de histórico passa das 1000 linhas que o PostgREST
+    devolve por requisição, e o corte é silencioso (CLAUDE.md §6). Com
+    `limit=2000` numa chamada só, a busca de OS por id perdia justamente os
+    desligamentos MAIS NOVOS — a ordem é por data crescente — assim que a
+    tabela passasse de 1000 linhas visíveis.
+    """
+    inicio = de or (None if incluir_passados else hoje().isoformat())
     params = {
-        "select": _CAMPOS,
-        "status": f"not.in.({','.join(STATUS_OCULTOS)})",
-        "order": "data_evento.asc",
-        "limit": str(limite),
+        "select": _CAMPOS + ",desapareceu_em",
+        "order": "data_evento.asc,id.asc",
     }
-    if de:
-        params["data_evento"] = f"gte.{de}"
-    elif not incluir_passados:
-        params["data_evento"] = f"gte.{hoje().isoformat()}"
-    if ate:
-        # PostgREST aceita o mesmo parâmetro duas vezes só via `and=`; com um
-        # intervalo é mais simples e legível usar a forma explícita.
-        params["and"] = f"(data_evento.gte.{de or hoje().isoformat()},data_evento.lte.{ate})"
-        params.pop("data_evento", None)
+    if ids is not None:
+        # O id vem do browser e entra no filtro: só uuid passa, senão uma
+        # vírgula ou parêntese no corpo reescreveria o `in.(...)`.
+        ids = [i for i in ids if _UUID.fullmatch(str(i))]
+        if not ids:
+            return []
+        params["id"] = f"in.({','.join(ids)})"
+    # Com o passado no recorte, `desapareceu` precisa vir do banco para o
+    # `_aconteceu` decidir linha a linha — o PostgREST não compara duas
+    # colunas entre si. De hoje em diante continua fora, como sempre esteve.
+    if inicio and inicio >= hoje().isoformat():
+        params["status"] = f"not.in.({','.join(STATUS_OCULTOS)})"
+    else:
+        params["status"] = "not.eq.expirado"
+    if inicio and ate:
+        # PostgREST aceita o mesmo parâmetro duas vezes só via `and=`.
+        params["and"] = f"(data_evento.gte.{inicio},data_evento.lte.{ate})"
+    elif inicio:
+        params["data_evento"] = f"gte.{inicio}"
+    elif ate:
+        params["data_evento"] = f"lte.{ate}"
 
     try:
-        rows = supa.select("desligamentos", params, schema=SCHEMA)
+        rows = _select_paginado("desligamentos", params, limite)
     except Exception as e:
         _falhou("listar", e)
         return []
 
+    rows = [r for r in rows if r.get("status") != "desapareceu" or _aconteceu(r)]
     linhas = [_linha(r) for r in rows]
     linhas.sort(key=lambda l: (ORDEM_RISCO.index(l["classificacao"])
                                if l["classificacao"] in ORDEM_RISCO else 99, l["data"] or ""))

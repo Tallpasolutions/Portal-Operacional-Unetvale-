@@ -5,15 +5,16 @@
   Instalação:
       cp coletor/net.unetvale.troca-poste.plist ~/Library/LaunchAgents/
       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/net.unetvale.troca-poste.plist
-  Rodar na hora (teste):
-      launchctl kickstart -k gui/$(id -u)/net.unetvale.troca-poste
+  Rodar na hora (teste) — o kickstart sozinho NÃO basta: se a rodada do
+  último horário já saiu, o script sai calado. Force:
+      CELESC_FORCAR=1 /bin/bash ~/unetvale-coletor/coletar_celesc.sh
   Log:
       ~/unetvale-coletor/celesc.log
 
   Separado do `com.unetvale.coletor` (WVSA) de propósito: o site da Celesc é
   público e não depende da VPN, então esta coleta não deve parar quando a rede
-  da Unetvale cai. Horários 07h e 13h — é o `CRON_COLETA_CELESC` que o monorepo
-  previu e nunca ligou a nada.
+  da Unetvale cai. Grade 07h e 13h (`HORARIOS` no script) — é o
+  `CRON_COLETA_CELESC` que o monorepo previu e nunca ligou a nada.
 
   ATENÇÃO: o script chama o monorepo em ~/Documents, pasta protegida por TCC no
   macOS. Se o job sair com código 78 e sem log, é isso — a saída é mover o
@@ -32,11 +33,13 @@
         <string>/Users/jhonicleyton/unetvale-coletor/coletar_celesc.sh</string>
     </array>
 
-    <key>StartCalendarInterval</key>
-    <array>
-        <dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>0</integer></dict>
-        <dict><key>Hour</key><integer>13</integer><key>Minute</key><integer>0</integer></dict>
-    </array>
+    <!-- A cada 15 min, e não às 07h/13h: a grade (07h e 13h) mora no
+         script, que só coleta quando a rodada do último horário ainda não
+         saiu. Horário fixo perdia a rodada inteira sempre que o Mac estava
+         fechado na bateria na hora — de 15/09 a 29/09/2026, todas as 07h.
+         Assim o horário perdido sai no primeiro tique com a máquina acordada. -->
+    <key>StartInterval</key>
+    <integer>900</integer>
 
     <key>StandardOutPath</key>
     <string>/Users/jhonicleyton/unetvale-coletor/celesc-launchd.log</string>
