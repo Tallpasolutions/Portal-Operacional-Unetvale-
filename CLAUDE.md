@@ -59,11 +59,15 @@ aplicação, **mas é a única fonte da Troca de Poste** — não o desative nem
 mova sem substituir esse job.
 
 O agendamento mora aqui, em `coletor/net.unetvale.troca-poste.plist` +
-`coletor/coletar_celesc.sh` (07h e 13h). É um LaunchAgent **separado** do
+`coletor/coletar_celesc.sh` (grade 07h e 13h, conferida a cada 15 min — §6).
+É um LaunchAgent **separado** do
 `com.unetvale.coletor` de propósito: a Celesc é pública, então esta coleta não
 tem por que parar quando a rede da Unetvale cai.
 
-`sync-rede` (espelho da malha, semanal e pesado) continua **manual**.
+`sync-rede` (espelho do Geogrid) **entrou na rodada** em 29/09/2026, entre
+geocodificar e match — só as células de desligamento de hoje em diante, as de
+data mais próxima primeiro (§6). A varredura do passado segue manual:
+`pnpm --filter @portal/api tp:sync-rede 500 --com-passado`.
 
 ### Dois tipos de módulo, e a diferença importa
 
@@ -426,6 +430,18 @@ uma viagem só a Areias do Meio: o pico dizia mais sobre como a Celesc redigiu o
 aviso do que sobre o que vem pela frente. No ranking de cidades o efeito era
 pior — a cidade cujo aviso foi escrito rua a rua subia sobre a que descreveu o
 bairro numa linha, sem diferença nenhuma de trabalho.
+
+**O filtro alcança o passado — a janela é do SERVIDOR.** O pacote padrão traz
+só de hoje em diante; até 29/09/2026 o De/Até filtrava no cliente em cima
+disso, e qualquer data passada dava tabela vazia com o histórico inteiro no
+banco. Hoje, se o período sai do que veio (`pacote.carregado`), a página
+recarrega com `?de=&ate=` (teto de 93 dias, cortado no COMEÇO), e há o atalho
+"Últimos 30 dias". No passado entram os `desapareceu` que sumiram da Celesc no
+dia do desligamento ou depois — a Celesc tira o aviso quando ele acontece, e
+esconder esse status apagava do histórico justamente o que foi realizado. Os
+que sumiram ANTES da data (cancelamento ou aviso republicado; 86 de 283) ficam
+fora (`troca_poste._aconteceu`). Grupo passado não é candidato a OS, não leva
+script no pacote, e o servidor recusa a OS com 400.
 
 **Grupo que já tem OS sai dos candidatos.** A `chave_idempotencia` sempre
 impediu a duplicata no banco, mas o risco nunca foi o banco: era o botão
@@ -1088,6 +1104,57 @@ original — `ps` mostra `bash` como pai e `caffeinate` como filho, e isso é
 `exec` bem-sucedido, não o contrário. ⚠️ Nada disso vence **lid fechado na
 bateria**: aí o macOS dorme de qualquer jeito.
 
+**Horário fixo perdia a rodada inteira — e é o caso NORMAL desta máquina.**
+De 15/09 a 29/09/2026 a rodada das 07h falhou todos os dias, e a das 13h de 27
+e 28/09 também: três dias sem dado novo. O `pmset -g log` mostrou o Mac na
+bateria, tampa fechada, nos dois horários — o `caffeinate` criava a asserção e
+o sistema dormia 2 s depois. Saía `getaddrinfo ENOTFOUND` do pooler 1 s após
+começar (a rede nem tinha voltado), ou a rodada andava aos pedaços até
+`Connection terminated`. E a próxima chance era 6 h depois.
+
+Hoje o plist chama a cada **15 min** (`StartInterval`) e o script decide:
+(1) a rodada do último horário da grade (`HORARIOS="7 13"`) já saiu? sai
+calado; (2) tampa fechada **na bateria**? adia (na tomada é clamshell, fica
+acordado); (3) sem rota até a Celesc **e** o pooler? adia. Quem diz que saiu é
+`~/unetvale-coletor/celesc.ultima_ok`, gravado só quando as TRÊS etapas
+terminam. O horário vira "a partir de": às 07h fechado, a coleta sai no
+primeiro tique depois que alguém abre a tampa. ⚠️ Por isso `launchctl
+kickstart` sozinho **não** coleta quando o carimbo está em dia — para forçar,
+`CELESC_FORCAR=1 /bin/bash ~/unetvale-coletor/coletar_celesc.sh`.
+
+**O espelho do Geogrid rodou UMA vez e continuou valendo como atual.** A
+única varredura foi em 27/08/2026 (142 células, 12.382 itens, 2.966 cabos), e
+`ponto_coberto` perguntava só se a célula tinha sido varrida, nunca QUANDO:
+cabo lançado depois não existia para o match, e o desligamento podia sair
+`sem_rede` ou com risco menor que o real. Três coisas que valem saber:
+
+* **Não existe "só o que mudou".** A API do Geogrid que o job usa responde
+  "tudo num raio de 600 m", e o `dataCadastro` do item só se lê depois de
+  baixar a célula. Atualizar custa o mesmo que baixar da primeira vez (3
+  chamadas, ~4,5 s por célula). O que barateia é escolher QUAIS células —
+  daí o recorte por desligamento futuro: ~80 células contra 3.233 da malha
+  inteira das 11 cidades;
+* **o ressync é upsert por `id_geogrid`**: item novo entra, alterado é
+  atualizado, **removido nunca sai**. Erra para o lado do alerta a mais;
+* **a cobertura expira em 7 dias** (migration 20 do monorepo) e, por isso,
+  `calcular_match_todos` passou a recalcular só de hoje em diante (e quem
+  nunca teve análise). Sem a segunda metade, a primeira rodada viraria os 196
+  `critico` do histórico em `indeterminado` — provado em transação com
+  `rollback`: 313 recalculados, passado idêntico linha a linha.
+
+Geocodificar e sincronizar são etapas **moles** do `coletar_celesc.sh`: a
+falha delas não impede o match (o que foi gravado vale), mas a rodada sai COM
+FALHA e o carimbo não é gravado. Só a coleta para a rodada.
+
+**A fila de geocodificação andava para TRÁS.** `buscarPendentesGeo` (monorepo)
+pegava 25 por rodada em `order by data_evento` crescente, sem filtro de data.
+Em 29/09/2026 havia 389 na fila, entravam 30–100 avisos por dia, e a cota ia
+toda para desligamento que já tinha passado: **os 305 da tela estavam sem
+posição, todos "indeterminado"** — o módulo inteiro sem classificação de risco,
+com coleta verde. Hoje a ordem põe hoje-em-diante primeiro, e o script passa
+`GEO_LIMITE` (150; ~3 s por endereço, ~8 min) em vez dos 25 do job. Sintoma a
+reconhecer: KPI "Indeterminado" perto do total de trechos.
+
 **O cão de guarda por `sleep` não anda enquanto a máquina dorme.** Corolário do
 anterior, e a razão de ele não ter latido: o prazo de 20 min existia desde
 31/08/2026, a etapa arrastou 58 min, e o log saiu `FALHOU (código 1)` — nunca
@@ -1215,7 +1282,7 @@ São **três** LaunchAgents, com propósitos diferentes:
 | Agente | Roda | Quando | Log |
 |---|---|---|---|
 | `com.unetvale.coletor` | `watcher.py` → `enviar.py` (WVSA) | contínuo, grade 08–18h | `coletor.log` |
-| `net.unetvale.troca-poste` | `coletar_celesc.sh` (Celesc) | 07h e 13h | `celesc.log` |
+| `net.unetvale.troca-poste` | `coletar_celesc.sh` (Celesc) | a cada 15 min; coleta se a rodada de 07h/13h não saiu | `celesc.log` |
 | `net.unetvale.enviar-os` | `enviar_os.py --daemon` (OS no WVSA) | **residente** | `enviar_os.log` |
 
 O terceiro não tem grade porque a fila dele não se enche por relógio: ela se
@@ -1551,7 +1618,7 @@ a.run(port=5001, use_reloader=False)"
   etapa e recusa de rodada vazia, e três rodadas seguidas passaram inteiras
   pelas três etapas e **encerraram o processo** (`state = not running`), a
   última trazendo 42 desligamentos novos, 257 confirmados e 8 desaparecidos.
-  `sync-rede` segue manual.
+  `sync-rede` ficou manual até 29/09/2026 (ver adiante).
 
   **O horário disparou sozinho pela primeira vez em 02/09/2026, às 07:06:57 —
   e a rodada morreu mesmo assim.** O agendamento estava certo; a máquina é que
@@ -1578,6 +1645,38 @@ a.run(port=5001, use_reloader=False)"
   mas nenhuma rodada morreu desde que ele existe); e o `caffeinate` segurando
   a máquina num horário em que ela de fato tentaria dormir, que é o teste que
   só o relógio dá.
+
+- **Troca de Poste parada e sem posição, corrigido em 29/09/2026.** Duas
+  causas independentes (§6): o horário fixo perdia a rodada com o Mac fechado
+  (última coleta boa: 26/09 13h) e a fila de geocodificação atendia o passado
+  primeiro (305 de 305 na tela sem posição). Junto entrou o histórico no filtro
+  (§4) e a busca de OS por id — o `listar(incluir_passados=True)` usado ali
+  pedia `limit=2000`, levava o corte de 1000 do PostgREST e, com a tabela a
+  ~55 linhas de passar disso, ia deixar de achar os desligamentos MAIS NOVOS.
+
+  Exercitado: a rodada forçada de 08:30 trouxe 305 desligamentos (101 novos,
+  11 cidades); as seis decisões do agendador provadas com `HOME` falso (em dia,
+  atrasado, sem carimbo, tampa fechada na bateria, clamshell na tomada,
+  forçado) e um tique real do launchd saiu com código 0 sem escrever no log;
+  o histórico conferido contra o banco (197 `desapareceu` que aconteceram
+  entram, 80 que sumiram antes não, nenhum `confirmado` perdido); paginação
+  com 1241 linhas; rotas pelo `test_client` com entrada ruim, todas `2xx/4xx`;
+  navegador no desktop e no mobile, console limpo.
+
+  No mesmo dia entraram os itens da **rede** (§6): `sync-rede` na rodada,
+  priorizando o futuro, e a migration 20 do monorepo (cobertura expira em 7
+  dias; o match congela o passado), aplicada em produção depois da prova com
+  `rollback`. O fluxo das quatro etapas foi provado com `pnpm` falso nos cinco
+  desfechos (tudo certo, geocodificar falha, sync falha, coleta falha, coleta
+  vazia).
+
+  ⚠️ O `DATABASE_URL` do `.env` DESTE repositório está com a senha velha
+  (autenticação recusada em 29/09/2026); o do monorepo funciona.
+
+  **Ainda não exercitado:** o adiamento por falta de rede (a sonda usa
+  caminhos absolutos e não foi simulada) e a grade antes das 07h (vale o 13h
+  de ontem) — só o relógio dá esses dois. O monorepo continua sendo a fonte
+  (§2); a mudança lá é uma linha em `repository-geocodificacao.ts`.
 
 - **IQI/IQM consolidado do WVSA** entrou em 01/09/2026, sem migration — o
   campo `geral` viaja dentro do payload de `dados_modulo`. Antes disso as duas

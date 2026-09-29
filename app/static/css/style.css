@@ -132,7 +132,13 @@ input:focus,select:focus{ outline:2px solid var(--brand-l); border-color:var(--b
 .btn:hover{ background:var(--brand-d); }
 .btn.sec{ background:#fff; color:var(--ink); border:1px solid var(--borda-2); }
 .btn.sec:hover{ background:var(--fundo); }
-.toggle{ display:inline-flex; border:1px solid var(--brand); border-radius:8px; overflow:hidden; }
+/* Rola em vez de esconder — a mesma armadilha do `.view-switch`: com o quinto
+   botão do período da Troca de Poste ("Últimos 30 dias"), o "30 dias" ficou
+   entre 366 e 426 px numa tela de 375, cortado e inalcançável. */
+.toggle{ display:inline-flex; border:1px solid var(--brand); border-radius:8px;
+  overflow-x:auto; overflow-y:hidden; max-width:100%; scrollbar-width:none; }
+.toggle::-webkit-scrollbar{ display:none; }
+.toggle button{ flex:0 0 auto; white-space:nowrap; }
 .toggle button{ border:none; background:#fff; color:var(--brand-d); font-weight:600; font-size:13.5px; padding:8px 16px; cursor:pointer; }
 .toggle button+button{ border-left:1px solid var(--brand); }
 .toggle button.active{ background:var(--brand); color:#fff; }

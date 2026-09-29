@@ -170,9 +170,17 @@ def troca_poste():
     filtro, gráficos e abas — sem round-trip por clique. O período padrão é
     hoje..+7 dias, porque a pergunta do módulo é sobre o que ainda VAI
     acontecer; o filtro permite abrir a janela.
+
+    Para trás, a janela é do SERVIDOR (`?de=&ate=`): o pacote padrão só tem
+    de hoje em diante, e o De/Até filtrando no cliente mostrava tabela vazia
+    para qualquer data passada — o histórico estava no banco e nunca chegava
+    à página. A tela recarrega com o período quando ele sai do que veio.
     """
     de, ate = tp.periodo_padrao()
-    linhas = tp.listar()
+    pedido_de, pedido_ate = tp.periodo_pedido(request.args.get("de"),
+                                              request.args.get("ate"))
+    linhas = tp.listar(de=pedido_de, ate=pedido_ate) if pedido_de else tp.listar()
+    hoje = tp.hoje().isoformat()
     # Antes do pacote: `agrupar` carimba `grupo_chave` em cada linha, e é dela
     # que a tabela de Desligamentos monta os grupos.
     grupos = tp.agrupar(linhas)
@@ -188,8 +196,11 @@ def troca_poste():
         # `itens` NÃO vai no pacote: ele repetia `linhas` inteiro dentro dos
         # grupos — 209 kB de 719 kB, 29% da página, para um dado que o cliente
         # já tem. O grupo carrega os `ids`, e a tela monta a lista por eles.
+        # Grupo do passado não vira OS, então não leva script: num mês de
+        # histórico são ~200 textos que ninguém vai enviar.
         "grupos": [{**{k: v for k, v in g.items() if k != "itens"},
-                    "script_os": solicitacao.montar(g["itens"])}
+                    "script_os": (solicitacao.montar(g["itens"])
+                                  if (g["data"] or "") >= hoje else None)}
                    for g in grupos],
         "revisao": tp.fila_revisao(),
         "ordens": tp.ordens(),
@@ -197,8 +208,12 @@ def troca_poste():
         "rotulos_causa": tp.ROTULO_CAUSA,
         "ordem_risco": tp.ORDEM_RISCO,
         "ultima_coleta": tp.ultima_coleta(),
-        "hoje": tp.hoje().isoformat(),
+        "hoje": hoje,
         "padrao": {"de": de, "ate": ate},
+        # O que o servidor MANDOU. Sem pedido é "de hoje, sem fim"; o cliente
+        # compara o De/Até com isto para saber se precisa recarregar.
+        "carregado": {"de": pedido_de or hoje, "ate": pedido_ate},
+        "pedido": {"de": pedido_de, "ate": pedido_ate} if pedido_de else None,
         "envio_os_habilitado": _envio_os_habilitado(),
         "envio_os_ensaio": tp.dry_run(),
         "catalogos": tp.catalogos(),
@@ -226,10 +241,17 @@ def troca_poste_criar_os():
     if not ids:
         return jsonify({"erro": "nenhum desligamento informado"}), 400
 
-    conhecidas = {l["id"]: l for l in tp.listar(incluir_passados=True)}
+    # Busca SÓ os ids pedidos. Listar a tabela inteira e procurar neles
+    # esbarrava no corte de 1000 linhas do PostgREST, que caía sobre os
+    # desligamentos mais novos — exatamente os que se abre OS.
+    conhecidas = {l["id"]: l for l in tp.listar(incluir_passados=True, ids=ids)}
     faltando = [i for i in ids if i not in conhecidas]
     if faltando:
         return jsonify({"erro": "desligamento não encontrado"}), 404
+    # O histórico agora chega à tela; a OS continua sendo de obra que ainda
+    # vai acontecer. A recusa é aqui, e não só no botão.
+    if any((conhecidas[i]["data"] or "") < tp.hoje().isoformat() for i in ids):
+        return jsonify({"erro": "o desligamento já aconteceu"}), 400
 
     try:
         ordem = tp.criar_rascunho_grupo(
