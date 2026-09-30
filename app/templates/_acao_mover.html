@@ -1,0 +1,45 @@
+{# Diálogo de troca de status. Um só para o quadro (soltar o cartão noutra
+   coluna) e para o seletor de status do painel — os dois caminhos chamam a
+   mesma `acoes.atualizar`, e duas telas para a mesma regra divergiriam.
+   Quem abre é `AcaoMover.abrir()`, em acao_painel.js. #}
+<dialog class="modal modal-largo" id="dlg-mover" aria-labelledby="dlg-mover-titulo">
+  <form data-form-mover novalidate>
+    <h3 id="dlg-mover-titulo">Mover <span data-m-codigo></span></h3>
+    <p class="mover-trilha" data-m-titulo></p>
+    <p class="mover-trilha"><span class="badge badge-cinza" data-m-de></span>
+      <span aria-hidden="true">→</span> <span class="badge badge-azul" data-m-para></span></p>
+
+    <div class="field">
+      <label for="m-texto">Comentário <span class="rotulo-leve">opcional</span></label>
+      {# Opcional por decisão de 29/09/2026. Em branco, o evento registra
+         "Movida de X para Y" — quem e quando ficam; só o porquê não. #}
+      <textarea id="m-texto" name="texto" rows="3" maxlength="4000"
+                placeholder="Em branco, fica registrado só que a ação foi movida."></textarea>
+    </div>
+
+    <div data-m-conclusao hidden>
+      <div class="field">
+        <label for="m-evidencia">Evidência <span class="rotulo-forte">obrigatória</span>
+          <span class="rotulo-leve">link, documento ou referência</span></label>
+        <input type="text" id="m-evidencia" name="evidencia" maxlength="500">
+      </div>
+      <div class="field">
+        <label for="m-data">Data de conclusão</label>
+        <input type="date" id="m-data" name="data_conclusao">
+      </div>
+      <p class="mover-aviso" data-m-chk hidden></p>
+    </div>
+
+    <div class="field" data-m-passo hidden>
+      <label for="m-passo">Próximo passo <span class="rotulo-forte">obrigatório</span>
+        <span class="rotulo-leve">ação atrasada exige escalonamento</span></label>
+      <input type="text" id="m-passo" name="proximo_passo" maxlength="300">
+    </div>
+
+    <p class="mover-erro" data-m-erro role="alert"></p>
+    <div class="modal-acoes">
+      <button type="button" class="btn sec" data-m-cancelar>Cancelar</button>
+      <button type="submit" class="btn" data-m-ok>Mover</button>
+    </div>
+  </form>
+</dialog>

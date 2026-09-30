@@ -15,7 +15,7 @@ Papéis:
 """
 import re
 import sys
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from . import supa
 
@@ -199,6 +199,107 @@ _CAMPOS = ("id,codigo,titulo,entrega_esperada,area_id,responsavel_id,data_abertu
            "prazo,prioridade,status,progresso,proximo_passo,data_conclusao,"
            "evidencia,observacoes,criado_por,criado_em,atualizado_em")
 
+# Coluna da migration 0017. Fica FORA de `_CAMPOS` pelo mesmo motivo do recuo
+# das reuniões (CLAUDE.md §6): o deploy e a migration não acontecem no mesmo
+# segundo, e a coluna nova no conjunto base derrubaria a lista inteira.
+_COL_ETIQUETAS = "etiquetas"
+# None = ainda não sabemos. Em memória do processo; cada cold start reavalia.
+_tem_etiquetas = None
+
+# O PostgREST corta em 1000 linhas e ignora `limit` maior em silêncio
+# (CLAUDE.md §6). Página menor que o teto, ordem estável, e segue pedindo.
+PAGINA = 1000
+TETO = 20000
+
+_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+
+def _eh_uuid(v):
+    return bool(v) and bool(_UUID.match(str(v).lower()))
+
+
+def _paginado(tabela, params, teto=TETO):
+    linhas = []
+    while len(linhas) < teto:
+        p = dict(params)
+        p["limit"] = str(min(PAGINA, teto - len(linhas)))
+        p["offset"] = str(len(linhas))
+        lote = supa.select(tabela, p)
+        linhas.extend(lote)
+        if len(lote) < int(p["limit"]):
+            break
+    return linhas
+
+
+def _lotes(ids, tamanho=80):
+    """`in.(...)` com centenas de uuids estoura o tamanho de URL; em lotes."""
+    ids = list(ids)
+    for i in range(0, len(ids), tamanho):
+        yield ids[i:i + tamanho]
+
+
+def tem_etiquetas():
+    """A coluna existe? Decide se a tela oferece o campo de etiquetas.
+
+    Sem nenhuma leitura ainda no processo (cold start da Vercel caindo direto
+    num POST de ação nova), sonda com uma linha. Responder "não" por não
+    saber descartaria em silêncio as etiquetas da primeira ação criada.
+    """
+    if _tem_etiquetas is None:
+        try:
+            _select_acoes({"limit": "1"})
+        except Exception as e:
+            _falhou("tem_etiquetas", e)
+    return _tem_etiquetas is True
+
+
+def _select_acoes(params, paginar=False):
+    """Lê ações com `etiquetas` quando a coluna existe, e sem ela quando não.
+
+    Só recua por COLUNA faltando (`supa.coluna_faltando`): um id que não é
+    uuid também dá 400, e recuar ali desligaria as etiquetas do processo
+    inteiro por causa de uma URL torta.
+    """
+    global _tem_etiquetas
+    ler = (lambda p: _paginado("acoes", p)) if paginar else (lambda p: supa.select("acoes", p))
+    if _tem_etiquetas is not False:
+        try:
+            linhas = ler(dict(params, select=f"{_CAMPOS},{_COL_ETIQUETAS}"))
+            _tem_etiquetas = True
+            for l in linhas:
+                l["etiquetas"] = l.get("etiquetas") or []
+            return linhas
+        except Exception as e:
+            if not supa.coluna_faltando(e):
+                raise
+            _falhou("_select_acoes (migration 0017 ainda não aplicada?)", e)
+            _tem_etiquetas = False
+    linhas = ler(dict(params, select=_CAMPOS))
+    for l in linhas:
+        l["etiquetas"] = []
+    return linhas
+
+
+def limpar_etiquetas(bruto):
+    """Texto livre ou lista -> etiquetas limpas, sem repetida e sem vazia.
+
+    Compara sem caixa ("vip" e "VIP" são a mesma), mas guarda a grafia da
+    primeira vez — quem escreveu "Cliente VIP" não quer ver "cliente vip".
+    O teto de 8 por ação e 30 caracteres é para o cartão continuar legível.
+    """
+    if not bruto:
+        return []
+    if isinstance(bruto, str):
+        bruto = re.split(r"[,;\n]", bruto)
+    vistos, saida = set(), []
+    for t in bruto:
+        t = " ".join(str(t or "").split())[:30]
+        chave = t.casefold()
+        if t and chave not in vistos:
+            vistos.add(chave)
+            saida.append(t)
+    return saida[:8]
+
 
 def _apoio_por_acao(ids):
     if not ids:
@@ -224,7 +325,7 @@ def listar(usuario, filtros=None):
     """
     filtros = filtros or {}
     try:
-        linhas = supa.select("acoes", {"select": _CAMPOS, "order": "criado_em.desc"})
+        linhas = _select_acoes({"order": "criado_em.desc,id.asc"}, paginar=True)
     except Exception as e:
         _falhou("listar", e)
         return []
@@ -250,6 +351,10 @@ def listar(usuario, filtros=None):
         linhas = [l for l in linhas if l["prioridade"] == filtros["prioridade"]]
     if filtros.get("situacao"):
         linhas = [l for l in linhas if l["situacao"] == filtros["situacao"]]
+    if filtros.get("etiqueta"):
+        alvo = filtros["etiqueta"].casefold()
+        linhas = [l for l in linhas
+                  if alvo in {t.casefold() for t in l.get("etiquetas") or []}]
 
     # Padrão: o que aperta primeiro. Atrasada antes de "vence em breve", e
     # dentro do mesmo grupo a prioridade decide — é a ordem em que a pauta da
@@ -261,56 +366,130 @@ def listar(usuario, filtros=None):
 
 
 def obter(acao_id):
+    # Id que não é uuid nem chega ao banco: seria um 400 do PostgREST (22P02)
+    # só para responder o que já se sabe — essa ação não existe.
+    if not _eh_uuid(acao_id):
+        return None
     try:
-        a = supa.select_one("acoes", {"select": _CAMPOS, "id": f"eq.{acao_id}"})
+        achadas = _select_acoes({"id": f"eq.{acao_id}"})
     except Exception as e:
         _falhou("obter", e)
         return None
-    if not a:
+    if not achadas:
         return None
+    a = achadas[0]
     a["apoio_ids"] = _apoio_por_acao([a["id"]]).get(a["id"], [])
     return _decorar(a)
 
 
-def criar(dados, autor_id, apoio_ids=()):
-    """Cria a ação. `responsavel_id`, `titulo` e `area_id` são obrigatórios.
+def _definicao(dados, parcial):
+    """Confere e normaliza os campos de definição antes de irem ao banco.
+
+    Existe porque a edição passou a ser campo a campo, por JSON (o painel
+    lateral), e não só pelo formulário inteiro: um uuid torto ou uma data
+    inventada chegariam ao PostgREST e voltariam como 400 genérico — que a
+    rota só saberia transformar em 500. Aqui viram mensagem.
+
+    `parcial=True` só valida o que veio; `False` é a criação.
+    """
+    saida = {}
+    if "titulo" in dados or not parcial:
+        titulo = " ".join((dados.get("titulo") or "").split())
+        if not titulo:
+            raise ValueError("A ação precisa de um título.")
+        saida["titulo"] = titulo[:200]
+    if "responsavel_id" in dados or not parcial:
+        # Regra da planilha: "ação sem responsável não entra na pauta".
+        if not _eh_uuid(dados.get("responsavel_id")):
+            raise ValueError("Toda ação precisa de um responsável.")
+        saida["responsavel_id"] = dados["responsavel_id"]
+    if "area_id" in dados:
+        v = dados.get("area_id") or None
+        if v is not None and not _eh_uuid(v):
+            raise ValueError("Área inválida.")
+        saida["area_id"] = v
+    if "prazo" in dados:
+        v = dados.get("prazo") or None
+        if v is not None and not _data(v):
+            raise ValueError("Prazo inválido.")
+        saida["prazo"] = _data(v).isoformat() if v else None
+    if "prioridade" in dados:
+        if dados.get("prioridade") not in PRIORIDADES:
+            raise ValueError("Prioridade inválida.")
+        saida["prioridade"] = dados["prioridade"]
+    for k in ("entrega_esperada", "observacoes"):
+        if k in dados:
+            # Vazio vira NULL, e não "": o template testa `if acao.observacoes`,
+            # e "" e NULL precisam dizer a mesma coisa — nada escrito.
+            saida[k] = (dados.get(k) or "").strip() or None
+    if "etiquetas" in dados and tem_etiquetas():
+        saida["etiquetas"] = limpar_etiquetas(dados.get("etiquetas"))
+    return saida
+
+
+def criar(dados, autor_id, apoio_ids=(), checklist_inicial=()):
+    """Cria a ação. `responsavel_id` e `titulo` são obrigatórios.
 
     Regra da planilha: "ação sem responsável não entra na pauta". Recusar aqui
     é melhor do que aceitar e deixar a ação órfã esperando alguém reparar.
     """
-    if not (dados.get("titulo") or "").strip():
-        raise ValueError("A ação precisa de um título.")
-    if not dados.get("responsavel_id"):
-        raise ValueError("Toda ação precisa de um responsável.")
-
-    registro = {k: dados.get(k) for k in (
-        "titulo", "entrega_esperada", "area_id", "responsavel_id", "prazo",
-        "prioridade", "status", "proximo_passo", "observacoes") if dados.get(k)}
+    registro = _definicao(dados, parcial=False)
+    registro = {k: v for k, v in registro.items() if v not in (None, "", [])}
+    if dados.get("status") in STATUS and dados["status"] not in TERMINAIS:
+        registro["status"] = dados["status"]
+    if (dados.get("proximo_passo") or "").strip():
+        registro["proximo_passo"] = dados["proximo_passo"].strip()
     registro["criado_por"] = autor_id
     criada = supa.insert("acoes", registro)
     acao = criada[0] if isinstance(criada, list) else criada
 
     for uid in apoio_ids:
-        if uid and uid != dados.get("responsavel_id"):
+        if _eh_uuid(uid) and uid != registro["responsavel_id"]:
             supa.upsert("acao_apoio", {"acao_id": acao["id"], "usuario_id": uid},
                         on_conflict="acao_id,usuario_id")
+
+    # O checklist entra DEPOIS da ação existir e item a item pela função do
+    # banco, que é quem recalcula o progresso. Falha aqui não desfaz a ação:
+    # ela já tem código, e perder um item de checklist é menos grave que a
+    # pessoa criar a ação de novo achando que a primeira não saiu.
+    for texto in checklist_inicial or ():
+        if (texto or "").strip():
+            try:
+                checklist_aplicar(acao["id"], "criar", autor_id, texto=texto)
+            except Exception as e:
+                _falhou("criar/checklist", e)
     return acao
 
 
 def editar(acao_id, dados, apoio_ids=None):
-    """Edição de gestor: os campos de definição (dono, prazo, prioridade, área)."""
-    mudancas = {k: dados.get(k) for k in (
-        "titulo", "entrega_esperada", "area_id", "responsavel_id", "prazo",
-        "prioridade", "observacoes") if k in dados}
-    mudancas["atualizado_em"] = _agora()
-    supa.update("acoes", {"id": acao_id}, mudancas)
+    """Edição de gestor: os campos de definição (dono, prazo, prioridade, área).
 
+    Aceita um campo só (o painel lateral grava ao sair do campo) ou o
+    formulário inteiro (a página da ação).
+    """
+    mudancas = _definicao(dados, parcial=True)
     if apoio_ids is not None:
-        supa.delete("acao_apoio", {"acao_id": acao_id})
-        for uid in apoio_ids:
-            if uid and uid != mudancas.get("responsavel_id"):
-                supa.upsert("acao_apoio", {"acao_id": acao_id, "usuario_id": uid},
-                            on_conflict="acao_id,usuario_id")
+        apoio_ids = [u for u in apoio_ids if _eh_uuid(u)]
+    if not mudancas and apoio_ids is None:
+        raise ValueError("Nada para salvar.")
+    if mudancas:
+        mudancas["atualizado_em"] = _agora()
+        supa.update("acoes", {"id": acao_id}, mudancas)
+
+    if apoio_ids is None and "responsavel_id" not in mudancas:
+        return
+    # O dono não é apoio dele mesmo. Trocar o responsável para alguém que
+    # estava no apoio tira essa pessoa do apoio — senão ela apareceria duas
+    # vezes no cartão. Lido DEPOIS do update, então `dono` já é o novo.
+    atual = obter(acao_id) or {}
+    dono = atual.get("responsavel_id")
+    if apoio_ids is None:
+        apoio_ids = atual.get("apoio_ids") or []
+    supa.delete("acao_apoio", {"acao_id": acao_id})
+    for uid in dict.fromkeys(apoio_ids):
+        if uid != dono:
+            supa.upsert("acao_apoio", {"acao_id": acao_id, "usuario_id": uid},
+                        on_conflict="acao_id,usuario_id")
 
 
 def atualizar(acao_id, autor_id, texto, status=None, progresso=None,
@@ -319,33 +498,53 @@ def atualizar(acao_id, autor_id, texto, status=None, progresso=None,
 
     As duas coisas andam juntas de propósito. Na planilha dava para mexer no
     status sem escrever uma linha no registro, e três semanas depois ninguém
-    lembrava por que a ação tinha mudado. Aqui, mudar exige dizer o que houve.
+    lembrava por que a ação tinha mudado. Aqui, toda mudança vira evento.
+
+    O TEXTO é opcional só quando o status muda (decisão de 29/09/2026, com o
+    quadro Kanban): arrastar o cartão sem escrever grava "Movida de X para Y".
+    O histórico continua dizendo quem moveu e quando — só não diz o porquê.
+    Atualização SEM mudança de status e sem texto não registra fato nenhum, e
+    essa continua recusada. As travas de evidência e de próximo passo abaixo
+    não mudaram.
     """
     atual = obter(acao_id)
     if not atual:
         raise ValueError("Ação não encontrada.")
-    if not (texto or "").strip():
-        raise ValueError("Escreva o que mudou — a atualização é o registro do fato.")
 
     novo_status = status or atual["status"]
+    if novo_status not in STATUS:
+        raise ValueError("Status inválido.")
+    texto = (texto or "").strip()
+    if not texto:
+        if novo_status == atual["status"]:
+            raise ValueError("Escreva o que mudou — a atualização é o registro do fato.")
+        texto = f"Movida de {atual['status']} para {novo_status}."
 
     # Regra da planilha: "ação atrasada exige novo próximo passo e
     # escalonamento". Sem isso a atrasada seria empurrada de semana em semana
     # sem ninguém decidir nada, que é exatamente o que a regra combate.
     passo = proximo_passo if proximo_passo is not None else atual.get("proximo_passo")
-    if atual["atrasada"] and novo_status not in TERMINAIS and not (passo or "").strip():
+    passo = (passo or "").strip() or None
+    if atual["atrasada"] and novo_status not in TERMINAIS and not passo:
         raise ValueError("Ação atrasada exige um próximo passo definido.")
+
+    if data_conclusao and not _data(data_conclusao):
+        raise ValueError("Data de conclusão inválida.")
 
     # "Concluída precisa de data e evidência verificável." O banco também
     # recusa; falhar aqui dá mensagem melhor que violação de constraint.
     if novo_status == "Concluída":
-        data_conclusao = data_conclusao or atual.get("data_conclusao") or date.today().isoformat()
-        evidencia_final = evidencia or atual.get("evidencia")
+        data_conclusao = (_data(data_conclusao) or _data(atual.get("data_conclusao"))
+                          or date.today()).isoformat()
+        evidencia_final = (evidencia or "").strip() or atual.get("evidencia")
         if not (evidencia_final or "").strip():
             raise ValueError("Para concluir, informe a evidência (link, documento ou referência).")
     else:
         evidencia_final = evidencia if evidencia is not None else atual.get("evidencia")
-        data_conclusao = None if novo_status == "Cancelada" else atual.get("data_conclusao")
+        # Reabrir uma concluída apaga a data de conclusão: ela deixou de ser
+        # verdade, e o Painel contaria a ação como fechada naquela semana.
+        data_conclusao = None if novo_status == "Cancelada" or atual["status"] == "Concluída" \
+            else atual.get("data_conclusao")
 
     mudancas = {
         "status": novo_status,
@@ -354,8 +553,19 @@ def atualizar(acao_id, autor_id, texto, status=None, progresso=None,
         "data_conclusao": data_conclusao,
         "atualizado_em": _agora(),
     }
-    if progresso is not None:
-        mudancas["progresso"] = max(0, min(100, int(progresso)))
+
+    # Com checklist, o % não é digitado: é feitos ÷ total (decisão de
+    # 29/09/2026). Quem manda `progresso` junto é ignorado — o controle nem
+    # aparece na tela — e reabrir uma concluída volta ao que o checklist diz,
+    # em vez de ficar nos 100% da conclusão.
+    total, feitos = checklist_resumo(acao_id)
+    if total and novo_status not in TERMINAIS:
+        mudancas["progresso"] = round(feitos * 100 / total)
+    elif progresso is not None:
+        try:
+            mudancas["progresso"] = max(0, min(100, int(progresso)))
+        except (TypeError, ValueError):
+            raise ValueError("Progresso inválido.")
     # Concluir sem alguém ter arrastado a barra é engano de digitação, não
     # intenção: 100% é a leitura correta de "concluída".
     if novo_status == "Concluída":
@@ -364,9 +574,9 @@ def atualizar(acao_id, autor_id, texto, status=None, progresso=None,
     supa.update("acoes", {"id": acao_id}, mudancas)
     supa.insert("acao_eventos", {
         "acao_id": acao_id, "tipo": "atualizacao", "autor_id": autor_id,
-        "texto": texto.strip(), "status_novo": novo_status,
+        "texto": texto, "status_novo": novo_status,
         "progresso_novo": mudancas.get("progresso", atual.get("progresso")),
-        "evidencia": evidencia,
+        "evidencia": evidencia or None,
     })
 
 
@@ -393,15 +603,167 @@ def eventos(acao_id):
         return []
 
 
-def ultimos_eventos(limite=12):
-    """Feed do Painel: o que andou nos últimos dias, de todas as ações."""
+def ultimos_eventos(acao_ids, limite=12):
+    """Feed do Painel: o que andou nos últimos dias NAS AÇÕES QUE A PESSOA VÊ.
+
+    Até 29/09/2026 o feed trazia os eventos de todas as ações, sem recorte: o
+    responsável comum lia no Painel o texto de atualização de ação que ele não
+    enxerga em nenhuma outra tela. O recorte é no servidor (CLAUDE.md §5).
+    """
+    if not acao_ids:
+        return []
+    linhas = []
     try:
-        return supa.select("acao_eventos", {
-            "select": "id,acao_id,tipo,autor_id,texto,status_novo,progresso_novo,criado_em",
-            "order": "criado_em.desc", "limit": str(limite)})
+        for lote in _lotes(acao_ids):
+            linhas += supa.select("acao_eventos", {
+                "select": "id,acao_id,tipo,autor_id,texto,status_novo,progresso_novo,criado_em",
+                "acao_id": f"in.({','.join(lote)})",
+                "order": "criado_em.desc", "limit": str(limite)})
     except Exception as e:
         _falhou("ultimos_eventos", e)
         return []
+    linhas.sort(key=lambda l: l.get("criado_em") or "", reverse=True)
+    linhas = linhas[:limite]
+    for l in linhas:
+        l["quando_br"] = _hora_local(l.get("criado_em"))
+    return linhas
+
+
+# --------------------------------------------------------------------------
+# Checklist (migration 0017)
+#
+# Toda escrita passa por `acao_checklist_aplicar`, no banco: marcar o item e
+# regravar `acoes.progresso` são um fato só (ver o cabeçalho da migration).
+# Sem a tabela — deploy antes da migration —, a leitura devolve None e a tela
+# simplesmente não mostra o bloco.
+# --------------------------------------------------------------------------
+OPERACOES_CHECKLIST = ("criar", "marcar", "desmarcar", "renomear", "apagar")
+# None = ainda não sabemos se a tabela existe. Mesmo papel de `_tem_etiquetas`.
+_tem_checklist = None
+
+
+def tem_checklist():
+    """A tabela existe? Decide se o modal de ação nova oferece o checklist."""
+    global _tem_checklist
+    if _tem_checklist is None:
+        try:
+            supa.select("acao_checklist", {"select": "id", "limit": "1"})
+            _tem_checklist = True
+        except Exception as e:
+            if supa.tabela_faltando(e):
+                _tem_checklist = False
+            else:
+                _falhou("tem_checklist", e)
+    return _tem_checklist is True
+
+
+def checklist(acao_id):
+    """Itens da ação em ordem. `None` = tabela ainda não existe; `[]` = vazio."""
+    global _tem_checklist
+    try:
+        itens = supa.select("acao_checklist", {
+            "select": "id,texto,feito,feito_por,feito_em,ordem,criado_em",
+            "acao_id": f"eq.{acao_id}", "order": "ordem.asc,criado_em.asc"})
+        _tem_checklist = True
+        return itens
+    except Exception as e:
+        if supa.tabela_faltando(e):
+            _tem_checklist = False
+        else:
+            _falhou("checklist", e)
+        return None
+
+
+def checklist_resumo(acao_id):
+    """(total, feitos). (0, 0) também quando a tabela não existe."""
+    itens = checklist(acao_id) or []
+    return len(itens), sum(1 for i in itens if i.get("feito"))
+
+
+def checklist_aplicar(acao_id, op, usuario_id, item_id=None, texto=None):
+    """Altera o checklist e devolve {total, feitos, progresso}.
+
+    Os erros da função (`raise exception` no plpgsql) são de entrada — item de
+    outra ação, texto vazio — e sobem como ValueError para a rota responder
+    400, não 500.
+    """
+    if op not in OPERACOES_CHECKLIST:
+        raise ValueError("Operação inválida.")
+    if op != "criar" and not _eh_uuid(item_id):
+        raise ValueError("Item inválido.")
+    if op in ("criar", "renomear") and not (texto or "").strip():
+        raise ValueError("Escreva o item do checklist.")
+    try:
+        return supa.rpc("acao_checklist_aplicar", {
+            "p_acao": acao_id, "p_op": op,
+            "p_item": item_id if op != "criar" else None,
+            "p_texto": (texto or "").strip()[:200] or None,
+            "p_usuario": usuario_id})
+    except RuntimeError as e:
+        raise ValueError(str(e).split(": ", 1)[-1])
+
+
+def contagens(ids):
+    """{acao_id: {eventos, chk_total, chk_feitos}} — os ícones do cartão.
+
+    Uma ida ao banco por tabela (em lotes de ids), e não uma por ação: o
+    quadro mostra todas de uma vez.
+    """
+    out = {i: {"eventos": 0, "chk_total": 0, "chk_feitos": 0} for i in ids}
+    for lote in _lotes(ids):
+        filtro = f"in.({','.join(lote)})"
+        try:
+            for e in _paginado("acao_eventos", {
+                    "select": "acao_id", "acao_id": filtro, "order": "id.asc"}):
+                out[e["acao_id"]]["eventos"] += 1
+        except Exception as e:
+            _falhou("contagens/eventos", e)
+        try:
+            for c in _paginado("acao_checklist", {
+                    "select": "acao_id,feito", "acao_id": filtro, "order": "id.asc"}):
+                out[c["acao_id"]]["chk_total"] += 1
+                out[c["acao_id"]]["chk_feitos"] += 1 if c.get("feito") else 0
+        except Exception as e:
+            if not supa.tabela_faltando(e):
+                _falhou("contagens/checklist", e)
+    return out
+
+
+def atividade(acao_id, itens_checklist=None):
+    """Linha do tempo da ação: eventos + itens de checklist concluídos.
+
+    Mistura na LEITURA, sem gravar nada novo em `acao_eventos`: marcar um
+    item é reversível, e o registro append-only guardaria para sempre um
+    "concluído" que alguém desfez um minuto depois.
+    """
+    linhas = [dict(e, quando=e.get("criado_em")) for e in eventos(acao_id)]
+    for i in itens_checklist or []:
+        if i.get("feito") and i.get("feito_em"):
+            linhas.append({"tipo": "checklist", "autor_id": i.get("feito_por"),
+                           "texto": i.get("texto"), "quando": i["feito_em"]})
+    linhas.sort(key=lambda l: l.get("quando") or "", reverse=True)
+    for l in linhas:
+        l["quando_br"] = _hora_local(l.get("quando"))
+    return linhas
+
+
+# Os carimbos vêm do banco em UTC. Cortar a data do texto ISO (o que as telas
+# faziam) põe o que foi feito às 21h de 29/09 em 30/09. Fuso fixo, como em
+# `dados.BR_TZ`: sem horário de verão desde 2019, e sem depender da base de
+# fusos da imagem da Vercel.
+_FUSO = timezone(timedelta(hours=-3))
+
+
+def _hora_local(iso):
+    """'2026-09-30T00:41:00+00:00' -> ('29/09/2026', '21:41')."""
+    try:
+        d = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return ("", "")
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=timezone.utc)
+    d = d.astimezone(_FUSO)
+    return (d.strftime("%d/%m/%Y"), d.strftime("%H:%M"))
 
 
 # --------------------------------------------------------------------------
@@ -439,6 +801,50 @@ def pode_atualizar(usuario, acao):
 # --------------------------------------------------------------------------
 # Painel
 # --------------------------------------------------------------------------
+def fluxo_semanal(acoes_visiveis, semanas=12, hoje=None):
+    """Abertas × concluídas por semana (segunda a domingo), as últimas N.
+
+    Responde "estamos fechando mais do que abrimos?". Conta pela data do fato
+    (`data_abertura`, `data_conclusao`), não por `criado_em`: ação cadastrada
+    hoje para registrar algo aberto semana passada entra na semana passada.
+    """
+    hoje = hoje or date.today()
+    inicio = hoje - timedelta(days=hoje.weekday())
+    janelas = [inicio - timedelta(weeks=k) for k in range(semanas - 1, -1, -1)]
+    saida = []
+    for w in janelas:
+        fim = w + timedelta(days=7)
+        dentro = lambda d: d is not None and w <= d < fim
+        saida.append({
+            "semana": w.isoformat(),
+            "rotulo": w.strftime("%d/%m"),
+            "abertas": sum(1 for a in acoes_visiveis if dentro(_data(a.get("data_abertura")))),
+            "concluidas": sum(1 for a in acoes_visiveis if a.get("status") == "Concluída"
+                              and dentro(_data(a.get("data_conclusao")))),
+        })
+    return saida
+
+
+def carga_por_pessoa(acoes_visiveis):
+    """Ações EM ABERTO por responsável, por status, com as atrasadas à parte.
+
+    Só o responsável conta, não o apoio: somar o apoio faria a mesma ação
+    pesar duas vezes e inflaria justamente quem ajuda muita gente.
+    """
+    abertos = [s for s in STATUS if s not in TERMINAIS]
+    por = {}
+    for a in acoes_visiveis:
+        if a.get("status") in TERMINAIS:
+            continue
+        linha = por.setdefault(a["responsavel_id"], {
+            "responsavel_id": a["responsavel_id"], "total": 0, "atrasadas": 0,
+            "por_status": {s: 0 for s in abertos}})
+        linha["total"] += 1
+        linha["por_status"][a["status"]] = linha["por_status"].get(a["status"], 0) + 1
+        linha["atrasadas"] += 1 if a.get("situacao") == "Atrasada" else 0
+    return sorted(por.values(), key=lambda l: (-l["total"], -l["atrasadas"]))
+
+
 def resumo(acoes_visiveis):
     """Os indicadores da planilha, calculados sobre o que a pessoa enxerga.
 
@@ -465,6 +871,8 @@ def resumo(acoes_visiveis):
             for p in PRIORIDADES],
         "por_situacao": [{"rotulo": s, "n": por(lambda a, s=s: a["situacao"] == s)}
                          for s in ORDEM_SITUACAO],
+        "fluxo_semanal": fluxo_semanal(acoes_visiveis),
+        "carga_por_pessoa": carga_por_pessoa(acoes_visiveis),
     }
 
 

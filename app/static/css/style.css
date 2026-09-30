@@ -353,6 +353,313 @@ tr.clicavel{ cursor:pointer; }
 .so-mobile-inline{ display:none; }
 @media (max-width:820px){ .so-mobile-inline{ display:inline-flex; margin-bottom:12px; } }
 
+/* ===== Ações: quadro, lista, cronograma e painel lateral =================
+   Tudo com os tokens do :root. O que nasceu aqui e serve em outra tela:
+   `.avatar` (iniciais), `.etiqueta`, `.gaveta` (painel lateral) e
+   `.modal-largo` (o `.modal` de 400px com formulário dentro). */
+
+/* Barra de filtro única: vale para quadro, lista e cronograma. */
+.ac-barra{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:10px; }
+.ac-busca{ flex:1 1 260px; min-width:0; max-width:420px; }
+.ac-filtros{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+.ac-agrupar{ font-size:12.5px; font-weight:600; color:var(--muted); display:flex; align-items:center; gap:6px; }
+.ac-barra2{ display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; margin-bottom:12px; }
+.ac-barra2 .fchips{ align-items:center; }
+.ac-direita{ display:flex; gap:10px; align-items:center; margin-left:auto; }
+.ac-contagem{ margin:0 0 12px; }
+
+/* Avatar de iniciais. A cor sai da POSIÇÃO da pessoa na lista de usuários
+   (ordenada por nome) — a mesma regra no Jinja e no JS, para a mesma pessoa
+   ter a mesma cor no cartão e no painel. */
+.avatar{ display:inline-grid; place-items:center; width:24px; height:24px; border-radius:50%;
+  font-size:10.5px; font-weight:800; color:#fff; letter-spacing:.02em; flex:0 0 auto;
+  background:var(--muted); }
+.avatar.grande{ width:30px; height:30px; font-size:12px; }
+.av-0{ background:var(--brand); } .av-1{ background:var(--success); } .av-2{ background:var(--warning); }
+.av-3{ background:var(--navy-3); } .av-4{ background:var(--cyan); } .av-5{ background:var(--muted); }
+.avatares{ display:inline-flex; align-items:center; }
+.avatares .avatar + .avatar{ margin-left:-6px; box-shadow:0 0 0 2px var(--branco); }
+
+.etiqueta{ display:inline-flex; align-items:center; gap:4px; background:var(--brand-l); color:var(--brand-d);
+  border-radius:6px; padding:2px 8px; font-size:11.5px; font-weight:600; white-space:nowrap; }
+.etiqueta button{ background:none; border:none; color:inherit; cursor:pointer; padding:0; font-size:13px; line-height:1; opacity:.7; }
+.etiqueta button:hover{ opacity:1; }
+.badge-azul{ background:var(--brand-l); color:var(--brand-d); }
+
+/* Prioridade escrita (onde não cabe a faixa colorida do cartão). */
+.pri{ font-size:11px; font-weight:800; letter-spacing:.04em; text-transform:uppercase; }
+.pri-critica.pri, .cartao-k.pri-critica .ck-pri{ color:var(--danger); }
+.pri-alta.pri, .cartao-k.pri-alta .ck-pri{ color:var(--warning); }
+.pri-media.pri, .cartao-k.pri-media .ck-pri{ color:var(--brand); }
+.pri-baixa.pri, .cartao-k.pri-baixa .ck-pri{ color:var(--muted); }
+
+/* ---------- Quadro -----------------------------------------------------
+   UMA grade para o cabeçalho e todas as raias: com uma grade por raia, as
+   colunas de "Responsável: Ana" e "Responsável: Jhoni" teriam larguras
+   diferentes e o olho perderia a coluna ao descer. */
+.quadro-wrap{ overflow-x:auto; padding-bottom:8px; }
+.quadro{ display:grid; gap:10px 12px; min-width:1080px;
+  grid-template-columns:repeat(4, minmax(240px, 1fr)) 46px; }
+.quadro.cancel-aberta{ grid-template-columns:repeat(5, minmax(240px, 1fr)); min-width:1300px; }
+.col-cab{ display:flex; align-items:center; gap:8px; padding:4px 4px 2px; font-size:12px; font-weight:800;
+  letter-spacing:.05em; text-transform:uppercase; color:var(--muted); }
+.col-cab .n{ background:var(--borda-2); color:var(--ink); border-radius:10px; padding:1px 8px; font-size:11.5px; letter-spacing:0; }
+.col-cab .col-nota{ margin-left:auto; text-transform:none; letter-spacing:0; font-weight:600; font-size:11.5px; }
+.col-cab button{ background:none; border:none; color:var(--brand-d); font:inherit; font-weight:600; cursor:pointer;
+  text-transform:none; letter-spacing:0; padding:0; }
+.raia-cab{ grid-column:1 / -1; display:flex; align-items:center; gap:8px; margin-top:8px;
+  font-size:13px; font-weight:700; color:var(--ink-d); cursor:pointer; user-select:none; }
+.raia-cab .raia-seta{ color:var(--muted); width:14px; display:inline-block; transition:transform .12s; }
+.raia-cab.fechada .raia-seta{ transform:rotate(-90deg); }
+.raia-cab .raia-resumo{ font-weight:600; font-size:12px; color:var(--muted); }
+/* A coluna é um pouco mais escura que a página, para o cartão branco saltar
+   sem precisar de sombra pesada. Mistura de tokens, não cor nova. */
+.col{ background:color-mix(in srgb, var(--borda-2) 55%, var(--fundo)); border-radius:10px; padding:8px;
+  min-height:90px; display:flex; flex-direction:column; gap:8px; transition:background .12s, box-shadow .12s; }
+.col.alvo{ background:var(--brand-l); box-shadow:inset 0 0 0 2px var(--brand); }
+.col-vazia{ color:var(--muted-l); font-size:12px; text-align:center; padding:14px 4px; }
+.col-add{ background:none; border:1px dashed var(--muted-l); border-radius:8px; color:var(--muted); font:inherit;
+  font-size:12.5px; font-weight:600; padding:8px; cursor:pointer; text-align:left; }
+.col-add:hover{ background:var(--branco); color:var(--brand-d); border-color:var(--brand); }
+.col-mais{ background:none; border:none; color:var(--brand-d); font:inherit; font-size:12.5px; font-weight:600;
+  cursor:pointer; padding:4px; }
+/* Cancelada recolhida numa faixa fina: continua ALVO de arrasto (cancelar é
+   mover para lá), mas não ocupa uma coluna inteira com o que já saiu de
+   circulação. Clique abre. */
+.col.recolhida{ padding:8px 0; align-items:center; cursor:pointer; }
+.col.recolhida .col-vertical{ writing-mode:vertical-rl; transform:rotate(180deg); font-size:12px; font-weight:800;
+  letter-spacing:.05em; text-transform:uppercase; color:var(--muted); }
+.col-cab.recolhida{ justify-content:center; padding:4px 0 2px; }
+
+.cartao-k{ background:var(--branco); border:1px solid var(--borda-2); border-left:4px solid var(--muted-l);
+  border-radius:8px; padding:10px 11px 9px; box-shadow:0 1px 2px rgba(11,23,39,.06); cursor:pointer;
+  display:flex; flex-direction:column; gap:6px; transition:box-shadow .12s, transform .12s; }
+.cartao-k:hover{ box-shadow:0 4px 12px rgba(11,23,39,.10); }
+.cartao-k:focus-visible{ outline:2px solid var(--brand); outline-offset:2px; }
+.cartao-k.pri-critica{ border-left-color:var(--danger); }
+.cartao-k.pri-alta{ border-left-color:var(--warning); }
+.cartao-k.pri-media{ border-left-color:var(--brand); }
+.cartao-k.pri-baixa{ border-left-color:var(--muted-l); }
+.cartao-k[draggable="true"]{ cursor:grab; }
+.cartao-k.arrastando{ opacity:.45; transform:rotate(1deg); }
+.cartao-k.selecionado{ box-shadow:0 0 0 2px var(--brand); }
+.ck-topo{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.ck-cod{ font-size:12px; font-weight:700; color:var(--muted); font-variant-numeric:tabular-nums; }
+.ck-pri{ font-size:10.5px; font-weight:800; letter-spacing:.05em; text-transform:uppercase; }
+.ck-titulo{ font-size:13.5px; font-weight:600; color:var(--ink-d); line-height:1.35;
+  display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.ck-tags{ display:flex; flex-wrap:wrap; gap:4px; }
+.ck-area{ background:var(--fundo); color:var(--muted); border-radius:6px; padding:2px 8px; font-size:11.5px; font-weight:600; }
+.ck-icones{ display:flex; gap:10px; font-size:11.5px; color:var(--muted); font-weight:600; }
+.ck-icones span{ display:inline-flex; align-items:center; gap:3px; }
+.ck-icones svg{ width:13px; height:13px; }
+.ck-icones .chk-completo{ color:var(--success); }
+.cartao-k .barra{ width:100%; height:4px; }
+.ck-pe{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.ck-prazo{ font-size:11.5px; font-weight:700; white-space:nowrap; border-radius:6px; padding:2px 7px; }
+.ck-prazo.atrasada{ background:#fdecee; color:#b21f37; }
+.ck-prazo.breve{ background:#fdeede; color:#b65a16; }
+.ck-prazo.noprazo{ color:var(--muted); }
+.ck-prazo.feita{ color:#0a7a52; }
+.ck-prazo.semprazo{ color:var(--muted-l); font-weight:600; }
+
+/* ---------- Lista ---------- */
+.ac-tabela th[data-ord]{ cursor:pointer; }
+.ac-tabela th.ord-asc::after{ content:" ▲"; font-size:9px; }
+.ac-tabela th.ord-desc::after{ content:" ▼"; font-size:9px; }
+.ac-tabela td .etiqueta{ margin-left:4px; }
+.ac-tabela .pessoa{ display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+
+/* ---------- Cronograma ----------------------------------------------------
+   Barras absolutas numa faixa por pessoa, uma LINHA por ação (sem
+   empacotar duas na mesma linha): empacotado fica mais baixo, mas a ação
+   muda de altura quando outra termina, e o olho perde onde ela estava. */
+.crono-wrap{ overflow-x:auto; background:var(--branco); border:1px solid var(--borda-2); border-radius:10px; }
+.crono{ position:relative; }
+.crono-linha{ display:flex; border-bottom:1px solid var(--borda); }
+.crono-nome{ flex:0 0 170px; position:sticky; left:0; z-index:3; background:var(--branco);
+  padding:8px 12px; font-size:12.5px; font-weight:700; color:var(--ink-d); border-right:1px solid var(--borda-2);
+  display:flex; align-items:flex-start; gap:8px; }
+.crono-faixa{ position:relative; flex:0 0 auto; }
+.crono-cab .crono-nome{ font-size:11.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+.crono-mes{ position:absolute; top:4px; font-size:11.5px; font-weight:800; color:var(--ink-d); text-transform:uppercase;
+  letter-spacing:.04em; padding-left:6px; border-left:1px solid var(--borda-2); height:36px; }
+.crono-dia{ position:absolute; bottom:4px; font-size:10.5px; color:var(--muted-l); transform:translateX(-50%); }
+.crono-grade{ position:absolute; top:0; bottom:0; width:1px; background:var(--borda); }
+.crono-grade.semana{ background:var(--borda-2); }
+.crono-hoje{ position:absolute; top:0; bottom:0; width:2px; background:var(--ouro); z-index:2; }
+.crono-hoje span{ position:absolute; top:2px; left:4px; font-size:10.5px; font-weight:800; color:var(--ouro); white-space:nowrap; }
+.crono-barra{ position:absolute; height:22px; border-radius:6px; background:var(--brand-l); border:1px solid var(--brand);
+  color:var(--brand-d); font-size:11.5px; font-weight:700; line-height:20px; padding:0 8px; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis; cursor:pointer; z-index:1; }
+.crono-barra i{ position:absolute; left:0; top:0; bottom:0; background:var(--brand); opacity:.22; z-index:-1; }
+.crono-barra:hover{ box-shadow:0 3px 10px rgba(11,23,39,.14); z-index:4; }
+.crono-barra.atrasada{ border-color:var(--danger); color:#b21f37; background:#fdecee; }
+.crono-barra.atrasada i{ background:var(--danger); }
+.crono-barra.feita{ border-color:var(--success); color:#0a7a52; background:#e3f6ee; }
+.crono-barra.feita i{ background:var(--success); }
+/* Quanto passou do prazo: listrado de vermelho do prazo até hoje. */
+.crono-excesso{ position:absolute; height:22px; border-radius:0 6px 6px 0; z-index:0;
+  background:repeating-linear-gradient(135deg, #fdecee 0 6px, color-mix(in srgb, var(--danger) 25%, #fff) 6px 12px); }
+.crono-legenda{ display:flex; gap:16px; flex-wrap:wrap; font-size:12px; color:var(--muted); margin:10px 2px 0; }
+.crono-legenda i{ display:inline-block; width:14px; height:10px; border-radius:3px; margin-right:5px; vertical-align:middle; }
+.crono-sem-prazo{ margin-top:12px; font-size:12.5px; color:var(--muted); }
+.crono-sem-prazo a{ color:var(--brand-d); font-weight:600; cursor:pointer; }
+
+/* ---------- Painel lateral (gaveta) -------------------------------------
+   `transform` e não `right`: anima na GPU, e o quadro atrás não recalcula
+   layout a cada quadro da animação. */
+.gaveta{ position:fixed; top:0; right:0; bottom:0; width:min(780px, 100vw); z-index:41;
+  background:var(--branco); box-shadow:-12px 0 32px rgba(11,23,39,.16);
+  transform:translateX(100%); transition:transform .2s ease; overflow-y:auto; overscroll-behavior:contain; }
+.gaveta.aberta{ transform:none; }
+.gaveta-fundo{ position:fixed; inset:0; background:rgba(11,23,39,.28); z-index:40; }
+.gaveta-carregando{ padding:40px; color:var(--muted); text-align:center; }
+body.gaveta-aberta{ overflow:hidden; }
+
+.icone-btn{ width:30px; height:30px; border-radius:8px; display:inline-grid; place-items:center; border:none;
+  background:transparent; color:var(--muted); cursor:pointer; }
+.icone-btn:hover{ background:var(--fundo); color:var(--ink-d); }
+.icone-btn svg{ width:16px; height:16px; }
+
+.acao-p-cab{ padding:16px 22px 14px; border-bottom:1px solid var(--borda); }
+.acao-pagina .acao-p-cab{ padding-top:18px; }
+.acao-p-linha1{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.acao-p-cod{ font-size:12.5px; color:var(--muted); }
+.acao-p-cod b{ color:var(--muted); }
+.acao-p-ferr{ display:flex; gap:2px; }
+.acao-p-titulo{ display:block; width:100%; margin:6px 0 10px; font-size:19px; font-weight:800; color:var(--ink-d);
+  line-height:1.3; font-family:inherit; }
+/* `textarea.` na frente: o título também é `.editavel`, que vem depois e
+   imporia os 13,5px do texto corrido. */
+textarea.acao-p-titulo{ resize:none; overflow:hidden; font-size:19px; font-weight:800; color:var(--ink-d); line-height:1.3; }
+.acao-p-estado{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.sel-status{ font-weight:700; border-radius:20px; padding:5px 12px; font-size:12.5px; cursor:pointer; }
+.sel-status.st-nao-iniciada{ background:var(--fundo); color:var(--ink); }
+.sel-status.st-em-andamento{ background:var(--brand-l); color:var(--brand-d); border-color:var(--brand-l); }
+.sel-status.st-aguardando{ background:#fdeede; color:#b65a16; border-color:#fdeede; }
+.sel-status.st-concluida{ background:#e3f6ee; color:#0a7a52; border-color:#e3f6ee; }
+.sel-status.st-cancelada{ background:var(--fundo); color:var(--muted); }
+
+.acao-p-corpo{ display:grid; grid-template-columns:minmax(0, 1fr) 230px; gap:26px; padding:16px 22px 26px; }
+.acao-p-sec{ margin-bottom:20px; }
+.acao-p-sec h4{ margin:0 0 6px; font-size:11.5px; font-weight:800; color:var(--muted); text-transform:uppercase;
+  letter-spacing:.04em; display:flex; align-items:center; gap:8px; }
+.acao-p-sec p{ margin:0; font-size:13.5px; color:var(--ink); white-space:pre-wrap; }
+.acao-p-conta{ background:var(--fundo); color:var(--ink); border-radius:10px; padding:1px 8px; font-size:11px; letter-spacing:0; }
+.acao-p-alerta{ color:var(--danger); font-size:11px; font-weight:700; text-transform:none; letter-spacing:0; }
+.acao-p-passo{ font-weight:600; color:var(--ink-d) !important; }
+.acao-p-vazio{ color:var(--muted-l); font-size:13px; }
+.acao-p-dica{ font-size:11.5px; color:var(--muted); margin-top:4px; }
+/* Campo que parece texto até alguém passar o mouse: a ação é para LER, e
+   uma parede de caixas de formulário diria o contrário. */
+.editavel{ width:100%; font-family:inherit; font-size:13.5px; color:var(--ink); background:transparent;
+  border:1px solid transparent; border-radius:8px; padding:6px 8px; margin-left:-8px; resize:vertical;
+  line-height:1.45; transition:border-color .12s, background .12s; }
+.editavel:hover{ border-color:var(--borda-2); }
+.editavel:focus{ outline:none; border-color:var(--brand); background:var(--branco); }
+.editavel.salvando{ border-color:var(--ouro); }
+
+.acao-p-campos{ margin:0; }
+.acao-p-campos dt{ font-size:11px; font-weight:800; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin-top:12px; }
+.acao-p-campos dt:first-child{ margin-top:0; }
+.acao-p-campos dd{ margin:4px 0 0; font-size:13.5px; color:var(--ink-d); }
+.acao-p-campos select, .acao-p-campos input[type=date], .acao-p-campos input[type=text]{ width:100%; min-width:0; max-width:100%; font-size:13px; padding:6px 8px; }
+.acao-p-campos input[type=date]{ height:32px; }
+.acao-p-campos .dropdown > summary{ padding:6px 8px; font-size:13px; }
+.acao-p-campos .avatares{ margin-top:6px; }
+.acao-p-campos .prog .barra{ width:120px; }
+.acao-p-pessoa{ display:inline-flex; align-items:center; gap:6px; }
+.etiquetas{ display:flex; flex-wrap:wrap; gap:4px; }
+.etiqueta-nova{ margin-top:6px; }
+.acao-p-salvo{ display:block; min-height:18px; margin-top:12px; font-size:12px; color:var(--success); font-weight:600; }
+.acao-p-salvo.erro{ color:var(--danger); }
+.acao-p-excluir{ margin-top:18px; padding-top:14px; border-top:1px solid var(--borda); }
+
+/* Checklist */
+.checklist{ list-style:none; margin:6px 0 0; padding:0; }
+.checklist li{ display:flex; align-items:center; gap:6px; padding:3px 6px; margin-left:-6px; border-radius:6px; }
+.checklist li:hover{ background:var(--fundo); }
+.checklist label{ display:flex; align-items:center; gap:8px; flex:1; cursor:pointer; font-size:13.5px; color:var(--ink); min-width:0; }
+.checklist input{ accent-color:var(--success); width:16px; height:16px; margin:0; flex:0 0 auto; }
+.checklist li.feito .chk-texto{ text-decoration:line-through; color:var(--muted); }
+.checklist li.pendente{ opacity:.55; }
+.chk-apagar{ background:none; border:none; color:var(--muted-l); cursor:pointer; font-size:17px; line-height:1; padding:0 4px;
+  visibility:hidden; }
+.checklist li:hover .chk-apagar, .chk-apagar:focus{ visibility:visible; }
+.chk-apagar:hover{ color:var(--danger); }
+.barra-chk{ width:100%; height:6px; }
+.barra-chk i{ background:var(--success); }
+.chk-novo input{ width:100%; margin-top:6px; font-size:13px; border-style:dashed; }
+
+/* Caixa de atividade */
+.acao-p-ativ-cab{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
+.acao-p-ativ-cab h4{ margin:0; }
+.acao-p-ativ-cab .fchip{ padding:3px 10px; font-size:12px; }
+.compositor{ border:1px solid var(--borda-2); border-radius:10px; padding:8px 10px; margin-bottom:16px; background:var(--branco); }
+.compositor:focus-within{ border-color:var(--brand); box-shadow:0 0 0 3px var(--brand-l); }
+.compositor textarea{ width:100%; border:none; outline:none; resize:vertical; font-family:inherit; font-size:13.5px;
+  color:var(--ink); min-height:44px; padding:2px 0; }
+.compositor-extra{ display:flex; flex-wrap:wrap; gap:10px 16px; padding:6px 0 2px; border-top:1px dashed var(--borda); margin-top:4px; }
+.compositor-extra label{ font-size:12px; font-weight:600; color:var(--muted); display:flex; align-items:center; gap:8px; }
+.compositor-prog input{ width:130px; accent-color:var(--brand); }
+.compositor-passo{ flex:1 1 240px; }
+.compositor-passo input{ flex:1; min-width:0; font-size:13px; padding:6px 8px; }
+.compositor-pe{ display:flex; align-items:center; gap:10px; margin-top:8px; }
+.compositor-pe .btn{ margin-left:auto; padding:7px 16px; }
+.compositor-erro{ font-size:12.5px; color:var(--danger); font-weight:600; }
+.compositor[data-tipo="comentario"] .compositor-extra{ display:none; }
+.toggle-mini button{ padding:5px 11px; font-size:12px; }
+.evento-checklist{ border-left-color:var(--success); }
+.evento-meta .avatar{ width:20px; height:20px; font-size:9px; }
+
+/* Diálogo largo: o `.modal` de 400px é de confirmação; com formulário
+   dentro, os campos lado a lado não cabem. `.modal.modal-largo` e não a
+   classe solta: o `.modal` vem DEPOIS no arquivo e, com a mesma
+   especificidade, o max-width de 400px dele venceria (CLAUDE.md §6). */
+.modal.modal-largo{ max-width:none; width:min(640px, calc(100vw - 32px)); }
+.modal-largo .field label{ display:block; }
+.modal-largo .field input, .modal-largo .field select, .modal-largo .field textarea{ width:100%; }
+.modal-largo textarea{ font-family:inherit; font-size:13.5px; padding:8px 10px; border:1px solid var(--borda-2); border-radius:8px; }
+.rotulo-leve{ font-weight:400; color:var(--muted-l); margin-left:4px; }
+.rotulo-forte{ font-weight:700; color:var(--danger); margin-left:4px; }
+.mover-trilha{ display:flex; align-items:center; gap:8px; margin:0 0 12px !important; }
+.mover-aviso{ background:#fdeede; color:#b65a16 !important; border-radius:8px; padding:8px 10px; font-weight:600; }
+.mover-erro{ color:var(--danger) !important; font-weight:600; min-height:0; }
+.mover-erro:empty{ display:none; }
+.nova-grade{ grid-template-columns:repeat(auto-fit, minmax(min(200px,100%), 1fr)); gap:0 14px; }
+.nova-chk{ display:flex; flex-direction:column; gap:6px; }
+
+@media (max-width:820px){
+  /* No celular o quadro vira carrossel: uma coluna por tela, com o pedaço
+     da próxima aparecendo para dizer que há mais. Arrastar não existe no
+     toque — o status muda pelo seletor do painel. */
+  .quadro-wrap{ scroll-snap-type:x mandatory; margin:0 -22px; padding:0 22px 8px; scroll-padding:0 22px; }
+  .quadro, .quadro.cancel-aberta{ min-width:0; grid-template-columns:repeat(4, 82vw) 46px; }
+  .quadro.cancel-aberta{ grid-template-columns:repeat(5, 82vw); }
+  .quadro > .col, .quadro > .col-cab{ scroll-snap-align:start; }
+  .raia-cab{ position:sticky; left:0; }
+  .ac-barra2{ flex-direction:column; align-items:stretch; }
+  /* Alternador e botão lado a lado não cabem em 375px: "Cronograma" saía
+     cortado e o botão quebrava em duas linhas. Botão na linha de baixo. */
+  .ac-direita{ margin-left:0; flex-wrap:wrap; }
+  .ac-direita #btn-nova{ flex:1 1 100%; justify-content:center; }
+  .ac-busca{ max-width:none; }
+  .ac-filtros select, .ac-agrupar{ width:100%; }
+  .ac-agrupar select{ flex:1; }
+  .gaveta{ width:100vw; }
+  .acao-p-corpo{ grid-template-columns:minmax(0, 1fr); gap:6px; padding:14px 16px 24px; }
+  .acao-p-cab{ padding:14px 16px 12px; }
+  .acao-p-lado{ order:-1; border-bottom:1px solid var(--borda); padding-bottom:14px; margin-bottom:10px; }
+  /* Rótulo à esquerda, campo à direita, na MESMA linha: margens zeradas,
+     senão o `margin-top` do dt desalinha cada par. `minmax(0,1fr)` porque o
+     select, com `1fr` puro, empurra a coluna até a borda da tela. */
+  .acao-p-campos{ display:grid; grid-template-columns:104px minmax(0, 1fr); gap:10px 12px; align-items:center; }
+  .acao-p-campos dt, .acao-p-campos dd{ margin:0; }
+  .chk-apagar{ visibility:visible; }
+  .crono-nome{ flex-basis:112px; }
+}
+
 /* ---------- Gravação e ata da reunião ------------------------------------
    Só o que não existia. Cartões, selos e botões vêm das classes que já
    estavam aqui (.card, .badge-*, .btn, .subnote).

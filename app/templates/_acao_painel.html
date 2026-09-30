@@ -1,0 +1,332 @@
+{# =====================================================================
+   A ação inteira, em DUAS molduras: o painel lateral do quadro
+   (modo='gaveta', servido por /acoes/<id>/painel) e a página cheia
+   (modo='pagina', /acoes/<id>). Uma definição só — duas cópias da tela da
+   ação divergiriam no primeiro campo novo.
+
+   Quem mexe aqui é `acao_painel.js`, por delegação no contêiner: o painel
+   é substituído inteiro depois de cada gravação, e ouvinte preso a um nó
+   morreria com ele.
+   ===================================================================== #}
+
+{% macro nome_usuario(uid) %}{% for u in usuarios %}{% if u.id == uid %}{{ u.nome or u.email }}{% endif %}{% endfor %}{% endmacro %}
+
+{# Cor do avatar pela POSIÇÃO da pessoa na lista (ordenada por nome), a mesma
+   regra que o `acoes_quadro.js` usa: a Ana tem a mesma cor no cartão e aqui. #}
+{% macro avatar(uid, grande=false) %}{% for u in usuarios %}{% if u.id == uid %}{% set p = (u.nome or u.email).split() %}<span class="avatar av-{{ loop.index0 % 6 }}{{ ' grande' if grande }}" title="{{ u.nome or u.email }}">{{ (p[0][0] ~ (p[-1][0] if p|length > 1 else ''))|upper }}</span>{% endif %}{% endfor %}{% endmacro %}
+
+{# dd/mm/aaaa. O `replace('-', '/')` de antes dava "2026/09/21". #}
+{% macro data_br(d) %}{% if d %}{{ d[8:10] }}/{{ d[5:7] }}/{{ d[:4] }}{% else %}—{% endif %}{% endmacro %}
+
+{% set aberta = acao.status not in ('Concluída', 'Cancelada') %}
+{% set chk_total = checklist|length if checklist else 0 %}
+{% set chk_feitos = checklist|selectattr('feito')|list|length if checklist else 0 %}
+
+<div class="acao-p" data-acao-painel
+     data-id="{{ acao.id }}" data-codigo="{{ acao.codigo }}"
+     data-titulo="{{ acao.titulo }}"
+     data-status="{{ acao.status }}" data-atrasada="{{ '1' if acao.atrasada }}"
+     data-evidencia="{{ acao.evidencia or '' }}"
+     data-proximo-passo="{{ acao.proximo_passo or '' }}"
+     data-chk-total="{{ chk_total }}" data-chk-feitos="{{ chk_feitos }}"
+     data-url="{{ url_for('dash.acao_detalhe', acao_id=acao.id) }}"
+     data-url-painel="{{ url_for('dash.acao_painel', acao_id=acao.id) }}">
+
+  <header class="acao-p-cab">
+    <div class="acao-p-linha1">
+      <span class="acao-p-cod"><b>{{ acao.codigo }}</b>
+        {% for a in areas %}{% if a.id == acao.area_id %} · {{ a.nome }}{% endif %}{% endfor %}</span>
+      <span class="acao-p-ferr">
+        <button type="button" class="icone-btn" data-copiar-link title="Copiar link da ação" aria-label="Copiar link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>
+        </button>
+        {% if modo == 'gaveta' %}
+        <a class="icone-btn" href="{{ url_for('dash.acao_detalhe', acao_id=acao.id) }}" title="Abrir em página cheia" aria-label="Abrir em página cheia">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+        </a>
+        <button type="button" class="icone-btn" data-fechar-gaveta title="Fechar (Esc)" aria-label="Fechar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+        {% endif %}
+      </span>
+    </div>
+
+    {% if pode_gerir %}
+    {# textarea e não input: título longo quebra em duas linhas em vez de
+       sumir à direita. O JS ajusta a altura ao conteúdo. #}
+    <textarea class="acao-p-titulo editavel" data-campo="titulo" rows="1" maxlength="200"
+              aria-label="Título da ação">{{ acao.titulo }}</textarea>
+    {% else %}
+    <h2 class="acao-p-titulo">{{ acao.titulo }}</h2>
+    {% endif %}
+
+    <div class="acao-p-estado">
+      {% if pode_atualizar %}
+      {# Trocar aqui abre o MESMO diálogo do arrasto no quadro. #}
+      <select class="sel-status st-{{ acao.status|lower|replace(' ', '-')|replace('ã','a')|replace('í','i') }}" data-mudar-status aria-label="Status">
+        {% for s in status_opcoes %}<option value="{{ s }}" {{ 'selected' if s == acao.status }}>{{ s }}</option>{% endfor %}
+      </select>
+      {% else %}
+      <span class="badge badge-cinza">{{ acao.status }}</span>
+      {% endif %}
+      {% if acao.situacao == 'Atrasada' %}<span class="badge badge-vermelho">Atrasada há {{ -acao.dias }} dia(s)</span>
+      {% elif acao.situacao == 'Vence em breve' %}<span class="badge badge-ambar">{{ 'Vence hoje' if acao.dias == 0 else 'Vence em ' ~ acao.dias ~ ' dia(s)' }}</span>
+      {% elif acao.situacao == 'No prazo' %}<span class="badge badge-verde">No prazo</span>
+      {% elif acao.situacao == 'Sem prazo' %}<span class="badge badge-cinza">Sem prazo</span>{% endif %}
+    </div>
+  </header>
+
+  <div class="acao-p-corpo">
+    <div class="acao-p-principal">
+
+      <section class="acao-p-sec">
+        <h4>Entrega esperada</h4>
+        {% if pode_gerir %}
+        <textarea class="editavel" data-campo="entrega_esperada" rows="2"
+                  placeholder="O que precisa existir quando esta ação acabar">{{ acao.entrega_esperada or '' }}</textarea>
+        {% else %}
+        <p>{{ acao.entrega_esperada or '—' }}</p>
+        {% endif %}
+      </section>
+
+      <section class="acao-p-sec">
+        <h4>Próximo passo
+          {% if acao.atrasada and aberta %}<span class="acao-p-alerta">atrasada: exige escalonamento</span>{% endif %}</h4>
+        {# Não é editável aqui: mudar o próximo passo é uma ATUALIZAÇÃO (fica
+           na linha do tempo), e é pela caixa de atividade abaixo que se faz. #}
+        <p class="acao-p-passo">{% if acao.proximo_passo %}▸ {{ acao.proximo_passo }}{% else %}<span class="acao-p-vazio">Nenhum definido.</span>{% endif %}</p>
+      </section>
+
+      {% if checklist is not none %}
+      <section class="acao-p-sec" data-checklist>
+        <h4>Checklist
+          {% if chk_total %}<span class="acao-p-conta">{{ chk_feitos }}/{{ chk_total }}</span>{% endif %}</h4>
+        {% if chk_total %}
+        <span class="barra barra-chk"><i style="width:{{ (chk_feitos * 100 / chk_total)|round|int }}%"></i></span>
+        {% endif %}
+        <ul class="checklist">
+          {% for i in checklist %}
+          <li class="{{ 'feito' if i.feito }}" data-item="{{ i.id }}">
+            <label>
+              <input type="checkbox" data-chk-marcar {{ 'checked' if i.feito }} {{ 'disabled' if not pode_atualizar }}>
+              <span class="chk-texto">{{ i.texto }}</span>
+            </label>
+            {% if pode_atualizar %}
+            <button type="button" class="chk-apagar" data-chk-apagar title="Remover item" aria-label="Remover item">×</button>
+            {% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+        {% if pode_atualizar %}
+        <form class="chk-novo" data-chk-novo>
+          <input type="text" name="texto" maxlength="200" placeholder="+ Adicionar item" aria-label="Novo item do checklist">
+        </form>
+        {% endif %}
+        {% if not chk_total %}
+        <p class="acao-p-dica">Com um item ou mais, o progresso passa a ser calculado pelo checklist.</p>
+        {% endif %}
+      </section>
+      {% endif %}
+
+      {% if acao.evidencia %}
+      <section class="acao-p-sec">
+        <h4>Evidência</h4>
+        <p>{{ acao.evidencia }}</p>
+      </section>
+      {% endif %}
+
+      <section class="acao-p-sec">
+        <h4>Observações</h4>
+        {% if pode_gerir %}
+        <textarea class="editavel" data-campo="observacoes" rows="2"
+                  placeholder="Contexto, restrições, combinados">{{ acao.observacoes or '' }}</textarea>
+        {% else %}
+        <p>{{ acao.observacoes or '—' }}</p>
+        {% endif %}
+      </section>
+
+      {% if itens_reuniao %}
+      <section class="acao-p-sec">
+        <h4>Em reuniões <span class="acao-p-conta">{{ itens_reuniao|length }}</span></h4>
+        <div class="linha-tempo">
+          {% for i in itens_reuniao %}
+          <div class="item-pauta">
+            <div class="item-pauta-topo">
+              <span class="badge badge-cinza">{{ i.tipo }}</span>
+              <span>{{ i.texto }}</span>
+            </div>
+            <div class="item-pauta-meta">
+              {% if i.reunioes %}<a href="{{ url_for('dash.reuniao_detalhe', reuniao_id=i.reunioes.id) }}">{{ i.reunioes.titulo }}</a> · {{ data_br(i.reunioes.data) }}{% endif %}
+              {% if i.prazo %} · prazo {{ data_br(i.prazo) }}{% endif %}
+              {% if i.aplicado_em %} · <b>registrado na linha do tempo</b>{% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+      {% endif %}
+
+      <section class="acao-p-sec acao-p-atividade">
+        <div class="acao-p-ativ-cab">
+          <h4>Atividade <span class="acao-p-conta">{{ atividade|length }}</span></h4>
+          <div class="fchips" data-filtro-atividade>
+            <button type="button" class="fchip on" data-f="">Tudo</button>
+            <button type="button" class="fchip" data-f="comentario">Comentários</button>
+            <button type="button" class="fchip" data-f="atualizacao">Atualizações</button>
+          </div>
+        </div>
+
+        {% set pode_atualizacao = pode_atualizar and aberta %}
+        {% if pode_atualizacao or pode_gerir %}
+        {# Uma caixa só no lugar dos dois cartões recolhidos de antes. O gestor
+           escolhe o que está escrevendo; o responsável só atualiza. #}
+        <form class="compositor" data-compositor
+              data-tipo="{{ 'atualizacao' if pode_atualizacao else 'comentario' }}">
+          <textarea name="texto" rows="2" maxlength="4000"
+                    placeholder="{{ 'O que mudou? Ex.: versão preliminar consolidada, falta validar com o supervisor.' if pode_atualizacao else 'Consideração, decisão ou cobrança.' }}"></textarea>
+          {% if pode_atualizacao %}
+          <div class="compositor-extra" data-so-atualizacao>
+            {% if not chk_total %}
+            <label class="compositor-prog">Progresso <b data-rotulo-prog>{{ acao.progresso }}%</b>
+              <input type="range" name="progresso" min="0" max="100" step="5" value="{{ acao.progresso }}"></label>
+            {% endif %}
+            <label class="compositor-passo">Próximo passo{% if acao.atrasada %} <span class="acao-p-alerta">obrigatório</span>{% endif %}
+              <input type="text" name="proximo_passo" maxlength="300" value="{{ acao.proximo_passo or '' }}"
+                     {{ 'required' if acao.atrasada }}></label>
+          </div>
+          {% endif %}
+          <div class="compositor-pe">
+            {% if pode_gerir and pode_atualizacao %}
+            <div class="toggle toggle-mini" data-tipo-compositor>
+              <button type="button" class="active" data-tipo="atualizacao">Atualização</button>
+              <button type="button" data-tipo="comentario">Comentário</button>
+            </div>
+            {% endif %}
+            <span class="compositor-erro" data-erro role="alert"></span>
+            <button class="btn" type="submit">Enviar</button>
+          </div>
+        </form>
+        {% endif %}
+
+        {% if atividade %}
+        <div class="linha-tempo" data-lista-atividade>
+          {% for e in atividade %}
+          <div class="evento evento-{{ e.tipo }}" data-tipo="{{ e.tipo }}">
+            <div class="evento-meta">
+              {{ avatar(e.autor_id) }}
+              <b>{{ nome_usuario(e.autor_id) or '—' }}</b>
+              {% if e.tipo == 'checklist' %}<span>concluiu um item do checklist</span>
+              {% else %}<span>{{ 'comentário' if e.tipo == 'comentario' else 'atualização' }}</span>{% endif %}
+              <span title="{{ e.quando_br[0] }} às {{ e.quando_br[1] }}">{{ e.quando_br[0] }} {{ e.quando_br[1] }}</span>
+              {% if e.status_novo %}<span class="badge badge-cinza">{{ e.status_novo }}{% if e.progresso_novo is not none %} · {{ e.progresso_novo }}%{% endif %}</span>{% endif %}
+              {% if e.reuniao_id %}<span class="badge badge-ambar">de reunião</span>{% endif %}
+            </div>
+            <div class="evento-texto">{% if e.tipo == 'checklist' %}☑ {% endif %}{{ e.texto }}</div>
+            {% if e.evidencia %}<div class="evento-meta">Evidência: {{ e.evidencia }}</div>{% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="acao-p-vazio">Nada registrado ainda. A primeira atualização começa o histórico.</div>
+        {% endif %}
+      </section>
+    </div>
+
+    <aside class="acao-p-lado">
+      <dl class="acao-p-campos">
+        <dt>Responsável</dt>
+        <dd>{% if pode_gerir %}
+          <select data-campo="responsavel_id" aria-label="Responsável">
+            {% for u in usuarios %}<option value="{{ u.id }}" {{ 'selected' if u.id == acao.responsavel_id }}>{{ u.nome or u.email }}</option>{% endfor %}
+          </select>
+          {% else %}<span class="acao-p-pessoa">{{ avatar(acao.responsavel_id) }} {{ nome_usuario(acao.responsavel_id) or '—' }}</span>{% endif %}</dd>
+
+        <dt>Apoio</dt>
+        <dd>{% if pode_gerir %}
+          <details class="dropdown" data-apoio>
+            <summary><span data-resumo>{% if acao.apoio_ids %}{{ acao.apoio_ids|length }} pessoa(s){% else %}Ninguém{% endif %}</span></summary>
+            <div class="lista-marcar" style="max-height:200px;">
+              {% for u in usuarios %}{% if u.id != acao.responsavel_id %}
+              <label class="linha-marcar"><input type="checkbox" value="{{ u.id }}" {{ 'checked' if u.id in acao.apoio_ids }}> {{ u.nome or u.email }}</label>
+              {% endif %}{% endfor %}
+            </div>
+          </details>
+          {% endif %}
+          <span class="avatares">{% for uid in acao.apoio_ids %}{{ avatar(uid) }}{% endfor %}{% if not acao.apoio_ids and not pode_gerir %}—{% endif %}</span></dd>
+
+        <dt>Prioridade</dt>
+        <dd>{% if pode_gerir %}
+          <select data-campo="prioridade" aria-label="Prioridade">
+            {% for p in prioridades %}<option value="{{ p }}" {{ 'selected' if p == acao.prioridade }}>{{ p }}</option>{% endfor %}
+          </select>
+          {% else %}<span class="pri pri-{{ acao.prioridade|lower|replace('é','e')|replace('í','i') }}">{{ acao.prioridade }}</span>{% endif %}</dd>
+
+        <dt>Prazo</dt>
+        <dd>{% if pode_gerir %}
+          <input type="date" data-campo="prazo" value="{{ acao.prazo or '' }}" aria-label="Prazo">
+          {% else %}{{ data_br(acao.prazo) }}{% endif %}</dd>
+
+        <dt>Área</dt>
+        <dd>{% if pode_gerir %}
+          <select data-campo="area_id" aria-label="Área">
+            <option value="">—</option>
+            {% for a in areas %}<option value="{{ a.id }}" {{ 'selected' if a.id == acao.area_id }}>{{ a.nome }}</option>{% endfor %}
+          </select>
+          {% else %}{% for a in areas %}{% if a.id == acao.area_id %}{{ a.nome }}{% endif %}{% endfor %}{% if not acao.area_id %}—{% endif %}{% endif %}</dd>
+
+        {% if tem_etiquetas %}
+        <dt>Etiquetas</dt>
+        <dd>
+          <div class="etiquetas" data-etiquetas>
+            {% for t in acao.etiquetas %}<span class="etiqueta" data-valor="{{ t }}">{{ t }}{% if pode_gerir %}<button type="button" data-tirar-etiqueta aria-label="Remover {{ t }}">×</button>{% endif %}</span>{% endfor %}
+            {% if not acao.etiquetas and not pode_gerir %}—{% endif %}
+          </div>
+          {% if pode_gerir %}
+          <input type="text" class="etiqueta-nova" data-nova-etiqueta maxlength="30" list="etiquetas-em-uso"
+                 placeholder="+ etiqueta" aria-label="Nova etiqueta">
+          {% endif %}
+        </dd>
+        {% endif %}
+
+        <dt>Progresso</dt>
+        <dd>
+          <span class="prog"><span class="barra"><i style="width:{{ acao.progresso }}%"></i></span><b>{{ acao.progresso }}%</b></span>
+          <div class="acao-p-dica">{{ 'pelo checklist' if chk_total and aberta else 'informado na atualização' }}</div>
+        </dd>
+
+        <dt>Abertura</dt>
+        <dd>{{ data_br(acao.data_abertura) }}</dd>
+
+        {% if acao.data_conclusao %}
+        <dt>Conclusão</dt>
+        <dd>{{ data_br(acao.data_conclusao) }}</dd>
+        {% endif %}
+
+        <dt>Criada por</dt>
+        <dd>{{ nome_usuario(acao.criado_por) or '—' }}</dd>
+      </dl>
+
+      <span class="acao-p-salvo" data-salvo aria-live="polite"></span>
+
+      {% if pode_gerir and not eventos %}
+      <div class="acao-p-excluir">
+        <p class="acao-p-dica">Sem nenhum registro ainda, dá para apagar — é o caso de ter sido
+          criada por engano. Depois do primeiro registro, só cancelando: o histórico não se reescreve.</p>
+        <form method="post" data-form-excluir action="{{ url_for('dash.acao_excluir', acao_id=acao.id) }}">
+          <button class="btn-ghost" type="button" data-abrir-excluir style="color:var(--danger);">Apagar ação</button>
+        </form>
+        {# `confirm()` abre a caixa do sistema, com o domínio no topo, que não
+           pertence à tela — CLAUDE.md §5. #}
+        <dialog class="modal" data-dlg-excluir>
+          <h3>Apagar {{ acao.codigo }}?</h3>
+          <p>Isso não pode ser desfeito.</p>
+          <div class="modal-acoes">
+            <button class="btn sec" type="button" data-fechar>Cancelar</button>
+            <button class="btn" type="button" data-confirmar-excluir style="background:var(--danger);">Apagar</button>
+          </div>
+        </dialog>
+      </div>
+      {% endif %}
+    </aside>
+  </div>
+</div>

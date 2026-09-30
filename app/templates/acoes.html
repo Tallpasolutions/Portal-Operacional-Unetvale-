@@ -4,18 +4,6 @@
 {% block content %}
 
 {% macro nome_usuario(uid) %}{% for u in usuarios %}{% if u.id == uid %}{{ u.nome or u.email }}{% endif %}{% endfor %}{% endmacro %}
-{% macro nome_area(aid) %}{% for a in areas %}{% if a.id == aid %}{{ a.nome }}{% endif %}{% endfor %}{% endmacro %}
-
-{# A situação vira cor antes de virar texto: quem abre a tela precisa ver o
-   que está pegando fogo sem ler a coluna. #}
-{% macro badge_situacao(a) %}
-  {% if a.situacao == 'Atrasada' %}<span class="badge badge-vermelho">Atrasada {{ a.dias }}d</span>
-  {% elif a.situacao == 'Vence em breve' %}<span class="badge badge-ambar">{{ 'Vence hoje' if a.dias == 0 else 'Vence em ' ~ a.dias ~ 'd' }}</span>
-  {% elif a.situacao == 'Concluída' %}<span class="badge badge-verde">Concluída</span>
-  {% elif a.situacao == 'Cancelada' %}<span class="badge badge-cinza">Cancelada</span>
-  {% elif a.situacao == 'Sem prazo' %}<span class="badge badge-cinza">Sem prazo</span>
-  {% else %}<span class="badge badge-verde">No prazo</span>{% endif %}
-{% endmacro %}
 
 <div class="view-bar">
   <div class="view-switch" id="ac-abas">
@@ -46,6 +34,15 @@
       <div class="card-b"><div class="chart-box"><canvas id="g-situacao"></canvas></div></div></div>
   </div>
 
+  <div class="grid charts-2" style="margin:0 0 18px;">
+    <div class="card"><div class="card-h"><span>Fluxo semanal</span>
+      <span class="subnote" style="margin:0;">abertas × concluídas, últimas 12 semanas</span></div>
+      <div class="card-b"><div class="chart-box"><canvas id="g-fluxo"></canvas></div></div></div>
+    <div class="card"><div class="card-h"><span>Carga por pessoa</span>
+      <span class="subnote" style="margin:0;">ações em aberto de cada responsável</span></div>
+      <div class="card-b"><div class="chart-box" id="box-carga"><canvas id="g-carga"></canvas></div></div></div>
+  </div>
+
   <div class="card">
     <div class="card-h">Últimas atualizações</div>
     <div class="card-b">
@@ -55,7 +52,7 @@
         <div class="evento evento-{{ e.tipo }}">
           <div class="evento-meta">
             <b>{{ nome_usuario(e.autor_id) or '—' }}</b>
-            <span>{{ e.criado_em[:10]|replace('-', '/') }}</span>
+            <span>{{ e.quando_br[0] }} {{ e.quando_br[1] }}</span>
             {% if e.status_novo %}<span class="badge badge-cinza">{{ e.status_novo }}{% if e.progresso_novo is not none %} · {{ e.progresso_novo }}%{% endif %}</span>{% endif %}
           </div>
           <div class="evento-texto">{{ e.texto }}</div>
@@ -74,142 +71,146 @@
 </section>
 
 <!-- ===================== Ações ===================== -->
+{# O quadro, a lista e o cronograma são desenhados pelo `acoes_quadro.js` a
+   partir de `window.__ACOES__`. O servidor já mandou só o que a pessoa pode
+   ver (recorte de permissão em `acoes.listar`); daqui para baixo o filtro é
+   de LEITURA — uma barra só, valendo para as três visões. #}
 <section data-painel="acoes" {% if aba != 'acoes' %}hidden{% endif %}>
-  <!-- No celular os filtros ficam recolhidos: cinco selects de altura inteira
-       empurrariam a primeira ação para fora da tela, e quem abre no campo quer
-       ver a lista, não o formulário. No computador ficam sempre abertos. -->
-  <button class="btn sec so-mobile-inline" type="button" id="btn-filtros" aria-expanded="false">
-    Filtros{% if filtros.values()|select|list %} <span class="badge badge-ambar">ativos</span>{% endif %}
-  </button>
-  <form class="toolbar" method="get" id="ac-filtros">
-    <input type="hidden" name="aba" value="acoes">
-    <label>Pessoa <select name="responsavel">
-      <option value="">Todas as pessoas</option>
-      {% for u in usuarios %}<option value="{{ u.id }}" {{ 'selected' if filtros.responsavel == u.id }}>{{ u.nome or u.email }}</option>{% endfor %}
-    </select></label>
-    <label>Área <select name="area">
-      <option value="">Todas</option>
-      {% for a in areas %}<option value="{{ a.id }}" {{ 'selected' if filtros.area == a.id }}>{{ a.nome }}</option>{% endfor %}
-    </select></label>
-    <label>Status <select name="status">
-      <option value="">Todos</option>
-      {% for s in status_opcoes %}<option value="{{ s }}" {{ 'selected' if filtros.status == s }}>{{ s }}</option>{% endfor %}
-    </select></label>
-    <label>Prioridade <select name="prioridade">
-      <option value="">Todas</option>
-      {% for p in prioridades %}<option value="{{ p }}" {{ 'selected' if filtros.prioridade == p }}>{{ p }}</option>{% endfor %}
-    </select></label>
-    <label>Prazo <select name="situacao">
-      <option value="">Todos</option>
-      {% for s in ['Atrasada', 'Vence em breve', 'No prazo', 'Sem prazo'] %}
-      <option value="{{ s }}" {{ 'selected' if filtros.situacao == s }}>{{ s }}</option>{% endfor %}
-    </select></label>
-    <button class="btn sec" type="submit">Filtrar</button>
-    <a class="btn-ghost" href="{{ url_for('dash.acoes_view', aba='acoes') }}">Limpar</a>
-  </form>
-  {% if pode_criar %}<button class="btn" type="button" id="btn-nova" style="margin-bottom:14px;">+ Nova ação</button>{% endif %}
-
-  <p class="subnote">
-    {{ acoes|length }} {{ 'ação' if acoes|length == 1 else 'ações' }}
-    {% if resumo.atrasadas %} · <b style="color:var(--danger)">{{ resumo.atrasadas }} atrasada(s)</b>{% endif %}
-    {% if resumo.vence_em_breve %} · {{ resumo.vence_em_breve }} vence(m) em 7 dias{% endif %}
-  </p>
-
-  {% if acoes %}
-  <!-- Tabela no computador; abaixo de 820px o CSS troca para os cartões. -->
-  <div class="card so-desktop">
-    <div class="card-b tabela-wrap" style="padding:0;">
-      <table class="tbl">
-        <thead><tr>
-          <th>ID</th><th>Ação</th><th>Área</th><th>Responsável</th>
-          <th>Prazo</th><th class="num">Progresso</th><th>Situação</th>
-        </tr></thead>
-        <tbody>
-          {% for a in acoes %}
-          <tr class="clicavel" data-href="{{ url_for('dash.acao_detalhe', acao_id=a.id) }}">
-            <td class="cod"><b>{{ a.codigo }}</b></td>
-            <td>{{ a.titulo }}
-              {% if a.prioridade in ('Crítica', 'Alta') %}<span class="badge badge-ambar">{{ a.prioridade }}</span>{% endif %}</td>
-            <td>{{ nome_area(a.area_id) or '—' }}</td>
-            <td>{{ nome_usuario(a.responsavel_id) or '—' }}</td>
-            <td>{{ a.prazo|replace('-', '/') if a.prazo else '—' }}</td>
-            <td><span class="prog"><span class="barra"><i style="width:{{ a.progresso }}%"></i></span><b>{{ a.progresso }}%</b></span></td>
-            <td>{{ badge_situacao(a) }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+  <div class="ac-barra">
+    <input type="search" id="ac-q" class="ac-busca" placeholder="Buscar AC-000, título ou etiqueta…"
+           aria-label="Buscar ações" autocomplete="off">
+    <button class="btn sec so-mobile-inline" type="button" id="btn-filtros" aria-expanded="false">
+      Filtros <span class="badge badge-ambar" id="ac-filtros-ativos" style="display:none">ativos</span>
+    </button>
+    <div class="ac-filtros" id="ac-filtros">
+      <select id="ac-f-responsavel" aria-label="Pessoa">
+        <option value="">Todas as pessoas</option>
+        {% for u in usuarios %}<option value="{{ u.id }}">{{ u.nome or u.email }}</option>{% endfor %}
+      </select>
+      <select id="ac-f-area" aria-label="Área">
+        <option value="">Todas as áreas</option>
+        {% for a in areas %}<option value="{{ a.id }}">{{ a.nome }}</option>{% endfor %}
+      </select>
+      <select id="ac-f-prioridade" aria-label="Prioridade">
+        <option value="">Toda prioridade</option>
+        {% for p in prioridades %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+      </select>
+      {% if tem_etiquetas %}
+      <select id="ac-f-etiqueta" aria-label="Etiqueta"><option value="">Toda etiqueta</option></select>
+      {% endif %}
+      <label class="ac-agrupar">Agrupar
+        <select id="ac-agrupar">
+          <option value="">Nada</option>
+          <option value="responsavel">Responsável</option>
+          <option value="area">Área</option>
+          <option value="prioridade">Prioridade</option>
+        </select>
+      </label>
     </div>
   </div>
 
-  <!-- Cartões no celular: tabela de 7 colunas no telefone é ilegível, e é no
-       telefone que a ação é atualizada em campo. -->
-  <div class="so-mobile">
-    {% for a in acoes %}
-    <a class="cartao-acao" href="{{ url_for('dash.acao_detalhe', acao_id=a.id) }}">
-      <div class="cartao-topo"><b>{{ a.codigo }}</b> {{ badge_situacao(a) }}</div>
-      <div class="cartao-titulo">{{ a.titulo }}</div>
-      <div class="cartao-meta">{{ nome_area(a.area_id) or '—' }} · {{ nome_usuario(a.responsavel_id) }}</div>
-      <div class="cartao-meta">Prazo {{ a.prazo|replace('-', '/') if a.prazo else '—' }}</div>
-      <span class="barra"><i style="width:{{ a.progresso }}%"></i></span>
-      <div class="cartao-meta">{{ a.progresso }}%{% if a.proximo_passo %} · ▸ {{ a.proximo_passo }}{% endif %}</div>
-    </a>
-    {% endfor %}
+  <div class="ac-barra2">
+    <div class="fchips" id="ac-atalhos">
+      <button type="button" class="fchip" data-atalho="minhas">Minhas</button>
+      <button type="button" class="fchip" data-atalho="atrasadas">Atrasadas</button>
+      <button type="button" class="fchip" data-atalho="breve">Vencem em 7 dias</button>
+      <button type="button" class="fchip" data-atalho="criticas">Críticas e altas</button>
+      <button type="button" class="btn-ghost" id="ac-limpar" style="display:none">Limpar filtros</button>
+    </div>
+    <div class="ac-direita">
+      <div class="view-switch" id="ac-visoes">
+        <button type="button" data-visao="quadro" class="active">Quadro</button>
+        <button type="button" data-visao="lista">Lista</button>
+        <button type="button" data-visao="cronograma">Cronograma</button>
+      </div>
+      {% if pode_criar %}<button class="btn" type="button" id="btn-nova">+ Nova ação</button>{% endif %}
+    </div>
   </div>
-  {% else %}
-  <div class="card"><div class="card-b"><div class="vazio">
-    Nenhuma ação com esses filtros.
-  </div></div></div>
-  {% endif %}
+
+  <p class="subnote ac-contagem" id="ac-contagem" aria-live="polite"></p>
+
+  <div id="ac-quadro" class="ac-visao"></div>
+  <div id="ac-lista" class="ac-visao" hidden></div>
+  <div id="ac-cronograma" class="ac-visao" hidden></div>
+  <datalist id="etiquetas-em-uso"></datalist>
 
   {% if pode_criar %}
-  <div class="card" id="form-nova" hidden style="margin-top:16px;">
-    <div class="card-h">Nova ação</div>
-    <div class="card-b">
-      <form method="post" action="{{ url_for('dash.acao_nova') }}">
-        <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(230px,1fr));">
-          <div class="field" style="grid-column:1/-1;">
-            <label>Ação <span class="subnote">verbo + entrega objetiva</span></label>
-            <input type="text" name="titulo" required maxlength="200" style="width:100%;"
-                   placeholder="Consolidar padrão de vistoria de rede">
-          </div>
-          <div class="field" style="grid-column:1/-1;">
-            <label>Entrega esperada</label>
-            <input type="text" name="entrega_esperada" style="width:100%;"
-                   placeholder="Padrão aprovado, publicado e comunicado">
-          </div>
-          <div class="field"><label>Área</label>
-            <select name="area_id" required style="width:100%;">
-              <option value="">Selecione…</option>
-              {% for a in areas %}<option value="{{ a.id }}">{{ a.nome }}</option>{% endfor %}
-            </select></div>
-          <div class="field"><label>Responsável <span class="subnote">obrigatório</span></label>
-            <select name="responsavel_id" required style="width:100%;">
-              <option value="">Selecione…</option>
-              {% for u in usuarios %}<option value="{{ u.id }}">{{ u.nome or u.email }}</option>{% endfor %}
-            </select></div>
-          <div class="field"><label>Prazo</label>
-            <input type="date" name="prazo" style="width:100%;"></div>
-          <div class="field"><label>Prioridade</label>
-            <select name="prioridade" style="width:100%;">
-              {% for p in prioridades %}<option value="{{ p }}" {{ 'selected' if p == 'Média' }}>{{ p }}</option>{% endfor %}
-            </select></div>
-        </div>
+  <dialog class="modal modal-largo" id="dlg-nova" aria-labelledby="dlg-nova-titulo">
+    <form method="post" action="{{ url_for('dash.acao_nova') }}" id="form-nova">
+      <input type="hidden" name="voltar" value="">
+      <h3 id="dlg-nova-titulo">Nova ação</h3>
+      <div class="field">
+        <label for="n-titulo">Ação <span class="rotulo-leve">verbo + entrega objetiva</span></label>
+        <input type="text" id="n-titulo" name="titulo" required maxlength="200"
+               placeholder="Consolidar padrão de vistoria de rede">
+      </div>
+      <div class="field">
+        <label for="n-entrega">Entrega esperada</label>
+        <input type="text" id="n-entrega" name="entrega_esperada" maxlength="500"
+               placeholder="Padrão aprovado, publicado e comunicado">
+      </div>
+      <div class="grid nova-grade">
+        <div class="field"><label for="n-area">Área</label>
+          <select id="n-area" name="area_id" required>
+            <option value="">Selecione…</option>
+            {% for a in areas %}<option value="{{ a.id }}">{{ a.nome }}</option>{% endfor %}
+          </select></div>
+        <div class="field"><label for="n-resp">Responsável</label>
+          <select id="n-resp" name="responsavel_id" required>
+            <option value="">Selecione…</option>
+            {% for u in usuarios %}<option value="{{ u.id }}">{{ u.nome or u.email }}</option>{% endfor %}
+          </select></div>
+        <div class="field"><label for="n-prazo">Prazo</label>
+          <input type="date" id="n-prazo" name="prazo"></div>
+        <div class="field"><label for="n-pri">Prioridade</label>
+          <select id="n-pri" name="prioridade">
+            {% for p in prioridades %}<option value="{{ p }}" {{ 'selected' if p == 'Média' }}>{{ p }}</option>{% endfor %}
+          </select></div>
+      </div>
+      <div class="grid nova-grade">
         <div class="field">
-          <label>Apoio <span class="subnote">apoio não substitui o dono</span></label>
-          <div class="lista-marcar" style="max-height:150px;">
-            {% for u in usuarios %}
-            <label class="linha-marcar"><input type="checkbox" name="apoio" value="{{ u.id }}"> {{ u.nome or u.email }}</label>
-            {% endfor %}
-          </div>
+          <label>Apoio <span class="rotulo-leve">não substitui o dono</span></label>
+          <details class="dropdown" id="dd-apoio-nova">
+            <summary><span data-resumo>Ninguém</span></summary>
+            <div class="lista-marcar" style="max-height:200px;">
+              {% for u in usuarios %}
+              <label class="linha-marcar"><input type="checkbox" name="apoio" value="{{ u.id }}"> {{ u.nome or u.email }}</label>
+              {% endfor %}
+            </div>
+          </details>
         </div>
-        <button class="btn" type="submit">Criar ação</button>
-        <button class="btn-ghost" type="button" id="btn-cancelar-nova">Cancelar</button>
-      </form>
-    </div>
-  </div>
+        {% if tem_etiquetas %}
+        <div class="field">
+          <label for="n-etiquetas">Etiquetas <span class="rotulo-leve">separe por vírgula</span></label>
+          <input type="text" id="n-etiquetas" name="etiquetas" maxlength="250" list="etiquetas-em-uso"
+                 placeholder="Cliente VIP, Processo">
+        </div>
+        {% endif %}
+      </div>
+      {% if tem_checklist %}
+      <div class="field">
+        <label>Checklist <span class="rotulo-leve">opcional — com itens, o progresso é calculado por eles</span></label>
+        <div class="nova-chk" id="nova-chk">
+          <input type="text" name="checklist" maxlength="200" placeholder="Primeiro item (Enter adiciona outro)">
+        </div>
+      </div>
+      {% endif %}
+      <div class="modal-acoes">
+        <button type="button" class="btn sec" data-fechar-nova>Cancelar</button>
+        <button type="submit" class="btn">Criar ação</button>
+      </div>
+    </form>
+  </dialog>
   {% endif %}
 </section>
+
+{# Painel lateral da ação. O conteúdo vem pronto do servidor
+   (/acoes/<id>/painel, o mesmo parcial da página cheia). #}
+<div class="gaveta-fundo" id="gaveta-fundo" hidden></div>
+<aside class="gaveta" id="gaveta" role="dialog" aria-modal="false" aria-label="Ação" hidden>
+  <div class="gaveta-corpo" data-acao-contenedor></div>
+</aside>
+{% include "_acao_mover.html" %}
 
 <!-- ===================== Reuniões ===================== -->
 <section data-painel="reunioes" {% if aba != 'reunioes' %}hidden{% endif %}>
@@ -353,6 +354,8 @@
 {% endblock %}
 
 {% block scripts %}
-<script>window.__RESUMO__ = {{ resumo|tojson }};</script>
+<script>window.__RESUMO__ = {{ resumo|tojson }}; window.__ACOES__ = {{ pacote|tojson }};</script>
+<script src="{{ url_for('static', filename='js/acao_painel.js') }}"></script>
+<script src="{{ url_for('static', filename='js/acoes_quadro.js') }}"></script>
 <script src="{{ url_for('static', filename='js/acoes.js') }}"></script>
 {% endblock %}

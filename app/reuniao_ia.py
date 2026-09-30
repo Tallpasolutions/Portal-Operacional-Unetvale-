@@ -826,6 +826,15 @@ def _mencoes_por_acao(excluir_reuniao=None):
     return mapa
 
 
+def reunioes_por_acao():
+    """{acao_id: nº de reuniões distintas} — o ↻ do cartão no quadro.
+
+    Mesma contagem de `recorrentes_pendentes`, sem o corte de 2+: o cartão
+    mostra desde a primeira vez que a ação foi à mesa.
+    """
+    return {a: len(r) for a, r in _mencoes_por_acao().items()}
+
+
 def recorrentes_pendentes(acao_ids=None, excluir_reuniao=None):
     """Ações que voltaram à mesa e continuam abertas.
 
