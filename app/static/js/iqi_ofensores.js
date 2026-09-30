@@ -31,12 +31,8 @@
     const base = window.__iqiSupervisor
       ? window.__iqiSupervisor.filtrar(d.tecnicos, alcanceSup)
       : d.tecnicos;
-    const avaliados = base
-      .map((t) => ({ nome: t.nome, curto: t.nome.split(" - ").pop(),
-                     os: t.m[mesIdx][0], cham: t.m[mesIdx][1], pct: t.m[mesIdx][2] }))
-      .filter((r) => r.os >= d.minOS);
-    const media = avaliados.length ? avaliados.reduce((s, r) => s + r.pct, 0) / avaliados.length : 0;
-    const ofensores = avaliados.filter((r) => r.pct > media).sort((a, b) => b.pct - a.pct);
+    // A regra mora em iqi_regras.js: o "Só ofensores" do Dashboard usa a mesma.
+    const { avaliados, media, ofensores } = window.IqiRegras.ofensoresDoMes(base, mesIdx, d.minOS);
     return { avaliados, media, ofensores, meta: d.meta };
   }
 

@@ -13,6 +13,10 @@
 //
 // Categorias 1 e 2 não entram aqui de propósito: elas dizem como o cliente
 // pediu e como o N1 encerrou, não a causa. Ficam no Dashboard.
+//
+// Cross-filter: clicar numa linha de Cat 4, 5 ou 6 filtra as OUTRAS duas
+// tabelas pelos protocolos daquela linha (a própria continua inteira, com a
+// linha marcada). A contagem é `Dash.contarCategorias`, a mesma do Dashboard.
 (function () {
   "use strict";
   var CR = window.__CAUSA_RAIZ__ || {};
@@ -21,10 +25,9 @@
   var raiz = document.getElementById("view-causaraiz");
   if (!raiz || !Dash) return;
 
-  var campos = CR.campos || ["tecnico", "cat1", "cat2", "cat3", "cat4", "cat5", "cidade"];
-  var pos = {};
-  campos.forEach(function (c, i) { pos[c] = i; });
-  var TEC = CR.tec || [], C4 = CR.c4 || [], C5 = CR.c5 || [];
+  var TEC = CR.tec || [];
+  var sel = {};   // {cat4|cat5|cat6: rotulo} — o cross-filter
+  var ROTULO = { cat4: "Categoria 4", cat5: "Categoria 5", cat6: "Categoria 6" };
 
   var ind = "IQI";
   var alcanceSup = null;
@@ -79,33 +82,15 @@
     return [...set].sort();
   }
 
-  /** {categoria: {mes: n}} + totais, para um dos campos (cat4 | cat5). */
-  function contar(campo, permitidos) {
-    var blocos = CR[ind] || {};
-    var iTec = pos.tecnico, iCat = pos[campo];
-    var lista = campo === "cat4" ? C4 : C5;
-    var linhas = {}, porMes = {}, total = 0, tecnicosVistos = new Set();
-    mesesExibidos().forEach(function (m) {
-      porMes[m] = 0;
-      (blocos[m] || []).forEach(function (r) {
-        if (permitidos && !permitidos.has(r[iTec])) return;
-        total++; porMes[m]++;
-        if (r[iTec] >= 0) tecnicosVistos.add(r[iTec]);
-        var c = r[iCat];
-        if (c < 0 || c >= lista.length) return;
-        var nome = lista[c];
-        (linhas[nome] = linhas[nome] || {})[m] = (linhas[nome][m] || 0) + 1;
-      });
-    });
-    return { linhas: linhas, porMes: porMes, total: total, tecnicos: tecnicosVistos.size };
-  }
-
   // -------------------------------------------------------------- tabela
-  function tabela(el, dados, titulo) {
+  // `dados` = {linhas: {categoria: {mes: n}}, porMes, total}. `campo` liga o
+  // clique da linha ao cross-filter. O rodapé "Total" é de PROTOCOLOS, não a
+  // soma das linhas — na Cat 6, que é múltipla, a soma passa do total.
+  function tabela(el, dados, titulo, campo, vazio) {
     var ms = mesesExibidos();
     if (!ms.length || !Object.keys(dados.linhas).length) {
       el.innerHTML = '<tbody><tr><td class="vazio-cel" style="padding:22px;text-align:center;">' +
-        "Nenhuma reincidência neste recorte." + "</td></tr></tbody>";
+        (vazio || "Nenhuma reincidência neste recorte.") + "</td></tr></tbody>";
       return;
     }
     // Ordena pelo TOTAL do período, não pelo último mês: a pergunta é qual
@@ -121,7 +106,10 @@
 
     var corpo = nomes.map(function (nome) {
       var linha = dados.linhas[nome];
-      return '<tr><td class="sticky-col nome">' + Dash.esc(nome) + "</td>" +
+      var marca = sel[campo] === undefined ? "" : (sel[campo] === nome ? " selecionado" : " apagado");
+      return '<tr class="clicavel' + marca + '" data-campo="' + campo + '" data-rotulo="' + Dash.esc(nome) +
+        '" title="' + (sel[campo] === nome ? "Clique para desfazer o filtro" : "Clique para filtrar as outras tabelas") + '">' +
+        '<td class="sticky-col nome">' + Dash.esc(nome) + "</td>" +
         ms.map(function (m) {
           var v = linha[m] || 0;
           return '<td class="' + (v ? "" : "vazio-cel") + (ehParcial(m) ? " parcial-cell" : "") +
@@ -130,7 +118,7 @@
         '<td class="nome">' + soma(linha) + "</td></tr>";
     }).join("");
 
-    var rodape = '<tfoot><tr class="total"><td class="sticky-col">Total</td>' +
+    var rodape = '<tfoot><tr class="total"><td class="sticky-col">Protocolos</td>' +
       ms.map(function (m) { return "<td>" + (dados.porMes[m] || 0) + "</td>"; }).join("") +
       "<td>" + dados.total + "</td></tr></tfoot>";
     el.innerHTML = cab + "<tbody>" + corpo + "</tbody>" + rodape;
@@ -147,17 +135,41 @@
         "A causa raiz vem do relatório de análises (AII), coletado junto do Dashboard. " +
         "A próxima coleta preenche esta tabela.</td></tr></tbody>";
       document.getElementById("icr-tab5").innerHTML = "";
+      document.getElementById("icr-tab6").innerHTML = "";
       return;
     }
     document.querySelectorAll("#view-causaraiz .tm-ind-nome").forEach(function (e) { e.textContent = ind; });
     var permitidos = (alcanceSup || empresasSel.size) ? tecnicosPermitidos() : null;
-    var d4 = contar("cat4", permitidos);
-    var d5 = contar("cat5", permitidos);
-    document.getElementById("icr-total").textContent = Dash.num(d4.total);
-    document.getElementById("icr-tec").textContent = Dash.num(d4.tecnicos);
-    tabela(document.getElementById("icr-tab4"), d4, "Categoria 4");
-    tabela(document.getElementById("icr-tab5"), d5, "Categoria 5");
+    var d = Dash.contarCategorias(CR, ind, mesesExibidos(),
+      { tecnicos: permitidos, sel: sel, campos: ["cat4", "cat5", "cat6"] });
+    document.getElementById("icr-total").textContent = Dash.num(d.total);
+    document.getElementById("icr-tec").textContent = Dash.num(d.tecnicos);
+    function dados(campo) { return { linhas: d.mensal[campo] || {}, porMes: d.porMes, total: d.total }; }
+    tabela(document.getElementById("icr-tab4"), dados("cat4"), "Categoria 4", "cat4");
+    tabela(document.getElementById("icr-tab5"), dados("cat5"), "Categoria 5", "cat5");
+    // "Não coletada" ≠ "nenhum ajuste": a Cat 6 entrou na coleta em 29/09/2026
+    // e os meses anteriores só a têm depois do backfill.
+    tabela(document.getElementById("icr-tab6"), dados("cat6"), "Categoria 6", "cat6",
+      d.total && !d.coletados.cat6
+        ? "A Categoria 6 destes meses ainda não foi coletada (entrou em 29/09/2026; os anteriores dependem do backfill)."
+        : "Nenhum ajuste de Categoria 6 registrado neste recorte.");
+    document.getElementById("icr-sel").innerHTML = Object.keys(sel).map(function (c) {
+      return '<span class="chip">' + Dash.esc(ROTULO[c]) + ": " + Dash.esc(sel[c]) +
+        ' <button type="button" data-campo="' + c + '" aria-label="Remover filtro">×</button></span>';
+    }).join("");
   }
+
+  // Um ouvinte no bloco inteiro (delegado): as tabelas são redesenhadas a cada
+  // clique, e ouvinte preso à linha morreria com ela.
+  raiz.addEventListener("click", function (e) {
+    var chip = e.target.closest("#icr-sel button[data-campo]");
+    if (chip) { delete sel[chip.dataset.campo]; render(); return; }
+    var tr = e.target.closest("tr.clicavel[data-campo]");
+    if (!tr) return;
+    var c = tr.dataset.campo, r = tr.getAttribute("data-rotulo");
+    if (sel[c] === r) delete sel[c]; else sel[c] = r;
+    render();
+  });
 
   // Indicador, supervisor, empresa e período: tudo vem da Tabela mensal, que é
   // dona dos chips desta página.

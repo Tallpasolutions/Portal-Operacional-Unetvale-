@@ -58,6 +58,38 @@ def empresa_de(rotulo):
     return APELIDOS_EMPRESA.get(e, e)
 
 
+def agrupar_empresa(rotulo):
+    """Reescreve só a empresa do rótulo "EMPRESA - Nome"; o nome é preservado.
+
+    O mapa de apelidos mora aqui porque o vínculo do supervisor compara por
+    ele. Duas cópias divergindo fariam o filtro perder técnicos sem erro
+    nenhum na tela. (Vivia em routes.py; saiu para cá quando o Dashboard
+    passou a precisar do mesmo recorte do /iqi.)
+    """
+    i = (rotulo or "").find(" - ")
+    if i < 0:
+        return rotulo
+    empresa, nome = rotulo[:i].strip(), rotulo[i + 3:]
+    return f"{APELIDOS_EMPRESA.get(empresa.upper(), empresa)} - {nome}"
+
+
+def so_operacional(payload):
+    """Payload de IQI/IQM só com o time operacional (sem infra), apelidos resolvidos.
+
+    É a MESMA regra do ranking do /iqi e do filtro global do Dashboard: infra
+    não entra no IQI/IQM (regra de negócio, ver CLAUDE.md §6).
+    """
+    if not payload or "tecnicos" not in payload:
+        return payload
+    p = dict(payload)
+    p["tecnicos"] = [
+        {**t, "nome": agrupar_empresa(t.get("nome", ""))}
+        for t in payload["tecnicos"]
+        if not eh_infra(t.get("nome", ""))
+    ]
+    return p
+
+
 def chave_tecnico(rotulo):
     """Chave estável de comparação para um rótulo "EMPRESA - Nome".
 

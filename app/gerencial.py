@@ -15,7 +15,7 @@ from . import dados, supa, supervisores
 BR_TZ = timezone(timedelta(hours=-3))
 
 MODULOS = ("ger_categorias", "ger_cancelamentos", "ger_esteira",
-           "ger_idf", "ger_salas")
+           "ger_idf", "ger_salas", "ger_atendimento")
 
 # O CMT é este grupo de motivo de cancelamento. Mesma constante do coletor —
 # aqui ela serve só para encurtar o rótulo na tela.
@@ -23,9 +23,13 @@ GRUPO_TECNICO = "PROBLEMA TECNICO"
 
 # Ordem dos campos dentro do registro compacto de `ger_categorias`. Espelha
 # `CAMPOS` do coletor; o payload também carrega a lista, e é ela que vale.
+#
+# `cat6` é MÚLTIPLA (lista de índices no registro) e mora no fim: registro
+# antigo tem 7 posições e continua valendo. Ver `CAMPOS` em coletor/gerencial.py.
 CAMPOS_PADRAO = ("tecnico", "cat1", "cat2", "cat3", "cat4", "cat5", "cidade")
+MULTIPLOS_PADRAO = ("cat6",)
 LISTAS = {"tecnico": "tec", "cat1": "c1", "cat2": "c2", "cat3": "c3",
-          "cat4": "c4", "cat5": "c5", "cidade": "cid"}
+          "cat4": "c4", "cat5": "c5", "cidade": "cid", "cat6": "c6"}
 
 # Quantos meses o par "fechado × corrente" mostra, quando não há preferência.
 MESES_VISIVEIS_PADRAO = 2
@@ -229,7 +233,8 @@ def qualidade(mapa_metas, quantos=MESES_VISIVEIS_PADRAO):
     saida = {}
     for modulo, rotulo, chave in (("iqi", "IQI", "iqi"), ("iqm", "IQM", "iqm")):
         row = dados.get_modulo(modulo)
-        serie, fonte = _consolidado_mensal((row or {}).get("payload"))
+        bruto = (row or {}).get("payload") or {}
+        serie, fonte = _consolidado_mensal(bruto)
         visiveis = _ultimos(serie, quantos)
         for d in visiveis:
             # Pela data, não pela posição na lista: um mês fica parcial até 30
@@ -243,6 +248,13 @@ def qualidade(mapa_metas, quantos=MESES_VISIVEIS_PADRAO):
             "visiveis": visiveis,
             "fonte": fonte,
             "meta": (mapa_metas.get(chave) or {}).get("valor"),
+            # Para o filtro global: com empresa, supervisor ou técnico
+            # escolhido, o número deixa de ser o consolidado do WVSA e passa
+            # a ser a SOMA dos técnicos do recorte — o mesmo que o /iqi faz.
+            # Só operacional (sem infra), pela mesma função do /iqi.
+            "meses": bruto.get("meses") or [],
+            "minOS": bruto.get("minOS"),
+            "tecnicos": (supervisores.so_operacional(bruto) or {}).get("tecnicos") or [],
         }
     return saida
 
@@ -339,19 +351,29 @@ def agregar_categorias(cat, indicador, meses):
     a contagem é feita na hora — são poucos milhares de registros.
     """
     campos = cat.get("campos") or list(CAMPOS_PADRAO)
+    multiplos = set(cat.get("multiplos") or MULTIPLOS_PADRAO)
     pos = {c: i for i, c in enumerate(campos)}
     listas = {c: (cat.get(LISTAS.get(c, "")) or []) for c in campos}
     blocos = cat.get(indicador) or {}
 
     contas = {c: Counter() for c in campos}
     total = 0
+    # Quantos registros TÊM o campo. Para a Cat 6 isso separa "ninguém
+    # registrou ajuste" (coletada, lista vazia) de "mês coletado antes de a
+    # Cat 6 existir" (registro de 7 posições) — a tela diz coisas diferentes.
+    coletados = Counter()
     for mes in meses:
         for reg in blocos.get(mes) or []:
             total += 1
             for campo, i in pos.items():
-                if i < len(reg) and reg[i] >= 0 and reg[i] < len(listas[campo]):
-                    contas[campo][listas[campo][reg[i]]] += 1
-    saida = {"total": total}
+                if i >= len(reg):
+                    continue
+                coletados[campo] += 1
+                valores = reg[i] if campo in multiplos else [reg[i]]
+                for v in valores or []:
+                    if isinstance(v, int) and 0 <= v < len(listas[campo]):
+                        contas[campo][listas[campo][v]] += 1
+    saida = {"total": total, "coletados": dict(coletados)}
     for campo, cont in contas.items():
         saida[campo] = dict(cont.most_common())
     return saida
@@ -365,7 +387,9 @@ def cancelamentos(payload, mapa_metas, quantos=MESES_VISIVEIS_PADRAO):
     blocos = (payload or {}).get("meses_dados") or {}
     meses = sorted(blocos)
     if not meses:
-        return {"meses": [], "mes_padrao": None, "visiveis": [], "serie": []}
+        return {"meses": [], "mes_padrao": None, "visiveis": [], "serie": [], "textos": {}}
+    campos_c = (payload or {}).get("campos_contrato") or []
+    campos_u = (payload or {}).get("campos_ultimo") or []
 
     def resumo(mes, parcial):
         d = blocos[mes]
@@ -386,13 +410,20 @@ def cancelamentos(payload, mapa_metas, quantos=MESES_VISIVEIS_PADRAO):
             "cidades": d.get("cidades") or {},
             "tempo_casa": d.get("tempo_casa") or {},
             "tempo_contrato": d.get("tempo_contrato") or {},
-            "faixa_ticket": d.get("faixa_ticket") or {},
             "motivos": d.get("motivos") or {},
+            # Faixa de ticket saiu da tela a pedido (29/09/2026). O coletor
+            # ainda a recebe nas abas do relatório, mas ela não viaja.
+            **_contratos_do_mes(d, campos_c, campos_u),
         }
 
     escolhidos = meses[-max(1, quantos):]
+    textos = (payload or {}).get("textos") or {}
     return {
         "meses": meses,
+        # Só as listas que a tela usa: bairro e o atendente que registrou o
+        # cancelamento ficam no banco e não engordam a página.
+        "textos": {k: textos.get(k) or [] for k in
+                   ("cidade", "motivo", "grupo", "casa", "tecnico")},
         "mes_padrao": mes_padrao(escolhidos, lambda m: (blocos[m].get("total") or 0)),
         "visiveis": [resumo(m, _mes_em_curso(m)) for m in escolhidos],
         "serie": [{"mes": m, "total": blocos[m].get("total") or 0,
@@ -400,6 +431,66 @@ def cancelamentos(payload, mapa_metas, quantos=MESES_VISIVEIS_PADRAO):
                    "pct": round((blocos[m].get("tecnico") or 0) /
                                 (blocos[m].get("total") or 1) * 100, 2)}
                   for m in meses],
+    }
+
+
+def _contratos_do_mes(d, campos_c, campos_u):
+    """Registros por contrato e o técnico da última OS, só com o que a tela usa.
+
+    `contratos` = [contrato, cidade, motivo, grupo, casa] (índices em
+    `textos`) — é o que o filtro por motivo reconta. `ultimo` = [contrato,
+    técnico, OS] — o técnico do último atendimento antes do cancelamento
+    (CMT, só grupo técnico com OS). O cruzamento dos dois é pelo contrato, no
+    browser, porque o filtro global recorta pelo técnico.
+
+    Mês coletado antes de 29/09/2026 não tem nada disso: devolve listas
+    vazias e `detalhe=False`, e a tela diz que o detalhe ainda não existe em
+    vez de mostrar zero.
+    """
+    brutos_c, brutos_u = d.get("contratos"), d.get("ultimo_atendimento")
+    if brutos_c is None or not campos_c:
+        return {"detalhe": False, "contratos": [], "ultimo": []}
+    pc = {c: i for i, c in enumerate(campos_c)}
+    pu = {c: i for i, c in enumerate(campos_u)}
+    contratos = [[r[pc["contrato"]], r[pc["cidade"]], r[pc["motivo"]], r[pc["grupo"]], r[pc["casa"]]]
+                 for r in brutos_c]
+    ultimo = [[r[pu["contrato"]], r[pu["tecnico"]], r[pu["os"]]] for r in (brutos_u or [])]
+    return {"detalhe": True, "contratos": contratos, "ultimo": ultimo}
+
+
+# Nota abaixo da qual o IDF acende alerta. É meta (`idf_alerta`, editável em
+# Configurações) e não constante, mas com padrão: a regra combinada em
+# 29/09/2026 é "acima de 3 nada; abaixo, alerta" — 3 exato não alerta.
+IDF_ALERTA_PADRAO = 3.0
+
+
+def limiar_idf(mapa_metas):
+    valor = (mapa_metas.get("idf_alerta") or {}).get("valor")
+    try:
+        return float(valor) if valor is not None else IDF_ALERTA_PADRAO
+    except (TypeError, ValueError):
+        return IDF_ALERTA_PADRAO
+
+
+def atendimento(payload, mapa_metas, quantos=MESES_VISIVEIS_PADRAO):
+    """TMA/TMF do chat (ger_atendimento): somas por departamento e atendente.
+
+    Vai em somas, não em médias, para a tela recortar por departamento ou
+    atendente somando as partes — média de médias daria o mesmo peso a quem
+    atendeu 3 conversas e a quem atendeu 300. As faixas de duração vão junto
+    porque a MÉDIA do TMA mente (conversa esquecida aberta puxa para cima): a
+    tela mostra a mediana aproximada ao lado.
+    """
+    blocos = (payload or {}).get("meses_dados") or {}
+    meses = sorted(blocos)
+    escolhidos = meses[-max(1, quantos):]
+    return {
+        "meses": meses,
+        "campos": (payload or {}).get("campos") or [],
+        "faixas_min": (payload or {}).get("faixas_min") or [],
+        "visiveis": [{"mes": m, "parcial": _mes_em_curso(m), **blocos[m]} for m in escolhidos],
+        "mes_padrao": mes_padrao(escolhidos, lambda m: (blocos[m].get("conversas") or 0)),
+        "metas": {c: (mapa_metas.get(c) or {}).get("valor") for c in ("tma_chat", "tmf_chat")},
     }
 
 
@@ -445,31 +536,30 @@ def pacote():
     meses_cat = cat.get("meses") or []
     visiveis_cat = meses_cat[-max(1, quantos):]
 
-    cr_iqi = {m: agregar_categorias(cat, "IQI", [m]) for m in visiveis_cat}
-    cr_iqm = {m: agregar_categorias(cat, "IQM", [m]) for m in visiveis_cat}
+    # Só para escolher o mês de abertura: a contagem que a tela mostra é feita
+    # no browser, a partir dos registros, porque o filtro global e o
+    # cross-filter recortam por técnico e por categoria ao mesmo tempo — e
+    # contagem já agregada não se recorta depois (mesma razão do /iqi).
+    totais = {m: (sum(1 for _ in (cat.get("IQI") or {}).get(m) or []) +
+                  sum(1 for _ in (cat.get("IQM") or {}).get(m) or []))
+              for m in visiveis_cat}
 
     idf_blocos = idf.get("meses_dados") or {}
     idf_meses = sorted(idf_blocos)
     idf_visiveis = idf_meses[-max(1, quantos):]
+    atend = payload("ger_atendimento")
 
     return {
         "meses_visiveis": quantos,
         "qualidade": qualidade(mapa, quantos),
         "causa_raiz": {
+            **_registros_categorias(cat, visiveis_cat),
             "meses": meses_cat,
             "visiveis": visiveis_cat,
-            # Agregado aqui e não no browser: o Dashboard mostra o consolidado,
-            # sem filtro por equipe. Quem precisa cruzar com empresa e
-            # supervisor usa a visualização "Causa raiz" do /iqi, que recebe
-            # os registros e filtra no cliente.
-            "IQI": cr_iqi,
-            "IQM": cr_iqm,
             # Qual mês a tela abre. Ver `mes_padrao`: na virada do mês o mais
             # recente está vazio, e abrir nele fazia o Dashboard inteiro
             # parecer quebrado.
-            "mes_padrao": mes_padrao(
-                visiveis_cat,
-                lambda m: (cr_iqi.get(m) or {}).get("total") or (cr_iqm.get(m) or {}).get("total")),
+            "mes_padrao": mes_padrao(visiveis_cat, lambda m: totais.get(m)),
         },
         "cancelamentos": cancelamentos(payload("ger_cancelamentos"), mapa, quantos),
         "esteira": {
@@ -480,18 +570,41 @@ def pacote():
         },
         "idf": {
             "meses": idf_meses,
+            # Os meses visíveis levam o detalhe (feedbacks, alertas, setor e
+            # cidade) — é dele que a tela recorta por subsetor, cidade e
+            # atendente. A série do ano leva só os números do painel: o
+            # detalhe de janeiro a agosto engordaria a página à toa.
             "visiveis": [{"mes": m, "parcial": _mes_em_curso(m), **idf_blocos[m]}
                          for m in idf_visiveis],
-            "serie": [{"mes": m, **idf_blocos[m]} for m in idf_meses],
+            "serie": [{"mes": m, **{c: idf_blocos[m].get(c) for c in ("ligacoes", "chats", "os")}}
+                      for m in idf_meses],
             "metas": {c: (mapa.get(f"idf_{c}") or {}).get("valor")
                       for c in ("ligacoes", "chats", "os")},
+            "textos": {k: (idf.get("textos") or {}).get(k) or [] for k in ("pessoa", "setor", "cidade")},
+            "limiar": limiar_idf(mapa),
         },
+        "atendimento": atendimento(atend, mapa, quantos),
         "salas": {**salas, "vs_meta": _vs_meta(salas.get("abertas"), "disk", mapa)},
         "metas": mapa,
         "estado": {m: {"status": (p.get(m) or {}).get("status") or "sem_dados",
                        "atualizado_em": (p.get(m) or {}).get("atualizado_em")}
                    for m in MODULOS},
     }
+
+
+def _registros_categorias(cat, meses):
+    """Registros compactos de Cat 1..6 só dos `meses` pedidos, com os textos.
+
+    O Dashboard recebe os meses VISÍVEIS e não o ano inteiro: é o que a tela
+    mostra, e o payload de janeiro em diante só engordaria a página.
+    """
+    saida = {k: cat.get(k) for k in ("campos", "multiplos", *LISTAS.values())
+             if cat.get(k) is not None}
+    saida.setdefault("campos", list(CAMPOS_PADRAO))
+    for ind in ("IQI", "IQM"):
+        blocos = cat.get(ind) or {}
+        saida[ind] = {m: blocos[m] for m in meses if m in blocos}
+    return saida
 
 
 def causa_raiz():
@@ -505,4 +618,5 @@ def causa_raiz():
     if not cat:
         return {"meses": [], "campos": list(CAMPOS_PADRAO)}
     return {k: cat.get(k) for k in
-            ("meses", "campos", "IQI", "IQM", *LISTAS.values()) if cat.get(k) is not None}
+            ("meses", "campos", "multiplos", "IQI", "IQM", *LISTAS.values())
+            if cat.get(k) is not None}

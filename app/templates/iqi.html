@@ -168,13 +168,14 @@
     </div>
   </div>
 
-  <h3 class="secao">Causa raiz — Categorias 4 e 5</h3>
+  <h3 class="secao">Causa raiz — Categorias 4, 5 e 6</h3>
   <div id="view-causaraiz">
 <p class="subnote">
-    Categoria 4 é a causa real atribuída <b>após análise interna</b>, e Categoria 5 é o detalhe dela —
-    é o que vale como causa raiz, não o encerramento do técnico. O relatório do WVSA agrega IQI e
-    IQM; a separação é feita aqui, e acompanha o indicador escolhido no topo.
+    Categoria 4 é a causa real atribuída <b>após análise interna</b>, Categoria 5 é o detalhe dela e
+    Categoria 6 é o ajuste feito — é o que vale como causa raiz, não o encerramento do técnico. O relatório
+    do WVSA agrega IQI e IQM; a separação é feita aqui, e acompanha o indicador escolhido no topo.
     <b>Falha Massiva entra na conta</b> — o relatório a esconde por padrão.
+    <b>Clique numa linha para filtrar</b> as outras duas tabelas pelos protocolos dela.
   </p>
   <p class="subnote" style="margin-top:-10px">
     Conta <b>todo protocolo de reincidência</b>, inclusive os de equipes de infraestrutura — que
@@ -186,6 +187,7 @@
     <div class="kpi" style="padding:8px 14px;"><span class="l">Reincidências no recorte</span> <b class="v" id="icr-total" style="font-size:18px;">0</b></div>
     <div class="kpi" style="padding:8px 14px;"><span class="l">Técnicos no recorte</span> <b class="v" id="icr-tec" style="font-size:18px;">0</b></div>
     <a class="btn-ghost" href="{{ url_for('dash.dashboard') }}">Ver no Dashboard</a>
+    <div class="chips" id="icr-sel" style="margin:0"></div>
   </div>
 
   <div class="card" style="margin-bottom:16px;">
@@ -196,9 +198,17 @@
     <div class="card-b tabela-wrap"><table class="tbl tbl-mensal" id="icr-tab4"></table></div>
   </div>
 
-  <div class="card">
+  <div class="card" style="margin-bottom:16px;">
     <div class="card-h"><span>Categoria 5 · detalhe da causa — <span class="tm-ind-nome">IQI</span> mês a mês</span></div>
     <div class="card-b tabela-wrap"><table class="tbl tbl-mensal" id="icr-tab5"></table></div>
+  </div>
+
+  <div class="card">
+    <div class="card-h">
+      <span>Categoria 6 · ajuste realizado — <span class="tm-ind-nome">IQI</span> mês a mês</span>
+      <span class="subnote" style="margin:0">um protocolo pode ter vários ajustes; a soma das linhas passa do total</span>
+    </div>
+    <div class="card-b tabela-wrap"><table class="tbl tbl-mensal" id="icr-tab6"></table></div>
   </div>
   </div>
 </div>
@@ -230,6 +240,7 @@
 </script>
 <script src="{{ url_for('static', filename='js/iqi.js') }}"></script>
 <script src="{{ url_for('static', filename='js/iqi_tabela.js') }}"></script>
+<script src="{{ url_for('static', filename='js/iqi_regras.js') }}"></script>
 <script src="{{ url_for('static', filename='js/iqi_ofensores.js') }}"></script>
 <script src="{{ url_for('static', filename='js/iqi_empresas.js') }}"></script>
 <script src="{{ url_for('static', filename='js/dashboard_rank.js') }}"></script>
