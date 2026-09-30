@@ -22,6 +22,7 @@ aqui em `_html_de_actions`.
 import json
 import os
 import re
+import time
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 
@@ -137,6 +138,31 @@ def _int(txt):
     return int(_num(txt))
 
 
+class _Textos:
+    """Listas de texto que SO CRESCEM, compartilhadas pelos registros compactos.
+
+    Mesma regra de `coletar_categorias`: os meses que nao forem recoletados
+    guardam indices para estas listas, e reordena-las trocaria em silencio o
+    texto de cada registro antigo. Aqui vale para cancelamentos e IDF.
+    """
+
+    def __init__(self, anterior):
+        self.listas = {k: list(v) for k, v in (anterior or {}).items()}
+        self._idx = {k: {t: i for i, t in enumerate(v)} for k, v in self.listas.items()}
+
+    def pos(self, lista, texto):
+        """Indice do texto. -1 = vazio."""
+        texto = _limpa(str(texto)) if texto not in (None, "") else ""
+        if not texto:
+            return -1
+        idx = self._idx.setdefault(lista, {})
+        if texto not in idx:
+            vals = self.listas.setdefault(lista, [])
+            idx[texto] = len(vals)
+            vals.append(texto)
+        return idx[texto]
+
+
 # ==========================================================================
 # 1. Categorias (AII) — operacional31
 # ==========================================================================
@@ -176,6 +202,30 @@ def _cat_do_select(td, n):
         return _normalizar(td.get_text(" ", strip=True))
     op = sel.find("option", selected=True)
     return _normalizar(op.get_text(strip=True)) if op else None
+
+
+def _cats_do_select(td, n):
+    """Cat 6 e MULTIPLA: `<select multiple>`, e um protocolo pode ter varias.
+
+    Medido em 08/2026, IQI: 25 de 144 linhas tinham Cat 6, uma delas com seis
+    valores ao mesmo tempo. Sao os ajustes feitos no Wi-Fi (BAND STEERING,
+    Atualizado Firmware, IPV6...). `_cat_do_select` pegaria so o primeiro
+    `option[selected]` e jogaria o resto fora em silencio.
+
+    Devolve lista (vazia quando nao ha), sem repetir valor — o cadastro tem
+    rotulos que o `_normalizar` junta, e dois deles no mesmo protocolo
+    contariam a mesma causa duas vezes.
+    """
+    sel = td.find("select", attrs={"name": re.compile(rf"^cat{n}-")})
+    if not sel:
+        v = _normalizar(td.get_text(" ", strip=True))
+        return [v] if v else []
+    saida = []
+    for op in sel.find_all("option", selected=True):
+        v = _normalizar(op.get_text(strip=True))
+        if v and v not in saida:
+            saida.append(v)
+    return saida
 
 
 def buscar_categorias(sessao, tipo, mes_iso, csrf):
@@ -252,15 +302,25 @@ def parse_categorias(html):
             i = idx.get(f"Categoria {n}")
             reg[f"cat{n}"] = (_cat_do_select(tds[i], n)
                               if i is not None and i < len(tds) else None)
+        i = idx.get("Categoria 6")
+        reg["cat6"] = _cats_do_select(tds[i], 6) if i is not None and i < len(tds) else []
         linhas.append(reg)
     return linhas
 
 
 # Ordem dos campos dentro de cada registro compacto. O front depende dela.
-CAMPOS = ("tecnico", "cat1", "cat2", "cat3", "cat4", "cat5", "cidade")
+#
+# `cat6` entrou em 29/09/2026 e fica no FIM de proposito: os meses que nao
+# forem recoletados continuam com registros de 7 posicoes, e um campo novo no
+# meio deslocaria `cidade` em todos eles. Registro sem a posicao 7 quer dizer
+# "Cat 6 nao coletada", que e diferente de `[]` ("coletada, nenhuma").
+#
+# `cat6` e o unico campo MULTIPLO: no registro ele e uma LISTA de indices.
+CAMPOS = ("tecnico", "cat1", "cat2", "cat3", "cat4", "cat5", "cidade", "cat6")
+MULTIPLOS = ("cat6",)
 # Nome da lista de textos de cada campo, dentro do payload.
 LISTAS = {"tecnico": "tec", "cat1": "c1", "cat2": "c2", "cat3": "c3",
-          "cat4": "c4", "cat5": "c5", "cidade": "cid"}
+          "cat4": "c4", "cat5": "c5", "cidade": "cid", "cat6": "c6"}
 
 
 def coletar_categorias(sessao, meses, anterior=None):
@@ -291,13 +351,16 @@ def coletar_categorias(sessao, meses, anterior=None):
         for mes in meses:
             log(f"  categorias {rotulo} {mes}…")
             linhas = parse_categorias(buscar_categorias(sessao, tipo, mes, csrf))
-            bloco[mes] = [[pos(c, reg.get(c)) for c in CAMPOS] for reg in linhas]
+            bloco[mes] = [[[pos(c, v) for v in reg.get(c) or []] if c in MULTIPLOS
+                           else pos(c, reg.get(c)) for c in CAMPOS]
+                          for reg in linhas]
             log(f"    -> {len(linhas)} reincidencias")
         payload[rotulo] = bloco
 
     for campo, nome in LISTAS.items():
         payload[nome] = listas[campo]
     payload["campos"] = list(CAMPOS)
+    payload["multiplos"] = list(MULTIPLOS)
     payload["meses"] = sorted(set(payload.get("IQI", {})) | set(payload.get("IQM", {})))
     payload["atualizado_em"] = _agora().isoformat()
     return payload
@@ -328,8 +391,10 @@ GRUPO_TECNICO = "PROBLEMA TECNICO"
 
 def coletar_cancelamentos(sessao, meses, anterior=None):
     csrf, _ = _csrf(sessao, "/relatorios/indicadores13")
+    csrf19, _ = _csrf(sessao, "/relatorios/operacional19")
     payload = dict(anterior or {})
     blocos = dict(payload.get("meses_dados") or {})
+    textos = _Textos(payload.get("textos"))
     for mes in meses:
         ini, fim = _limites_do_mes(mes)
         log(f"  cancelamentos {mes} ({ini} a {fim})…")
@@ -344,12 +409,21 @@ def coletar_cancelamentos(sessao, meses, anterior=None):
             timeout=300,
         )
         r.raise_for_status()
-        blocos[mes] = parse_cancelamentos(_html_de_envelope(r.text))
+        html = _html_de_envelope(r.text)
+        blocos[mes] = parse_cancelamentos(html)
         blocos[mes]["motivos_tecnicos"] = _motivos_do_grupo_tecnico(
             sessao, csrf, ini, fim)
+        blocos[mes]["contratos"] = contratos_do_pivot(html, textos)
+        blocos[mes]["ultimo_atendimento"] = ultimo_atendimento(
+            sessao, csrf19, ini, fim, textos)
         log(f"    -> {blocos[mes]['total']} cancelamentos validos, "
-            f"{blocos[mes]['tecnico']} tecnicos")
+            f"{blocos[mes]['tecnico']} tecnicos, "
+            f"{len(blocos[mes]['contratos'])} contratos no detalhe, "
+            f"{len(blocos[mes]['ultimo_atendimento'])} com ultima OS")
     payload["meses_dados"] = blocos
+    payload["textos"] = textos.listas
+    payload["campos_contrato"] = list(CAMPOS_CONTRATO)
+    payload["campos_ultimo"] = list(CAMPOS_ULTIMO)
     payload["meses"] = sorted(blocos)
     payload["grupo_tecnico"] = GRUPO_TECNICO
     payload["atualizado_em"] = _agora().isoformat()
@@ -433,6 +507,126 @@ def parse_cancelamentos(html):
     saida["tecnico"] = (grupos.get(GRUPO_TECNICO) or {}).get("qtd", 0)
     saida["valor_tecnico"] = (grupos.get(GRUPO_TECNICO) or {}).get("valor", 0.0)
     return saida
+
+
+# Cabecalho do pivot -> (campo, lista de texto). Casa-se pelo NOME: a ordem
+# das colunas da tabela dinamica nao e contrato, e o relatorio ja mostrou
+# largura variavel nas abas agregadas (ver `parse_cancelamentos`).
+#
+# Servicos e Faixa de ticket ficam de fora de proposito: servicos e uma lista
+# por contrato (o pacote de SVA inteiro) e a faixa de ticket saiu da tela.
+_PIVOT_CANCELAMENTO = {
+    "Cidades": ("cidade", "cidade"), "Bairros": ("bairro", "bairro"),
+    "Motivos": ("motivo", "motivo"), "Motivos (Grupo)": ("grupo", "grupo"),
+    "Usuarios": ("usuario", "usuario"),
+    "Tempo de casa": ("casa", "casa"), "Tempo de contrato": ("tempo_contrato", "tempo_contrato"),
+}
+CAMPOS_CONTRATO = ("contrato", "cidade", "bairro", "motivo", "grupo", "usuario",
+                   "dia", "casa", "tempo_contrato")
+
+
+def contratos_do_pivot(html, textos):
+    """Um registro por contrato cancelado, lido da TABELA DINAMICA do IGC.
+
+    O relatorio publica as abas ja agregadas (cidade, motivo, tempo de casa...)
+    e, no mesmo HTML, o `pivotUI([...])` da aba "Tabela dinamica" com o
+    contrato a contrato. As abas bastavam enquanto a tela so mostrava o total;
+    para filtrar por motivo E recontar cidade, ou cruzar com o tecnico da
+    ultima OS (que vem de outro relatorio, pelo numero do contrato), e preciso
+    o registro. Medido em 08/2026: 64 contratos no grupo tecnico, os mesmos 64
+    da aba "Motivo (Grupo)".
+
+    Registro: [contrato, cidade, bairro, motivo, grupo, usuario, dia, casa,
+    tempo_contrato] — texto como indice em `textos`, `dia` como inteiro.
+    Sem o pivot (layout mudou), devolve [] e a tela cai no agregado.
+    """
+    i = html.find("pivotUI(")
+    j = html.find("[", i) if i >= 0 else -1
+    if j < 0:
+        return []
+    try:
+        linhas, _ = json.JSONDecoder().raw_decode(html[j:])
+    except json.JSONDecodeError:
+        return []
+    if not linhas or not isinstance(linhas[0], list):
+        return []
+    cab = {nome: k for k, nome in enumerate(linhas[0])}
+    if "Contrato" not in cab:
+        return []
+    saida = []
+    for lin in linhas[1:]:
+        reg = {"contrato": lin[cab["Contrato"]]}
+        for nome, (campo, lista) in _PIVOT_CANCELAMENTO.items():
+            reg[campo] = textos.pos(lista, lin[cab[nome]]) if nome in cab else -1
+        dia = str(lin[cab["Dia"]]) if "Dia" in cab else ""
+        m = re.match(r"(\d{2})/", dia)
+        reg["dia"] = int(m.group(1)) if m else 0
+        saida.append([reg[c] for c in CAMPOS_CONTRATO])
+    return saida
+
+
+CAMPOS_ULTIMO = ("contrato", "os", "tecnico", "dia", "qtd_os", "cat1", "cat2", "cat3")
+
+
+def ultimo_atendimento(sessao, csrf, ini, fim, textos):
+    """Tecnico da ULTIMA OS antes do cancelamento — operacional19 (CMT).
+
+    O relatorio lista, por contrato cancelado por motivo tecnico, todas as OS
+    que ele teve e o tecnico de cada uma. O ultimo atendimento e a OS de MAIOR
+    NUMERO: o WVSA numera na ordem de abertura (conferido em 29/09/2026, a
+    `#579421` foi aberta em 11/08 e o contrato cancelou em 20/08).
+
+    ⚠️ Cobre SO o grupo PROBLEMA TECNICO, e so quem teve OS. Os "SEM
+    HISTORICO" nao aparecem — por definicao nao ha tecnico a apontar. Em
+    08/2026: 45 dos 64 contratos tecnicos.
+
+    A coluna "Usuario" do relatorio e o ATENDENTE que registrou o
+    cancelamento, nao o cliente. A chave do cruzamento com o IGC e o contrato
+    do link `/atendimento/<n>` (45 de 45 casaram em 08/2026).
+
+    As datas deste relatorio sao DD/MM/AAAA; as do indicadores13, ISO.
+    """
+    di, df = (date.fromisoformat(x).strftime("%d/%m/%Y") for x in (ini, fim))
+    r = sessao.post(
+        sessao.base + "/relatorios/operacional19/dados",
+        data={"_token": csrf, "inicio": di, "fim": df},
+        headers=_cabecalhos(csrf, sessao.base + "/relatorios/operacional19"),
+        timeout=300,
+    )
+    r.raise_for_status()
+    return parse_ultimo_atendimento(_html_de_envelope(r.text), textos)
+
+
+def parse_ultimo_atendimento(html, textos):
+    soup = BeautifulSoup(html, "lxml")
+    tabela = soup.find("table", id="lista-cancelamentos")
+    if not tabela:
+        return []
+    cabec = _cabecalho(tabela)
+    idx = {n: i for i, n in enumerate(cabec)}
+    i_tec = idx.get("Técnicos", idx.get("Tecnicos"))
+    i_dia = idx.get("Data de Cancelamento")
+    por_contrato = {}
+    for tr in tabela.select("tbody tr"):
+        tds = tr.find_all("td")
+        m_c = re.search(r"/atendimento/(\d+)", str(tds[0])) if tds else None
+        m_o = re.search(r"/os/(\d+)", str(tds[idx.get("OSs", 3)])) if len(tds) > 3 else None
+        if not m_c or not m_o:
+            continue
+        contrato, os_n = int(m_c.group(1)), int(m_o.group(1))
+        cel = lambda i: _limpa(tds[i].get_text(" ", strip=True)) if i is not None and i < len(tds) else ""
+        atual = por_contrato.get(contrato)
+        qtd = (atual[4] if atual else 0) + 1
+        if atual and atual[1] > os_n:
+            atual[4] = qtd
+            continue
+        dia = re.match(r"(\d{2})/", cel(i_dia))
+        por_contrato[contrato] = [
+            contrato, os_n, textos.pos("tecnico", cel(i_tec)),
+            int(dia.group(1)) if dia else 0, qtd,
+            *(textos.pos(f"os_c{n}", cel(idx.get(f"CAT{n}"))) for n in (1, 2, 3)),
+        ]
+    return sorted(por_contrato.values())
 
 
 def _limites_do_mes(mes_iso):
@@ -539,10 +733,11 @@ class IdfVazio(RuntimeError):
     """O IDF voltou zerado — quase sempre e a sessao errada, nao o mes fraco."""
 
 
-def coletar_idf(sessao, meses, anterior=None):
+def coletar_idf(sessao, meses, anterior=None, detalhar=True):
     csrf, _ = _csrf(sessao, "/relatorios/indicadores9")
     payload = dict(anterior or {})
     blocos = dict(payload.get("meses_dados") or {})
+    textos = _Textos(payload.get("textos"))
     for mes in meses:
         ini, fim = _limites_do_mes(mes)
         log(f"  IDF {mes} ({ini} a {fim})…")
@@ -554,11 +749,26 @@ def coletar_idf(sessao, meses, anterior=None):
             timeout=300,
         )
         r.raise_for_status()
+        antigo = blocos.get(mes) or {}
         blocos[mes] = parse_idf(_html_de_actions(r.text))
+        blocos[mes].update(idf_detalhado(sessao, csrf, ini, fim, textos, detalhar))
+        if not detalhar:
+            # O drill por setor/cidade e o que pesa (~45 chamadas de ~5 s por
+            # mes, medido em 29/09/2026: 4 min para 08/2026). Fora da rodada
+            # diaria, fica o da ultima vez — setor de atendente e cidade do
+            # mes mudam devagar; a lista de feedbacks, nao.
+            for k in ("setor_de", "cidade", "detalhado_em"):
+                if k in antigo:
+                    blocos[mes][k] = antigo[k]
         log(f"    -> ligacoes {blocos[mes]['ligacoes']['n']}, "
-            f"chats {blocos[mes]['chats']['n']}, OS {blocos[mes]['os']['n']}")
+            f"chats {blocos[mes]['chats']['n']}, OS {blocos[mes]['os']['n']} "
+            f"| feedbacks lidos: " + ", ".join(
+                f"{c} {len(v)}" for c, v in blocos[mes]["feedbacks"].items()))
     conferir_idf_vazio(blocos, meses, anterior)
     payload["meses_dados"] = blocos
+    payload["textos"] = textos.listas
+    payload["campos_feedback"] = list(CAMPOS_FEEDBACK)
+    payload["campos_alerta"] = list(CAMPOS_ALERTA)
     payload["meses"] = sorted(blocos)
     payload["atualizado_em"] = _agora().isoformat()
     return payload
@@ -583,6 +793,148 @@ def parse_idf(html):
             if pai.startswith(rotulo):
                 saida[canal]["n"] = _int(badge.get_text(strip=True))
     return saida
+
+
+# Nome do canal na URL da lista e no TIPO do detalhe. Nao ha padrao no WVSA.
+_IDF_CANAIS = {"ligacoes": "LIGACOES", "chats": "CHATS", "os": "OS"}
+
+# Em que canal cada recorte EXISTE. Medido em 29/09/2026, 08/2026:
+#   * ligacao por cidade devolve um grupo so, "Indefinido" (224 de 224) — o
+#     telefone nao sabe de onde o cliente e;
+#   * o "setor" das OS e a EMPRESA do tecnico (razao social), nao um setor do
+#     atendimento — e a empresa ja vem no rotulo "EMPRESA - Nome".
+# Pedir o que nao existe gastaria chamadas para gravar um recorte que mente.
+_IDF_SETOR_EM = ("ligacoes", "chats")
+_IDF_CIDADE_EM = ("chats", "os")
+
+# Observacao so e guardada ate esta nota. Ela e texto livre do CLIENTE e so
+# interessa a lista de alerta; guardar a de todo feedback levaria para o
+# banco centenas de comentarios que ninguem vai ler. Fica em 3 (e nao "< 3")
+# para o limiar do alerta, que e configuravel na tela, poder subir para 4.
+IDF_OBS_ATE = 3
+
+CAMPOS_FEEDBACK = ("dia", "pessoa", "nota", "resolvido")
+CAMPOS_ALERTA = ("canal", "dia", "pessoa", "nota", "obs", "os")
+
+
+def idf_detalhado(sessao, csrf, ini, fim, textos, detalhar=True):
+    """O que o painel do IDF nao mostra agregado: quem, onde e com qual nota.
+
+    Tres pecas, porque nenhum endpoint entrega as tres juntas:
+
+      * `lista/{canal}` — um registro por feedback (data, atendente ou
+        tecnico, nota, resolvido). NAO traz setor nem cidade;
+      * `detalhes` com `AGRUPAR_POR=setor` — setor -> atendentes. E o
+        "subsetor" da tela ("SUPORTE TECNICO (N1)" e cia.);
+      * `detalhes` com `AGRUPAR_POR=cidade` — cidade -> atendentes, com
+        quantidade e media. Vira um cubo (cidade, pessoa, qtd, media),
+        porque a lista nao diz a cidade de cada feedback e nao ha como
+        atribuir um a um sem inventar.
+
+    Nada de nome ou telefone de cliente: a coluna "Atendimento" da lista e
+    ignorada. O numero da OS fica (so no alerta), porque e por ele que se
+    abre a OS no WVSA.
+    """
+    saida = {"feedbacks": {}, "alertas": []}
+    if detalhar:
+        saida.update({"setor_de": {}, "cidade": {}, "detalhado_em": _agora().isoformat()})
+    base = {"INICIO": f"{ini} 00:00:00", "FIM": f"{fim} 23:59:59"}
+    for canal, tipo in _IDF_CANAIS.items():
+        html = _post_idf(sessao, csrf, f"/relatorios/indicadores9/lista/{canal}",
+                         {**base, "AGRUPAR_POR": "setor"})
+        regs, alertas = parse_idf_lista(html, canal, textos)
+        saida["feedbacks"][canal] = regs
+        saida["alertas"] += alertas
+        if not detalhar:
+            continue
+        if canal in _IDF_SETOR_EM:
+            saida["setor_de"][canal] = [
+                [textos.pos("pessoa", p), textos.pos("setor", g)]
+                for g, p, _q, _m in _idf_por_grupo(sessao, csrf, base, tipo, "setor")]
+        if canal in _IDF_CIDADE_EM:
+            saida["cidade"][canal] = [
+                [textos.pos("cidade", g), textos.pos("pessoa", p), q, m]
+                for g, p, q, m in _idf_por_grupo(sessao, csrf, base, tipo, "cidade")]
+    return saida
+
+
+def _post_idf(sessao, csrf, caminho, dados):
+    r = sessao.post(sessao.base + caminho, data={"_token": csrf, **dados},
+                    headers=_cabecalhos(csrf, sessao.base + "/relatorios/indicadores9"),
+                    timeout=300)
+    r.raise_for_status()
+    return _html_de_actions(r.text)
+
+
+def _idf_por_grupo(sessao, csrf, base, tipo, agrupar):
+    """[(grupo, pessoa, qtd, media)] — o drill de dois niveis do painel.
+
+    Primeiro nivel: os grupos (`data-u-setor`, que carrega a cidade quando o
+    agrupamento e por cidade — o atributo nao muda de nome). Segundo: a tabela
+    Usuario / Quantidade / Media de cada grupo. Uma chamada por grupo, com
+    pausa entre elas: o WVSA falha calado quando apertado (ver o autocomplete
+    de bairro no CLAUDE.md), e aqui a falha seria um grupo a menos.
+    """
+    html = _post_idf(sessao, csrf, "/relatorios/indicadores9/detalhes",
+                     {**base, "AGRUPAR_POR": agrupar, "TIPO": f"{tipo}_NOTAS_POR_SETOR"})
+    grupos = [d.get("data-u-setor") for d in
+              BeautifulSoup(html, "lxml").select("[data-u-setor]") if d.get("data-u-setor")]
+    saida = []
+    for g in grupos:
+        time.sleep(0.4)
+        h = _post_idf(sessao, csrf, "/relatorios/indicadores9/detalhes",
+                      {**base, "AGRUPAR_POR": agrupar, "SETOR": g,
+                       "TIPO": f"{tipo}_NOTAS_POR_USUARIO"})
+        tabela = BeautifulSoup(h, "lxml").find("table")
+        if not tabela:
+            continue
+        for tr in tabela.select("tbody tr"):
+            c = _celulas(tr)
+            if len(c) >= 3 and c[0]:
+                saida.append((g, c[0], _int(c[1]), _nota(c[2])))
+    return saida
+
+
+def _nota(txt):
+    """Media do WVSA vem com PONTO decimal ("4.33"), ao contrario de `_num`."""
+    try:
+        return round(float((txt or "").strip().replace(",", ".")), 2)
+    except ValueError:
+        return None
+
+
+def parse_idf_lista(html, canal, textos):
+    """Registros [dia, pessoa, nota, resolvido] e os alertas do canal.
+
+    As tres listas tem colunas diferentes (ligacao traz gravacao, chat traz
+    observacao, OS traz o tecnico e "Internet funcionando?"), entao tudo e
+    casado pelo cabecalho. `resolvido`: 1 sim, 0 nao, -1 sem resposta.
+    """
+    tabela = BeautifulSoup(html, "lxml").find("table")
+    if not tabela:
+        return [], []
+    cab = _cabecalho(tabela)
+    idx = {n: i for i, n in enumerate(cab)}
+    i_pes = idx.get("Técnico", idx.get("Usuário"))
+    i_res = idx.get("Internet funcionando?", idx.get("Solicitação Atendida?"))
+    i_nota, i_obs, i_os = idx.get("Nota"), idx.get("Observações"), idx.get("OS")
+    regs, alertas = [], []
+    for tr in tabela.select("tbody tr"):
+        c = _celulas(tr)
+        if len(c) < len(cab) - 2:
+            continue
+        m = re.match(r"(\d{2})/", c[1] if len(c) > 1 else "")
+        dia = int(m.group(1)) if m else 0
+        pessoa = textos.pos("pessoa", c[i_pes]) if i_pes is not None else -1
+        nota = _int(c[i_nota]) if i_nota is not None and c[i_nota].strip() else None
+        res = (c[i_res] if i_res is not None else "").strip().lower()
+        regs.append([dia, pessoa, nota, 1 if res == "sim" else 0 if res.startswith("n") else -1])
+        if nota is not None and nota <= IDF_OBS_ATE:
+            m_os = re.search(r"OS\s*(\d+)", c[i_os]) if i_os is not None else None
+            alertas.append([canal, dia, pessoa, nota,
+                            c[i_obs][:400] if i_obs is not None else "",
+                            int(m_os.group(1)) if m_os else None])
+    return regs, alertas
 
 
 def conferir_idf_vazio(blocos, meses, anterior):
@@ -697,6 +1049,179 @@ def parse_salas(html):
     saida["por_status"] = dict(status.most_common())
     saida["cabecalho"] = cabec
     return saida
+
+
+# ==========================================================================
+# 6. Atendimento por chat (TMA / TMF) — indicadores14, RRO (sessao GESTOR)
+# ==========================================================================
+# O WVSA nao publica TMA nem TMF com esses nomes em relatorio nenhum (conferido
+# em 29/09/2026: ITA, ligacoes6, Ranking N1 e MRP nao tem). O RRO traz uma
+# linha por conversa do Rocketchat, e as duas medidas saem dela:
+#
+#   TMA = "Ultima mensagem" - "Iniciado em", so conversa FECHADA com atendente
+#         humano (aberta ainda nao tem fim; a do bot nao e atendimento);
+#   TMF = a PRIMEIRA entrada de "Tempos de resposta" cujo autor nao e o bot —
+#         quanto o cliente esperou ate uma pessoa responder.
+#
+# Pesa ~1,8 MB por DIA (900 conversas), entao o coletor agrega aqui e so as
+# somas sobem. Nenhum nome de cliente sai daqui.
+#
+# ⚠️ O relatorio devolve SEMPRE as conversas em aberto, qualquer que seja o
+# periodo pedido: consultando so 01/09, vieram 872 de 01/09 e mais 69 abertas
+# de 28-29/09. O corte e refeito por "Iniciado em", e a sala (id do link)
+# deduplica entre janelas.
+_BOTS = ("assistente-virtual", "botpress")
+_UNIDADES = {"dia": 86400, "hora": 3600, "minuto": 60, "segundo": 1}
+
+
+def _eh_bot(nome):
+    n = (nome or "").strip().lower()
+    return not n or any(n.startswith(b) for b in _BOTS)
+
+
+def _segundos(txt):
+    """"1 hora 3 minutos 5 segundos" -> 3785. Nada reconhecivel -> None.
+
+    Le o TEXTO, nao o `data-order` da celula: em 29/09/2026 uma conversa com
+    "30 minutos 19 segundos" (1819 s) trazia data-order=654394, que nao e
+    segundos, nem milissegundos da mesma resposta.
+    """
+    total, achou = 0, False
+    for n, u in re.findall(r"(\d+)\s*(dia|hora|minuto|segundo)s?", txt or ""):
+        total += int(n) * _UNIDADES[u]
+        achou = True
+    return total if achou else None
+
+
+def _primeira_resposta_humana(td):
+    """Segundos ate a 1a resposta de uma pessoa, lidos da celula.
+
+    A celula empilha uma entrada por resposta, separadas por <br>, cada uma
+    "<tempo> (<autor>)". A ordem e a das mensagens, nao a do tempo — por isso
+    e a PRIMEIRA humana, e nao a menor.
+    """
+    for trecho in td.get_text("\n").split("\n"):
+        m = re.match(r"\s*(.+?)\s*\(([^)]*)\)\s*$", trecho)
+        if m and not _eh_bot(m.group(2)):
+            return _segundos(m.group(1))
+    return None
+
+
+def _dt(txt):
+    try:
+        return datetime.strptime(_limpa(txt)[:19], "%d/%m/%Y %H:%M:%S")
+    except ValueError:
+        return None
+
+
+def parse_rro(html, mes):
+    """{sala: (departamento, atendente, tma_s|None, tmf_s|None)} do mes pedido."""
+    soup = BeautifulSoup(html, "lxml")
+    tabela = soup.find("table")
+    if not tabela:
+        return {}
+    idx = {n: i for i, n in enumerate(_cabecalho(tabela))}
+    i_dep, i_at = idx.get("Departamento"), idx.get("Atendido por")
+    i_ini, i_fim = idx.get("Iniciado em"), idx.get("Última mensagem")
+    i_sit, i_tr = idx.get("Situação"), idx.get("Tempos de resposta")
+    if None in (i_dep, i_at, i_ini, i_fim, i_sit, i_tr):
+        return {}
+    ano, mm = (int(x) for x in mes.split("-"))
+    saida = {}
+    for tr in tabela.select("tbody tr"):
+        tds = tr.find_all("td")
+        if len(tds) <= max(i_dep, i_at, i_ini, i_fim, i_sit, i_tr):
+            continue
+        ini = _dt(tds[i_ini].get_text(" ", strip=True))
+        if not ini or (ini.year, ini.month) != (ano, mm):
+            continue
+        link = tr.find("a", href=re.compile(r"/live/"))
+        m = re.search(r"/live/([A-Za-z0-9]+)", link["href"]) if link else None
+        sala = m.group(1) if m else f"{ini:%Y%m%d%H%M%S}-{len(saida)}"
+        atendente = _limpa(tds[i_at].get_text(" ", strip=True))
+        humano = not _eh_bot(atendente)
+        tma = None
+        if humano and _limpa(tds[i_sit].get_text()).lower().startswith("fechad"):
+            fim = _dt(tds[i_fim].get_text(" ", strip=True))
+            if fim and fim >= ini:
+                tma = int((fim - ini).total_seconds())
+        saida[sala] = (_limpa(tds[i_dep].get_text(" ", strip=True)),
+                       atendente if humano else "",
+                       tma, _primeira_resposta_humana(tds[i_tr]) if humano else None)
+    return saida
+
+
+CAMPOS_ATENDIMENTO = ("departamento", "atendente", "conversas", "n_tma", "soma_tma",
+                      "n_tmf", "soma_tmf", "faixas_tma", "faixas_tmf")
+
+# Limites (em MINUTOS) das faixas de distribuicao. Existem porque a MEDIA do
+# TMA mente: medido na semana de 22 a 28/09/2026, media de 167 min contra
+# mediana de 64 min — conversa que o cliente deixa aberta ate o dia seguinte
+# puxa a media para cima sozinha. Mediana nao se soma entre atendentes nem
+# entre semanas; contagem por faixa, sim, e dela sai a mediana aproximada de
+# qualquer recorte. Ultima faixa = acima do ultimo limite.
+FAIXAS_MIN = (1, 2, 5, 10, 15, 30, 60, 120, 240, 480, 1440)
+
+
+def _faixa(seg):
+    m = seg / 60
+    for i, lim in enumerate(FAIXAS_MIN):
+        if m <= lim:
+            return i
+    return len(FAIXAS_MIN)
+
+
+def coletar_atendimento(sessao, meses, anterior=None):
+    """Somas de TMA/TMF por (mes, departamento, atendente).
+
+    Janelas de 7 dias: um mes inteiro de uma vez seriam ~50 MB numa resposta
+    so. Registro: [departamento, atendente, conversas, n_tma, soma_tma_s,
+    n_tmf, soma_tmf_s] — a media e soma / n, feita na tela, para que filtrar
+    por departamento ou atendente some as partes em vez de fazer media de
+    media.
+    """
+    csrf, _ = _csrf(sessao, "/relatorios/indicadores14")
+    payload = dict(anterior or {})
+    blocos = dict(payload.get("meses_dados") or {})
+    for mes in meses:
+        ini, fim = (date.fromisoformat(x) for x in _limites_do_mes(mes))
+        salas, cur = {}, ini
+        while cur <= fim:
+            ate = min(cur + timedelta(days=6), fim)
+            log(f"  atendimento (RRO) {cur:%d/%m} a {ate:%d/%m}…")
+            r = sessao.post(
+                sessao.base + "/relatorios/indicadores14/dados",
+                data={"_token": csrf, "inicio": f"{cur:%d/%m/%Y}", "fim": f"{ate:%d/%m/%Y}",
+                      "nome": "", "atendido_por": "", "departament_id": "", "open": "",
+                      "resolvidoBot": "", "encaminhado_de": "", "encaminhado_para": ""},
+                headers=_cabecalhos(csrf, sessao.base + "/relatorios/indicadores14"),
+                timeout=600,
+            )
+            r.raise_for_status()
+            salas.update(parse_rro(_html_de_envelope(r.text), mes))
+            cur = ate + timedelta(days=1)
+        agg = {}
+        for dep, at, tma, tmf in salas.values():
+            n_f = len(FAIXAS_MIN) + 1
+            a = agg.setdefault((dep, at), [dep, at, 0, 0, 0, 0, 0, [0] * n_f, [0] * n_f])
+            a[2] += 1
+            if tma is not None:
+                a[3] += 1
+                a[4] += tma
+                a[7][_faixa(tma)] += 1
+            if tmf is not None:
+                a[5] += 1
+                a[6] += tmf
+                a[8][_faixa(tmf)] += 1
+        blocos[mes] = {"linhas": sorted(agg.values(), key=lambda x: (x[0], x[1])),
+                       "conversas": len(salas)}
+        log(f"    -> {len(salas)} conversas, {len(agg)} pares departamento/atendente")
+    payload["meses_dados"] = blocos
+    payload["meses"] = sorted(blocos)
+    payload["campos"] = list(CAMPOS_ATENDIMENTO)
+    payload["faixas_min"] = list(FAIXAS_MIN)
+    payload["atualizado_em"] = _agora().isoformat()
+    return payload
 
 
 # ==========================================================================

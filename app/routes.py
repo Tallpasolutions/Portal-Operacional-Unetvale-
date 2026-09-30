@@ -73,7 +73,9 @@ def dashboard():
     cancelamento — que é justamente a relação que interessa.
     """
     return render_template("dashboard.html", ativo="dashboard",
-                           pacote=gerencial.pacote())
+                           pacote=gerencial.pacote(),
+                           supervisores=_supervisores_para_filtro(usuario_atual()),
+                           apelidos_empresa=supervisores.APELIDOS_EMPRESA)
 
 
 @bp.route("/produtividade")
@@ -106,32 +108,6 @@ def produtividade():
                            apelidos_empresa=supervisores.APELIDOS_EMPRESA)
 
 
-def _agrupar_empresa(rotulo):
-    """Reescreve só a empresa do rótulo "EMPRESA - Nome"; o nome é preservado.
-
-    O mapa de apelidos mora em `supervisores` porque o vínculo do supervisor
-    compara por ele. Duas cópias divergindo fariam o filtro perder técnicos
-    sem erro nenhum na tela.
-    """
-    i = rotulo.find(" - ")
-    if i < 0:
-        return rotulo
-    empresa, nome = rotulo[:i].strip(), rotulo[i + 3:]
-    return f"{supervisores.APELIDOS_EMPRESA.get(empresa.upper(), empresa)} - {nome}"
-
-
-def _so_operacional(payload):
-    if not payload or "tecnicos" not in payload:
-        return payload
-    p = dict(payload)
-    p["tecnicos"] = [
-        {**t, "nome": _agrupar_empresa(t.get("nome", ""))}
-        for t in payload["tecnicos"]
-        if not supervisores.eh_infra(t.get("nome", ""))
-    ]
-    return p
-
-
 @bp.route("/iqi")
 @login_obrigatorio
 @modulo_obrigatorio("iqi")
@@ -140,9 +116,9 @@ def iqi():
     iqm_row = dados.get_modulo("iqm")
     pacote = {}
     if iqi_row and iqi_row.get("payload"):
-        pacote["IQI"] = _so_operacional(iqi_row["payload"])
+        pacote["IQI"] = supervisores.so_operacional(iqi_row["payload"])
     if iqm_row and iqm_row.get("payload"):
-        pacote["IQM"] = _so_operacional(iqm_row["payload"])
+        pacote["IQM"] = supervisores.so_operacional(iqm_row["payload"])
     return render_template("iqi.html", ativo="iqi", pacote=pacote,
                            causa_raiz=gerencial.causa_raiz(),
                            meta=_meta(iqi_row or iqm_row),

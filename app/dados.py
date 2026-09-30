@@ -29,7 +29,7 @@ MIN_DT = datetime.min.replace(tzinfo=timezone.utc)
 # coleta do Dashboard que falhe precisa aparecer no mesmo lugar.
 MODULOS = ("produtividade", "iqi", "iqm", "massivas",
            "ger_categorias", "ger_cancelamentos", "ger_esteira",
-           "ger_idf", "ger_salas")
+           "ger_idf", "ger_salas", "ger_atendimento")
 NOMES = {
     "produtividade": "Produtividade", "iqi": "IQI", "iqm": "IQM",
     "massivas": "Massivas",
@@ -38,7 +38,27 @@ NOMES = {
     "ger_esteira": "Dashboard · Esteira",
     "ger_idf": "Dashboard · IDF",
     "ger_salas": "Dashboard · Salas",
+    "ger_atendimento": "Dashboard · TMA/TMF (chat)",
 }
+
+
+# Módulos que o coletor roda UMA vez por dia, e não a cada rodada da grade
+# (ver `coletar_ger_atendimento` no enviar.py: o RRO pesa dezenas de MB por
+# mês). Duas consequências, as duas aqui:
+#   * o limiar de "desatualizado" é de dia, não das 3 h da grade;
+#   * numa rodada em que ele já tinha saído hoje, ele NÃO é esperado. O
+#     progresso conta carimbos novos, e sem isto o botão ficaria em "9/10" a
+#     rodada inteira e o card ficaria "Na fila" por algo que não vai rodar.
+#     (Quem encerra a rodada é o log `geral`, não o contador.)
+CADENCIA_DIARIA = {"ger_atendimento"}
+LIMITE_DESATUALIZADO_MIN = {m: 26 * 60 for m in CADENCIA_DIARIA}
+
+
+def _ja_saiu_hoje(modulo, dt, inicio):
+    """Módulo diário que já coletou hoje, antes desta rodada — não é esperado nela."""
+    return (modulo in CADENCIA_DIARIA and dt is not None and inicio is not None
+            and dt < inicio
+            and dt.astimezone(BR_TZ).date() == inicio.astimezone(BR_TZ).date())
 
 
 def _idade_texto(minutos):
@@ -144,10 +164,12 @@ def resumo_modulos(rodada=None):
         dt = _parse_dt(row.get("atualizado_em")) if row else None
         idade = int((agora - dt).total_seconds() // 60) if dt else None
         status = (row or {}).get("status") or "sem_dados"
-        desatualizado = idade is not None and idade > 180  # esperado a cada 2h (08–18h)
+        # Esperado a cada 2h (08–18h); os de cadência diária, uma vez por dia.
+        desatualizado = idade is not None and idade > LIMITE_DESATUALIZADO_MIN.get(m, 180)
         # Na fila: a rodada começou e este módulo ainda não foi gravado. Não
         # está atrasado, está esperando — e por isso não leva selo de alerta.
-        na_fila = bool(inicio and (dt is None or dt < inicio))
+        na_fila = bool(inicio and (dt is None or dt < inicio)
+                       and not _ja_saiu_hoje(m, dt, inicio))
         if na_fila:
             desatualizado = False
         out.append({
@@ -201,11 +223,14 @@ def rodada_em_andamento():
     # coleta do `iqi`). Contando log, o progresso pararia em 8/9 e nunca
     # fecharia. Contando carimbo, bate exatamente com os cards da tela — e sai
     # de graça, porque `get_todos()` é a mesma leitura que o resumo já faz.
-    concluidos = sum(1 for r in get_todos().values()
+    todos = get_todos()
+    concluidos = sum(1 for r in todos.values()
                      if (_parse_dt(r.get("atualizado_em")) or MIN_DT) >= dt)
+    pulados = sum(1 for m, r in todos.items()
+                  if _ja_saiu_hoje(m, _parse_dt(r.get("atualizado_em")), dt))
     return {"rodando": True, "inicio": dt,
             "inicio_br": dt.astimezone(BR_TZ).strftime("%H:%M"),
-            "concluidos": concluidos, "total": len(MODULOS), "aguardando": False}
+            "concluidos": concluidos, "total": len(MODULOS) - pulados, "aguardando": False}
 
 
 def heartbeat():

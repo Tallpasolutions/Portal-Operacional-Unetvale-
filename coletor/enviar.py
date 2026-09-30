@@ -6,7 +6,7 @@ Reaproveita os scripts originais SEM mudar a lógica de negócio:
   - extrator.py    -> Produtividade (mantém SQLite local p/ histórico incremental)
   - w8_client.py   -> IQI / IQM
   - fetch_wvsa.py  -> Massivas (model.json)
-  - gerencial.py   -> Dashboard (5 relatórios da visão gerencial)
+  - gerencial.py   -> Dashboard (6 relatórios da visão gerencial)
 
 Cada módulo vira um upsert na tabela `dados_modulo` (modulo, payload, status).
 Agende com cron às 08/10/12/14/16/18h (ver README).
@@ -303,9 +303,62 @@ def coletar_ger_cancelamentos(full=False):
 
 
 def coletar_ger_idf(full=False):
+    """Painel + lista de feedbacks a cada rodada; drill por setor/cidade 1x/dia.
+
+    O drill custa ~4 min por mês (dezenas de chamadas lentas ao `detalhes`) e
+    dobraria a rodada. Sai na primeira rodada do dia, no `--full`, e sempre
+    que algum mês pedido ainda não tiver drill nenhum.
+    """
     import gerencial as g
+    anterior = supa_ler("ger_idf")
+    meses = _meses(full)
+    blocos = (anterior or {}).get("meses_dados") or {}
+    detalhar = full or any(
+        not _eh_de_hoje((blocos.get(m) or {}).get("detalhado_em")) for m in meses)
     supa_upsert("ger_idf", g.coletar_idf(
-        _sessao(gestor=True), _meses(full), anterior=supa_ler("ger_idf")))
+        _sessao(gestor=True), meses, anterior=anterior, detalhar=detalhar))
+
+
+def _eh_de_hoje(iso):
+    """O carimbo (ISO em UTC) é de hoje NO FUSO DE BRASÍLIA?
+
+    Comparar os 10 primeiros caracteres do ISO com `date.today()` erra depois
+    das 21h: o carimbo UTC já está no dia seguinte.
+    """
+    from datetime import timedelta
+    try:
+        dt = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    br = timezone(timedelta(hours=-3))
+    return dt.astimezone(br).date() == datetime.now(br).date()
+
+
+def coletar_ger_atendimento(full=False):
+    """TMA/TMF do chat (RRO). Roda UMA vez por dia, não a cada rodada.
+
+    O relatório pesa ~1,8 MB por dia de conversa: o mês corrente inteiro são
+    dezenas de MB, e refazer isso seis vezes por dia só trocaria o número das
+    últimas horas. Já coletado hoje → sai sem tocar em nada.
+
+    O mês anterior é refeito até o dia 5: conversa aberta no fim do mês só
+    ganha "Última mensagem" (e portanto TMA) quando fecha.
+    """
+    import gerencial as g
+    from datetime import timedelta
+    anterior = supa_ler("ger_atendimento")
+    hoje = date.today()
+    if not full and anterior and _eh_de_hoje(anterior.get("atualizado_em")):
+        log("  atendimento (RRO): já coletado hoje — pulado")
+        return "Já coletado hoje (cadência diária)"
+    if full:
+        meses = g.meses_do_backfill()
+    else:
+        meses = [f"{hoje:%Y-%m}"]
+        if hoje.day <= 5:
+            meses.insert(0, f"{hoje.replace(day=1) - timedelta(days=1):%Y-%m}")
+    supa_upsert("ger_atendimento", g.coletar_atendimento(
+        _sessao(gestor=True), meses, anterior=anterior))
 
 
 def coletar_ger_salas(full=False):
@@ -382,6 +435,7 @@ MODULOS = {
     "ger_esteira": coletar_ger_esteira,
     "ger_idf": coletar_ger_idf,
     "ger_salas": coletar_ger_salas,
+    "ger_atendimento": coletar_ger_atendimento,
 }
 
 
@@ -425,10 +479,12 @@ def main():
             if modulo == "produtividade" or modulo.startswith("ger_"):
                 # Estes aceitam `full`: para a Produtividade é recriar o SQLite,
                 # para os `ger_*` é o backfill dos 13 meses.
-                MODULOS[modulo](full=args.full)
+                msg = MODULOS[modulo](full=args.full)
             else:
-                MODULOS[modulo]()
-            log_evento(modulo, "ok", "Atualizado com sucesso")
+                msg = MODULOS[modulo]()
+            # Módulo que devolve texto não coletou de propósito (cadência
+            # própria) — o log diz isso, em vez de "Atualizado".
+            log_evento(modulo, "ok", msg if isinstance(msg, str) else "Atualizado com sucesso")
         except Exception as e:  # noqa
             falhas += 1
             log(f"FALHA em {modulo}: {e}")

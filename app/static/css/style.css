@@ -552,6 +552,30 @@ tr.clicavel{ cursor:pointer; }
 .rank-linha.topo .rl{ color:var(--ink-d); font-weight:700; }
 .rank-linha.topo .rf{ background:var(--danger); }
 .rank-linha.suave .rf{ background:var(--muted-l); }
+/* Cross-filter: a linha vira botão. A escolhida fica em destaque e as outras
+   esmaecem, em vez de sumir — sumir tiraria de vista onde clicar para trocar
+   de causa. */
+.rank-linha.clicavel{ cursor:pointer; border-radius:6px; margin:-2px -4px; padding:2px 4px; }
+.rank-linha.clicavel:hover{ background:var(--brand-l); }
+.rank-linha.selecionado{ background:var(--brand-l); }
+.rank-linha.selecionado .rl{ color:var(--brand-d); font-weight:700; }
+.rank-linha.selecionado .rf{ background:var(--brand-d); }
+.rank-linha.apagado{ opacity:.55; }
+
+/* Filtro global do Dashboard. Gruda sob a topbar só em tela larga: no celular
+   a barra quebra em três ou quatro linhas, e grudada comeria metade da tela. */
+.dash-filtro{ background:var(--branco); border:1px solid var(--borda-2); border-radius:10px;
+  padding:10px 12px; box-shadow:var(--sombra); }
+.dash-filtro .dropdown{ min-width:190px; }
+.dash-filtro .dropdown > .lista-marcar{ max-height:320px; min-width:260px; }
+.dash-filtro input[type=search]{ max-width:180px; }
+@media (min-width:900px){
+  .dash-filtro{ position:sticky; top:calc(var(--top-h) + 8px); z-index:15; }
+}
+/* Etiqueta dos blocos que o filtro não alcança — só aparece com filtro ativo. */
+.nao-recorta{ display:none; font-size:11.5px; font-weight:600; color:var(--muted);
+  background:var(--fundo); border-radius:20px; padding:2px 9px; margin-left:8px; vertical-align:middle; }
+.dash-filtrado .nao-recorta{ display:inline-block; }
 
 /* Par "mês fechado × mês corrente": dois blocos numa moldura só, porque o que
    se lê é a diferença entre eles, não cada um isolado. */

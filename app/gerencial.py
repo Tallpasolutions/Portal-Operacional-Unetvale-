@@ -15,7 +15,7 @@ from . import dados, supa, supervisores
 BR_TZ = timezone(timedelta(hours=-3))
 
 MODULOS = ("ger_categorias", "ger_cancelamentos", "ger_esteira",
-           "ger_idf", "ger_salas")
+           "ger_idf", "ger_salas", "ger_atendimento")
 
 # O CMT é este grupo de motivo de cancelamento. Mesma constante do coletor —
 # aqui ela serve só para encurtar o rótulo na tela.
@@ -23,9 +23,13 @@ GRUPO_TECNICO = "PROBLEMA TECNICO"
 
 # Ordem dos campos dentro do registro compacto de `ger_categorias`. Espelha
 # `CAMPOS` do coletor; o payload também carrega a lista, e é ela que vale.
+#
+# `cat6` é MÚLTIPLA (lista de índices no registro) e mora no fim: registro
+# antigo tem 7 posições e continua valendo. Ver `CAMPOS` em coletor/gerencial.py.
 CAMPOS_PADRAO = ("tecnico", "cat1", "cat2", "cat3", "cat4", "cat5", "cidade")
+MULTIPLOS_PADRAO = ("cat6",)
 LISTAS = {"tecnico": "tec", "cat1": "c1", "cat2": "c2", "cat3": "c3",
-          "cat4": "c4", "cat5": "c5", "cidade": "cid"}
+          "cat4": "c4", "cat5": "c5", "cidade": "cid", "cat6": "c6"}
 
 # Quantos meses o par "fechado × corrente" mostra, quando não há preferência.
 MESES_VISIVEIS_PADRAO = 2
@@ -229,7 +233,8 @@ def qualidade(mapa_metas, quantos=MESES_VISIVEIS_PADRAO):
     saida = {}
     for modulo, rotulo, chave in (("iqi", "IQI", "iqi"), ("iqm", "IQM", "iqm")):
         row = dados.get_modulo(modulo)
-        serie, fonte = _consolidado_mensal((row or {}).get("payload"))
+        bruto = (row or {}).get("payload") or {}
+        serie, fonte = _consolidado_mensal(bruto)
         visiveis = _ultimos(serie, quantos)
         for d in visiveis:
             # Pela data, não pela posição na lista: um mês fica parcial até 30
@@ -243,6 +248,13 @@ def qualidade(mapa_metas, quantos=MESES_VISIVEIS_PADRAO):
             "visiveis": visiveis,
             "fonte": fonte,
             "meta": (mapa_metas.get(chave) or {}).get("valor"),
+            # Para o filtro global: com empresa, supervisor ou técnico
+            # escolhido, o número deixa de ser o consolidado do WVSA e passa
+            # a ser a SOMA dos técnicos do recorte — o mesmo que o /iqi faz.
+            # Só operacional (sem infra), pela mesma função do /iqi.
+            "meses": bruto.get("meses") or [],
+            "minOS": bruto.get("minOS"),
+            "tecnicos": (supervisores.so_operacional(bruto) or {}).get("tecnicos") or [],
         }
     return saida
 
@@ -339,19 +351,29 @@ def agregar_categorias(cat, indicador, meses):
     a contagem é feita na hora — são poucos milhares de registros.
     """
     campos = cat.get("campos") or list(CAMPOS_PADRAO)
+    multiplos = set(cat.get("multiplos") or MULTIPLOS_PADRAO)
     pos = {c: i for i, c in enumerate(campos)}
     listas = {c: (cat.get(LISTAS.get(c, "")) or []) for c in campos}
     blocos = cat.get(indicador) or {}
 
     contas = {c: Counter() for c in campos}
     total = 0
+    # Quantos registros TÊM o campo. Para a Cat 6 isso separa "ninguém
+    # registrou ajuste" (coletada, lista vazia) de "mês coletado antes de a
+    # Cat 6 existir" (registro de 7 posições) — a tela diz coisas diferentes.
+    coletados = Counter()
     for mes in meses:
         for reg in blocos.get(mes) or []:
             total += 1
             for campo, i in pos.items():
-                if i < len(reg) and reg[i] >= 0 and reg[i] < len(listas[campo]):
-                    contas[campo][listas[campo][reg[i]]] += 1
-    saida = {"total": total}
+                if i >= len(reg):
+                    continue
+                coletados[campo] += 1
+                valores = reg[i] if campo in multiplos else [reg[i]]
+                for v in valores or []:
+                    if isinstance(v, int) and 0 <= v < len(listas[campo]):
+                        contas[campo][listas[campo][v]] += 1
+    saida = {"total": total, "coletados": dict(coletados)}
     for campo, cont in contas.items():
         saida[campo] = dict(cont.most_common())
     return saida
@@ -445,8 +467,13 @@ def pacote():
     meses_cat = cat.get("meses") or []
     visiveis_cat = meses_cat[-max(1, quantos):]
 
-    cr_iqi = {m: agregar_categorias(cat, "IQI", [m]) for m in visiveis_cat}
-    cr_iqm = {m: agregar_categorias(cat, "IQM", [m]) for m in visiveis_cat}
+    # Só para escolher o mês de abertura: a contagem que a tela mostra é feita
+    # no browser, a partir dos registros, porque o filtro global e o
+    # cross-filter recortam por técnico e por categoria ao mesmo tempo — e
+    # contagem já agregada não se recorta depois (mesma razão do /iqi).
+    totais = {m: (sum(1 for _ in (cat.get("IQI") or {}).get(m) or []) +
+                  sum(1 for _ in (cat.get("IQM") or {}).get(m) or []))
+              for m in visiveis_cat}
 
     idf_blocos = idf.get("meses_dados") or {}
     idf_meses = sorted(idf_blocos)
@@ -456,20 +483,13 @@ def pacote():
         "meses_visiveis": quantos,
         "qualidade": qualidade(mapa, quantos),
         "causa_raiz": {
+            **_registros_categorias(cat, visiveis_cat),
             "meses": meses_cat,
             "visiveis": visiveis_cat,
-            # Agregado aqui e não no browser: o Dashboard mostra o consolidado,
-            # sem filtro por equipe. Quem precisa cruzar com empresa e
-            # supervisor usa a visualização "Causa raiz" do /iqi, que recebe
-            # os registros e filtra no cliente.
-            "IQI": cr_iqi,
-            "IQM": cr_iqm,
             # Qual mês a tela abre. Ver `mes_padrao`: na virada do mês o mais
             # recente está vazio, e abrir nele fazia o Dashboard inteiro
             # parecer quebrado.
-            "mes_padrao": mes_padrao(
-                visiveis_cat,
-                lambda m: (cr_iqi.get(m) or {}).get("total") or (cr_iqm.get(m) or {}).get("total")),
+            "mes_padrao": mes_padrao(visiveis_cat, lambda m: totais.get(m)),
         },
         "cancelamentos": cancelamentos(payload("ger_cancelamentos"), mapa, quantos),
         "esteira": {
@@ -494,6 +514,21 @@ def pacote():
     }
 
 
+def _registros_categorias(cat, meses):
+    """Registros compactos de Cat 1..6 só dos `meses` pedidos, com os textos.
+
+    O Dashboard recebe os meses VISÍVEIS e não o ano inteiro: é o que a tela
+    mostra, e o payload de janeiro em diante só engordaria a página.
+    """
+    saida = {k: cat.get(k) for k in ("campos", "multiplos", *LISTAS.values())
+             if cat.get(k) is not None}
+    saida.setdefault("campos", list(CAMPOS_PADRAO))
+    for ind in ("IQI", "IQM"):
+        blocos = cat.get(ind) or {}
+        saida[ind] = {m: blocos[m] for m in meses if m in blocos}
+    return saida
+
+
 def causa_raiz():
     """Registros compactos de Cat 1..5, para a visualização dentro do /iqi.
 
@@ -505,4 +540,5 @@ def causa_raiz():
     if not cat:
         return {"meses": [], "campos": list(CAMPOS_PADRAO)}
     return {k: cat.get(k) for k in
-            ("meses", "campos", "IQI", "IQM", *LISTAS.values()) if cat.get(k) is not None}
+            ("meses", "campos", "multiplos", "IQI", "IQM", *LISTAS.values())
+            if cat.get(k) is not None}

@@ -9,6 +9,30 @@
    desce do indicador para a causa: qualidade, causa raiz, churn, fila,
    atendimento. #}
 
+{# Filtro global. Recorta todo bloco que conhece o técnico (qualidade, causa
+   raiz, IDF de OS, técnico ofensor do cancelamento); os que não conhecem
+   ganham a etiqueta "não recortado" enquanto houver filtro — ver
+   dashboard_filtro.js. O motivo não mora aqui: ele filtra pelo clique na
+   barra do ranking de causa raiz (cross-filter). #}
+<div class="toolbar dash-filtro" id="dash-filtro">
+  <details class="dropdown" id="df-empresa">
+    <summary><span data-resumo>Todas as empresas</span></summary>
+    <div class="lista-marcar"></div>
+  </details>
+  <label id="df-sup-box" title="Equipes e técnicos vinculados ao supervisor em Configurações">Supervisor
+    <select id="df-sup"></select></label>
+  <details class="dropdown" id="df-tecnico">
+    <summary><span data-resumo>Todos os técnicos</span></summary>
+    <div class="lista-marcar">
+    </div>
+  </details>
+  <input type="search" id="df-busca" placeholder="Buscar técnico" aria-label="Buscar técnico">
+  <button type="button" class="btn-ghost" id="df-ofensores" aria-pressed="false"
+          title="Só técnicos acima da média do mês no IQI/IQM (a mesma regra do bloco Ofensores do /iqi)">Só ofensores</button>
+  <button type="button" class="btn-ghost" id="df-limpar" style="display:none">Limpar filtro</button>
+  <span class="subnote" id="df-resumo" style="margin:0"></span>
+</div>
+
 {# Sem título aqui: este é o primeiro bloco da página, logo abaixo de
    "Dashboard — Visão Gerencial" na topbar, e os dois cards já se identificam
    ("IQI · instalação", "IQM · manutenção"). Um cabeçalho de seção nessa
@@ -37,16 +61,17 @@
 
 <h3 class="secao">Causa raiz da reincidência</h3>
 <p class="subnote">
-  Categoria 4 é a causa real após análise interna; Categoria 5 é o detalhe dela.
+  Categoria 4 é a causa real após análise interna; Categoria 5 é o detalhe dela; Categoria 6 é o ajuste feito.
   <b>Falha Massiva entra no ranking</b> — é a segunda maior causa e o relatório do WVSA a esconde por padrão.
-  Para cruzar com empresa, equipe ou supervisor, use a visualização
-  <a href="{{ url_for('dash.iqi') }}">Causa raiz do IQI/IQM</a>.
+  <b>Clique numa barra para filtrar</b>: as outras categorias passam a contar só aqueles protocolos.
+  A mesma leitura, mês a mês, está no <a href="{{ url_for('dash.iqi') }}">IQI/IQM → Tabela mensal</a>.
 </p>
 <div class="toolbar">
   <label>Indicador <span class="view-switch" id="cr-ind">
     <button data-ind="IQI">IQI</button><button data-ind="IQM">IQM</button></span></label>
   <label>Mês <select id="cr-mes"></select></label>
-  <div class="kpi" style="padding:8px 14px;"><span class="l">Reincidências no mês</span> <b class="v" id="cr-total" style="font-size:18px;">0</b></div>
+  <div class="kpi" style="padding:8px 14px;"><span class="l">Reincidências no recorte</span> <b class="v" id="cr-total" style="font-size:18px;">0</b></div>
+  <div class="chips" id="cr-sel" style="margin:0"></div>
 </div>
 <div class="grid charts-2" style="margin-bottom:16px;">
   <div class="card"><div class="card-h">Categoria 4 · causa real</div>
@@ -60,10 +85,14 @@
   <div class="card"><div class="card-h">Categoria 2 · encerramento do N1</div>
     <div class="card-b"><div class="rank" id="cr-cat2"></div></div></div>
 </div>
-<div class="card"><div class="card-h">Onde concentra</div>
-  <div class="card-b"><div class="rank" id="cr-cidades"></div></div></div>
+<div class="grid charts-2" style="margin-bottom:16px;">
+  <div class="card"><div class="card-h"><span>Categoria 6 · ajuste realizado</span><span class="subnote" style="margin:0" id="cr-cat6-nota"></span></div>
+    <div class="card-b"><div class="rank" id="cr-cat6"></div></div></div>
+  <div class="card"><div class="card-h">Onde concentra</div>
+    <div class="card-b"><div class="rank" id="cr-cidades"></div></div></div>
+</div>
 
-<h3 class="secao">Cancelamentos · churn válido</h3>
+<h3 class="secao">Cancelamentos · churn válido <span class="nao-recorta">não recortado pelo filtro</span></h3>
 <p class="subnote">Somente cancelamentos <b>válidos para o churn</b> (o mesmo recorte do ICP).
   O CMT é a fatia do grupo PROBLEMA TECNICO.</p>
 <div class="grid charts-2" style="margin-bottom:16px;">
@@ -92,7 +121,7 @@
 <div class="card"><div class="card-h">Faixa de ticket</div>
   <div class="card-b"><div class="rank" id="ca-ticket"></div></div></div>
 
-<h3 class="secao">Esteira de agendamento</h3>
+<h3 class="secao">Esteira de agendamento <span class="nao-recorta">não recortado pelo filtro</span></h3>
 <p class="subnote">
   <b>Esteira útil</b> = fila sem as retiradas. Retirada é equipamento a recolher de quem já cancelou —
   somada ao resto, ela domina a fila e esconde o que a operação consegue atacar.
@@ -107,7 +136,7 @@
   <div class="card"><div class="card-h">Por cidade</div><div class="card-b"><div class="rank" id="es-cid"></div></div></div>
 </div>
 
-<h3 class="secao">Atendimento · IDF e salas</h3>
+<h3 class="secao">Atendimento · IDF e salas <span class="nao-recorta">não recortado pelo filtro</span></h3>
 <p class="subnote">Nota de 0 a 5 dos feedbacks. O contraste mostra o ofensor: quanto do volume
   saiu <b>sem a solicitação resolvida</b> (em OS, sem a internet funcionando).</p>
 <div class="kpis" id="idf-kpis"></div>
@@ -131,7 +160,16 @@
 {% endblock %}
 
 {% block scripts %}
-<script>window.__DASH__ = {{ pacote|tojson }};</script>
+<script>
+  window.__DASH__ = {{ pacote|tojson }};
+  window.__SUPERVISORES__ = {{ supervisores|tojson }};
+  // Do servidor, como no /iqi: a chave que o vínculo do supervisor guardou foi
+  // calculada em Python com este mapa. Uma cópia no JS divergiria.
+  window.__APELIDOS_EMPRESA__ = {{ apelidos_empresa|tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/iqi_supervisor.js') }}"></script>
+<script src="{{ url_for('static', filename='js/iqi_regras.js') }}"></script>
 <script src="{{ url_for('static', filename='js/dashboard_rank.js') }}"></script>
+<script src="{{ url_for('static', filename='js/dashboard_filtro.js') }}"></script>
 <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 {% endblock %}
