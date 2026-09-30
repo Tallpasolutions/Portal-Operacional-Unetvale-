@@ -387,7 +387,9 @@ def cancelamentos(payload, mapa_metas, quantos=MESES_VISIVEIS_PADRAO):
     blocos = (payload or {}).get("meses_dados") or {}
     meses = sorted(blocos)
     if not meses:
-        return {"meses": [], "mes_padrao": None, "visiveis": [], "serie": []}
+        return {"meses": [], "mes_padrao": None, "visiveis": [], "serie": [], "textos": {}}
+    campos_c = (payload or {}).get("campos_contrato") or []
+    campos_u = (payload or {}).get("campos_ultimo") or []
 
     def resumo(mes, parcial):
         d = blocos[mes]
@@ -408,13 +410,20 @@ def cancelamentos(payload, mapa_metas, quantos=MESES_VISIVEIS_PADRAO):
             "cidades": d.get("cidades") or {},
             "tempo_casa": d.get("tempo_casa") or {},
             "tempo_contrato": d.get("tempo_contrato") or {},
-            "faixa_ticket": d.get("faixa_ticket") or {},
             "motivos": d.get("motivos") or {},
+            # Faixa de ticket saiu da tela a pedido (29/09/2026). O coletor
+            # ainda a recebe nas abas do relatório, mas ela não viaja.
+            **_contratos_do_mes(d, campos_c, campos_u),
         }
 
     escolhidos = meses[-max(1, quantos):]
+    textos = (payload or {}).get("textos") or {}
     return {
         "meses": meses,
+        # Só as listas que a tela usa: bairro e o atendente que registrou o
+        # cancelamento ficam no banco e não engordam a página.
+        "textos": {k: textos.get(k) or [] for k in
+                   ("cidade", "motivo", "grupo", "casa", "tecnico")},
         "mes_padrao": mes_padrao(escolhidos, lambda m: (blocos[m].get("total") or 0)),
         "visiveis": [resumo(m, _mes_em_curso(m)) for m in escolhidos],
         "serie": [{"mes": m, "total": blocos[m].get("total") or 0,
@@ -423,6 +432,30 @@ def cancelamentos(payload, mapa_metas, quantos=MESES_VISIVEIS_PADRAO):
                                 (blocos[m].get("total") or 1) * 100, 2)}
                   for m in meses],
     }
+
+
+def _contratos_do_mes(d, campos_c, campos_u):
+    """Registros por contrato e o técnico da última OS, só com o que a tela usa.
+
+    `contratos` = [contrato, cidade, motivo, grupo, casa] (índices em
+    `textos`) — é o que o filtro por motivo reconta. `ultimo` = [contrato,
+    técnico, OS] — o técnico do último atendimento antes do cancelamento
+    (CMT, só grupo técnico com OS). O cruzamento dos dois é pelo contrato, no
+    browser, porque o filtro global recorta pelo técnico.
+
+    Mês coletado antes de 29/09/2026 não tem nada disso: devolve listas
+    vazias e `detalhe=False`, e a tela diz que o detalhe ainda não existe em
+    vez de mostrar zero.
+    """
+    brutos_c, brutos_u = d.get("contratos"), d.get("ultimo_atendimento")
+    if brutos_c is None or not campos_c:
+        return {"detalhe": False, "contratos": [], "ultimo": []}
+    pc = {c: i for i, c in enumerate(campos_c)}
+    pu = {c: i for i, c in enumerate(campos_u)}
+    contratos = [[r[pc["contrato"]], r[pc["cidade"]], r[pc["motivo"]], r[pc["grupo"]], r[pc["casa"]]]
+                 for r in brutos_c]
+    ultimo = [[r[pu["contrato"]], r[pu["tecnico"]], r[pu["os"]]] for r in (brutos_u or [])]
+    return {"detalhe": True, "contratos": contratos, "ultimo": ultimo}
 
 
 def _sem_prefixo_do_grupo(motivos):

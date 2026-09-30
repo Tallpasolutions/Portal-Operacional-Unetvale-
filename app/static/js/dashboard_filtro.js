@@ -38,7 +38,11 @@
     ["IQI", "IQM"].forEach(function (ind) {
       (((D.qualidade || {})[ind] || {}).tecnicos || []).forEach(function (t) { add(t.nome); });
     });
-    (window.__DASH_TECNICOS_EXTRA__ || []).forEach(add);
+    // Técnico do último atendimento (cancelamento) e técnico do feedback de
+    // OS (IDF): só entram nomes no formato "EMPRESA - Nome" (o `add` recusa o
+    // resto), então atendente de ligação/chat não vira técnico na lista.
+    (((D.cancelamentos || {}).textos || {}).tecnico || []).forEach(add);
+    (((D.idf || {}).textos || {}).pessoa || []).forEach(add);
     return Object.keys(porChave).map(function (k) { return porChave[k]; })
       .sort(function (a, b) { return a.localeCompare(b, "pt-BR"); });
   }

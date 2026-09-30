@@ -257,7 +257,7 @@
   // Os dois blocos recortáveis redesenham a cada mudança do filtro global. A
   // primeira publicação chega no DOMContentLoaded (ver dashboard_filtro.js);
   // sem o filtro na página, desenham já.
-  function recortaveis() { qualidade(); causaRaiz(); }
+  function recortaveis() { qualidade(); causaRaiz(); if (typeof cancelamentos === "function" && c) cancelamentos(); }
   if (window.DashFiltro) document.addEventListener("dashfiltro", recortaveis);
   else recortaveis();
 
@@ -269,26 +269,174 @@
 
   Dash.preencherSelect($("ca-mes"), (c.visiveis || []).map(function (d) { return d.mes; }),
     c.mes_padrao);
-  function cancelamentos() {
+  var TX = c.textos || {};
+  var txt = function (lista, i) { return (TX[lista] || [])[i] || ""; };
+  var GRUPO_TECNICO = "PROBLEMA TECNICO";
+
+  function mesCancel() {
     var mes = $("ca-mes").value;
-    var d = (c.visiveis || []).filter(function (x) { return x.mes === mes; })[0];
+    return (c.visiveis || []).filter(function (x) { return x.mes === mes; })[0];
+  }
+
+  // Selects de grupo e motivo com o que EXISTE no mês, e a contagem ao lado.
+  function montarMotivos(d) {
+    var gSel = $("ca-grupo"), mSel = $("ca-motivo");
+    var gAtual = gSel.value, mAtual = mSel.value;
+    var porGrupo = {}, porMotivo = {};
+    (d && d.contratos || []).forEach(function (r) {
+      var g = txt("grupo", r[3]), m = txt("motivo", r[2]);
+      porGrupo[g] = (porGrupo[g] || 0) + 1;
+      if (!gAtual || g === gAtual) porMotivo[m] = (porMotivo[m] || 0) + 1;
+    });
+    function opcoes(mapa, todos) {
+      return '<option value="">' + todos + "</option>" + Object.keys(mapa)
+        .sort(function (a, b) { return mapa[b] - mapa[a]; })
+        .map(function (k) { return '<option value="' + Dash.esc(k) + '">' + Dash.esc(k) + " (" + mapa[k] + ")</option>"; })
+        .join("");
+    }
+    gSel.innerHTML = opcoes(porGrupo, "Todos");
+    gSel.value = porGrupo[gAtual] ? gAtual : "";
+    mSel.innerHTML = opcoes(porMotivo, "Todos");
+    mSel.value = porMotivo[mAtual] ? mAtual : "";
+    // Sem o detalhe por contrato (mês coletado antes de 29/09/2026) não há o
+    // que filtrar — o select desabilitado diz isso melhor que uma lista vazia.
+    var sem = !(d && d.detalhe);
+    gSel.disabled = mSel.disabled = sem;
+    gSel.title = mSel.title = sem ? "Este mês foi coletado antes do detalhe por contrato existir." : "";
+  }
+
+  function contratosFiltrados(d) {
+    var g = $("ca-grupo").value, m = $("ca-motivo").value;
+    return (d.contratos || []).filter(function (r) {
+      return (!g || txt("grupo", r[3]) === g) && (!m || txt("motivo", r[2]) === m);
+    });
+  }
+
+  function contar(regs, lista, col) {
+    var out = {};
+    regs.forEach(function (r) { var k = txt(lista, r[col]); if (k) out[k] = (out[k] || 0) + 1; });
+    return out;
+  }
+
+  function cancelamentos() {
+    var d = mesCancel();
     if (!d) {
-      ["ca-grupos", "ca-cidades", "ca-casa", "ca-ticket", "cmt-motivos"].forEach(function (id) { Dash.vazio($(id)); });
+      ["ca-grupos", "ca-cidades", "ca-casa", "cmt-motivos"].forEach(function (id) { Dash.vazio($(id)); });
+      ofensorCancel(null);
       return;
     }
-    $("ca-total").textContent = Dash.num(d.total);
-    $("ca-tec").textContent = Dash.num(d.tecnico) + " (" + Dash.pct(d.pct) + ")";
-    $("ca-valor").textContent = Dash.moeda(d.valor);
-    $("ca-quando").textContent = Dash.rotuloMes(d.mes);
+    montarMotivos(d);
+    var filtrado = !!($("ca-grupo").value || $("ca-motivo").value);
+    var regs = filtrado ? contratosFiltrados(d) : null;
     var nada = "Nenhum cancelamento registrado em " + Dash.rotuloMes(d.mes) + " até agora.";
+    var nadaFiltro = "Nenhum cancelamento deste motivo em " + Dash.rotuloMes(d.mes) + ".";
+    $("ca-quando").textContent = Dash.rotuloMes(d.mes);
     Dash.rank($("cmt-motivos"), d.motivos_tecnicos,
       { limite: 6, vazio: d.total ? "Sem motivos técnicos no mês." : nada });
-    Dash.rank($("ca-grupos"), d.grupos, { limite: 10, vazio: nada });
-    Dash.rank($("ca-cidades"), d.cidades, { limite: 10, destacarTopo: false, vazio: nada });
-    Dash.rank($("ca-casa"), d.tempo_casa, { limite: 10, destacarTopo: false, vazio: nada });
-    Dash.rank($("ca-ticket"), d.faixa_ticket, { limite: 10, destacarTopo: false, vazio: nada });
+
+    if (!filtrado) {
+      // Sem filtro, os números do próprio relatório — os que batem com o WVSA.
+      $("ca-total").textContent = Dash.num(d.total);
+      $("ca-tec").textContent = Dash.num(d.tecnico) + " (" + Dash.pct(d.pct) + ")";
+      $("ca-valor").textContent = Dash.moeda(d.valor);
+      $("ca-valor").title = "";
+      $("ca-filtro-nota").textContent = "";
+      Dash.rank($("ca-grupos"), d.grupos, { limite: 10, vazio: nada });
+      Dash.rank($("ca-cidades"), d.cidades, { limite: 10, destacarTopo: false, vazio: nada });
+      Dash.rank($("ca-casa"), d.tempo_casa, { limite: 10, destacarTopo: false, vazio: nada });
+    } else {
+      var tec = regs.filter(function (r) { return txt("grupo", r[3]) === GRUPO_TECNICO; }).length;
+      $("ca-total").textContent = Dash.num(regs.length);
+      $("ca-tec").textContent = Dash.num(tec) + " (" + Dash.pct(regs.length ? tec / regs.length * 100 : null) + ")";
+      // A tabela dinâmica do IGC não traz o valor de cada contrato: a receita
+      // só existe para o mês inteiro. Um "—" com o porquê, em vez de um número
+      // que não é do recorte.
+      $("ca-valor").textContent = "—";
+      $("ca-valor").title = "O relatório só publica a receita do mês inteiro, não por motivo.";
+      $("ca-filtro-nota").textContent = Dash.num(regs.length) + " de " + Dash.num(d.total) +
+        " cancelamentos do mês. Receita perdida não é recortada: o relatório só a publica para o mês inteiro.";
+      Dash.rank($("ca-grupos"), contar(regs, "grupo", 3), { limite: 10, vazio: nadaFiltro });
+      Dash.rank($("ca-cidades"), contar(regs, "cidade", 1), { limite: 10, destacarTopo: false, vazio: nadaFiltro });
+      Dash.rank($("ca-casa"), contar(regs, "casa", 4), { limite: 10, destacarTopo: false, vazio: nadaFiltro });
+    }
+    ofensorCancel(d);
   }
+
+  // Técnico do último atendimento: contrato do CMT × contrato do IGC (cidade,
+  // motivo). Obedece ao filtro global (é o único pedaço da seção com técnico)
+  // e ao filtro de motivo.
+  function ofensorCancel(d) {
+    var nota = $("ca-of-nota"), tTec = $("ca-of-tec"), tCid = $("ca-of-cid");
+    var vazioTab = function (el, msg) {
+      el.innerHTML = '<tbody><tr><td class="vazio-cel" style="padding:22px;text-align:center;">' + msg + "</td></tr></tbody>";
+    };
+    if (!d || !d.detalhe) {
+      nota.textContent = "";
+      var msg = d ? "O técnico do último atendimento passou a ser coletado em 29/09/2026; " +
+        Dash.rotuloMes(d.mes) + " foi coletado antes disso." : "Sem dados de cancelamento ainda.";
+      vazioTab(tTec, msg); vazioTab(tCid, msg);
+      return;
+    }
+    var g = $("ca-grupo").value;
+    if (g && g !== GRUPO_TECNICO) {
+      nota.textContent = "";
+      var m2 = "O técnico do último atendimento só existe para o grupo " + GRUPO_TECNICO +
+        " — nos outros motivos o técnico não explica o cancelamento.";
+      vazioTab(tTec, m2); vazioTab(tCid, m2);
+      return;
+    }
+    var porContrato = {};
+    contratosFiltrados(d).forEach(function (r) { porContrato[r[0]] = r; });
+    var tecnicos = (d.contratos || []).filter(function (r) { return txt("grupo", r[3]) === GRUPO_TECNICO; });
+    var comOs = d.ultimo.filter(function (u) { return porContrato[u[0]]; });
+    var noRecorte = comOs.filter(function (u) { return F.passa(txt("tecnico", u[1]), { mes: d.mes }); });
+
+    nota.innerHTML = "Última OS antes do cancelamento, pelo relatório CMT do WVSA. Cobre só o grupo " +
+      "<b>" + GRUPO_TECNICO + "</b> e só quem teve OS: em " + Dash.esc(Dash.rotuloMes(d.mes)) + ", <b>" +
+      Dash.num(d.ultimo.length) + " de " + Dash.num(tecnicos.length) + "</b> cancelamentos técnicos. " +
+      "O % é sobre os " + Dash.num(noRecorte.length) + " do recorte." +
+      (F.ativo() ? " Recorte: " + Dash.esc(F.resumo()) + "." : "");
+    $("ca-of-quando").textContent = Dash.rotuloMes(d.mes);
+    if (!noRecorte.length) {
+      var m3 = F.ativo() ? "Nenhum técnico do recorte fez o último atendimento de um cancelado neste mês."
+                         : "Nenhum cancelamento técnico com OS neste mês.";
+      vazioTab(tTec, m3); vazioTab(tCid, m3);
+      return;
+    }
+    var tot = noRecorte.length;
+    function agrupa(chave, outra) {
+      var out = {};
+      noRecorte.forEach(function (u) {
+        var k = chave(u), o = outra(u);
+        var a = out[k] = out[k] || { n: 0, outros: {} };
+        a.n++; a.outros[o] = (a.outros[o] || 0) + 1;
+      });
+      return Object.keys(out).map(function (k) {
+        var os = out[k].outros, top = Object.keys(os).sort(function (a, b) { return os[b] - os[a]; })[0];
+        return { k: k, n: out[k].n, top: top, topN: os[top] };
+      }).sort(function (a, b) { return b.n - a.n || a.k.localeCompare(b.k); });
+    }
+    var tec = function (u) { return txt("tecnico", u[1]); };
+    var cid = function (u) { return txt("cidade", porContrato[u[0]][1]) || "(sem cidade)"; };
+    var pct = function (n) { return Dash.pct(n / tot * 100, 1); };
+
+    tTec.innerHTML = '<thead><tr><th>Técnico</th><th>Empresa</th><th class="num">Clientes</th><th class="num">%</th><th>Cidade que mais pesa</th></tr></thead><tbody>' +
+      agrupa(tec, cid).map(function (r) {
+        var p = r.k.indexOf(" - ");
+        return "<tr><td>" + Dash.esc(p >= 0 ? r.k.slice(p + 3) : r.k) + "</td><td>" +
+          Dash.esc(p >= 0 ? r.k.slice(0, p) : "") + '</td><td class="num">' + r.n + '</td><td class="num">' +
+          pct(r.n) + "</td><td>" + Dash.esc(r.top) + (r.n > 1 ? " (" + r.topN + ")" : "") + "</td></tr>";
+      }).join("") + "</tbody>";
+    tCid.innerHTML = '<thead><tr><th>Cidade</th><th class="num">Clientes</th><th class="num">%</th><th>Técnico que mais pesa</th></tr></thead><tbody>' +
+      agrupa(cid, tec).map(function (r) {
+        return "<tr><td>" + Dash.esc(r.k) + '</td><td class="num">' + r.n + '</td><td class="num">' + pct(r.n) +
+          "</td><td>" + Dash.esc(r.top) + (r.n > 1 ? " (" + r.topN + ")" : "") + "</td></tr>";
+      }).join("") + "</tbody>";
+  }
+
   $("ca-mes").addEventListener("change", cancelamentos);
+  $("ca-grupo").addEventListener("change", function () { $("ca-motivo").value = ""; cancelamentos(); });
+  $("ca-motivo").addEventListener("change", cancelamentos);
   cancelamentos();
 
   // -------------------------------------------------------------- esteira

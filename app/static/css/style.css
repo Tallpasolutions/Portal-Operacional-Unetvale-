@@ -576,6 +576,13 @@ tr.clicavel{ cursor:pointer; }
 @media (min-width:900px){
   .dash-filtro{ position:sticky; top:calc(var(--top-h) + 8px); z-index:15; }
 }
+/* Tabela longa dentro de cartão do Dashboard (técnico ofensor: ~35 linhas num
+   mês). Sem teto, ela empurra o cartão vizinho para longe e, no celular,
+   esconde a seção seguinte — a mesma armadilha da fila de revisão da Troca de
+   Poste (.tp-fila), com a mesma altura. */
+.dash-lista{ max-height:420px; overflow:auto; }
+.dash-lista thead th{ position:sticky; top:0; z-index:1; background:var(--fundo); }
+
 /* Etiqueta dos blocos que o filtro não alcança — só aparece com filtro ativo. */
 .nao-recorta{ display:none; font-size:11.5px; font-weight:600; color:var(--muted);
   background:var(--fundo); border-radius:20px; padding:2px 9px; margin-left:8px; vertical-align:middle; }
