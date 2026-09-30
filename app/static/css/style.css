@@ -582,6 +582,11 @@ tr.clicavel{ cursor:pointer; }
    Poste (.tp-fila), com a mesma altura. */
 .dash-lista{ max-height:420px; overflow:auto; }
 .dash-lista thead th{ position:sticky; top:0; z-index:1; background:var(--fundo); }
+/* Alerta do IDF (nota abaixo do limiar): a linha inteira ganha um fundo leve,
+   para a tabela ordenada da pior média para a melhor mostrar onde o alerta
+   termina sem precisar ler cada badge. */
+.tbl tr.linha-alerta td{ background:#fdf3f4; }
+.kpi.kpi-alerta{ border-color:#f3c3ca; }
 
 /* Etiqueta dos blocos que o filtro não alcança — só aparece com filtro ativo. */
 .nao-recorta{ display:none; font-size:11.5px; font-weight:600; color:var(--muted);

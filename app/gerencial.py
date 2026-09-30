@@ -458,6 +458,42 @@ def _contratos_do_mes(d, campos_c, campos_u):
     return {"detalhe": True, "contratos": contratos, "ultimo": ultimo}
 
 
+# Nota abaixo da qual o IDF acende alerta. É meta (`idf_alerta`, editável em
+# Configurações) e não constante, mas com padrão: a regra combinada em
+# 29/09/2026 é "acima de 3 nada; abaixo, alerta" — 3 exato não alerta.
+IDF_ALERTA_PADRAO = 3.0
+
+
+def limiar_idf(mapa_metas):
+    valor = (mapa_metas.get("idf_alerta") or {}).get("valor")
+    try:
+        return float(valor) if valor is not None else IDF_ALERTA_PADRAO
+    except (TypeError, ValueError):
+        return IDF_ALERTA_PADRAO
+
+
+def atendimento(payload, mapa_metas, quantos=MESES_VISIVEIS_PADRAO):
+    """TMA/TMF do chat (ger_atendimento): somas por departamento e atendente.
+
+    Vai em somas, não em médias, para a tela recortar por departamento ou
+    atendente somando as partes — média de médias daria o mesmo peso a quem
+    atendeu 3 conversas e a quem atendeu 300. As faixas de duração vão junto
+    porque a MÉDIA do TMA mente (conversa esquecida aberta puxa para cima): a
+    tela mostra a mediana aproximada ao lado.
+    """
+    blocos = (payload or {}).get("meses_dados") or {}
+    meses = sorted(blocos)
+    escolhidos = meses[-max(1, quantos):]
+    return {
+        "meses": meses,
+        "campos": (payload or {}).get("campos") or [],
+        "faixas_min": (payload or {}).get("faixas_min") or [],
+        "visiveis": [{"mes": m, "parcial": _mes_em_curso(m), **blocos[m]} for m in escolhidos],
+        "mes_padrao": mes_padrao(escolhidos, lambda m: (blocos[m].get("conversas") or 0)),
+        "metas": {c: (mapa_metas.get(c) or {}).get("valor") for c in ("tma_chat", "tmf_chat")},
+    }
+
+
 def _sem_prefixo_do_grupo(motivos):
     """Tira o "PROBLEMA TECNICO" repetido do início de cada motivo.
 
@@ -511,6 +547,7 @@ def pacote():
     idf_blocos = idf.get("meses_dados") or {}
     idf_meses = sorted(idf_blocos)
     idf_visiveis = idf_meses[-max(1, quantos):]
+    atend = payload("ger_atendimento")
 
     return {
         "meses_visiveis": quantos,
@@ -533,12 +570,20 @@ def pacote():
         },
         "idf": {
             "meses": idf_meses,
+            # Os meses visíveis levam o detalhe (feedbacks, alertas, setor e
+            # cidade) — é dele que a tela recorta por subsetor, cidade e
+            # atendente. A série do ano leva só os números do painel: o
+            # detalhe de janeiro a agosto engordaria a página à toa.
             "visiveis": [{"mes": m, "parcial": _mes_em_curso(m), **idf_blocos[m]}
                          for m in idf_visiveis],
-            "serie": [{"mes": m, **idf_blocos[m]} for m in idf_meses],
+            "serie": [{"mes": m, **{c: idf_blocos[m].get(c) for c in ("ligacoes", "chats", "os")}}
+                      for m in idf_meses],
             "metas": {c: (mapa.get(f"idf_{c}") or {}).get("valor")
                       for c in ("ligacoes", "chats", "os")},
+            "textos": {k: (idf.get("textos") or {}).get(k) or [] for k in ("pessoa", "setor", "cidade")},
+            "limiar": limiar_idf(mapa),
         },
+        "atendimento": atendimento(atend, mapa, quantos),
         "salas": {**salas, "vs_meta": _vs_meta(salas.get("abertas"), "disk", mapa)},
         "metas": mapa,
         "estado": {m: {"status": (p.get(m) or {}).get("status") or "sem_dados",

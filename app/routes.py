@@ -504,6 +504,12 @@ METAS_DASHBOARD = [
     {"chave": "idf_ligacoes", "rotulo": "IDF — ligações (nota)", "direcao": "maior"},
     {"chave": "idf_chats", "rotulo": "IDF — chats (nota)", "direcao": "maior"},
     {"chave": "idf_os", "rotulo": "IDF — OS (nota)", "direcao": "maior"},
+    # Limiar do ALERTA do IDF, não meta de cobrança: média ou feedback com
+    # nota abaixo dele acende o alerta. Vazio = 3, a regra combinada em
+    # 29/09/2026 ("acima de 3 nada; abaixo, alerta"). Ver gerencial.limiar_idf.
+    {"chave": "idf_alerta", "rotulo": "IDF — alerta abaixo da nota (vazio = 3)", "direcao": "maior"},
+    {"chave": "tma_chat", "rotulo": "TMA do chat (minutos)", "direcao": "menor"},
+    {"chave": "tmf_chat", "rotulo": "TMF do chat — espera até a 1ª resposta (minutos)", "direcao": "menor"},
 ]
 
 
