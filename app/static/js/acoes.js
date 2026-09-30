@@ -1,4 +1,5 @@
-// Módulo Ações — abas, gráficos do Painel e o formulário de nova ação.
+// Módulo Ações — abas e gráficos do Painel. O quadro, a lista e o
+// cronograma moram em acoes_quadro.js; o painel da ação, em acao_painel.js.
 (function () {
   const R = window.__RESUMO__ || {};
 
@@ -25,41 +26,12 @@
   }
 
   // Linha da tabela inteira clicável — no computador o alvo é a linha, não um
-  // link de 4px dentro dela.
-  document.querySelectorAll("tr.clicavel").forEach((tr) => {
+  // link de 4px dentro dela. Só as que levam a outra página (`data-href`, as
+  // reuniões): as linhas da Lista de ações abrem o painel lateral, e quem
+  // cuida delas é o acoes_quadro.js.
+  document.querySelectorAll("tr.clicavel[data-href]").forEach((tr) => {
     tr.addEventListener("click", () => { location.href = tr.dataset.href; });
   });
-
-  // Filtros recolhidos no celular. `hidden` no elemento em vez de classe: o
-  // CSS já usa `display:flex` na toolbar e venceria uma classe solta.
-  const btnFiltros = document.getElementById("btn-filtros");
-  const filtros = document.getElementById("ac-filtros");
-  if (btnFiltros && filtros) {
-    const estreito = () => window.matchMedia("(max-width:820px)").matches;
-    const aplicar = () => {
-      const recolher = estreito() && btnFiltros.getAttribute("aria-expanded") !== "true";
-      filtros.style.display = recolher ? "none" : "";
-    };
-    btnFiltros.addEventListener("click", () => {
-      const aberto = btnFiltros.getAttribute("aria-expanded") === "true";
-      btnFiltros.setAttribute("aria-expanded", String(!aberto));
-      aplicar();
-    });
-    window.addEventListener("resize", aplicar);
-    aplicar();
-  }
-
-  const novaBtn = document.getElementById("btn-nova");
-  const novaForm = document.getElementById("form-nova");
-  if (novaBtn && novaForm) {
-    novaBtn.addEventListener("click", () => {
-      novaForm.hidden = false;
-      novaForm.scrollIntoView({ behavior: "smooth", block: "center" });
-      novaForm.querySelector("input[name=titulo]").focus();
-    });
-    document.getElementById("btn-cancelar-nova")
-      .addEventListener("click", () => { novaForm.hidden = true; });
-  }
 
   // ---- gráficos -----------------------------------------------------------
   // Mesmas cores de status do resto do portal: verde = no alvo, vermelho =
@@ -125,6 +97,9 @@
       });
     }
 
+    fluxo();
+    carga();
+
     // Situação em rosca: aqui a pergunta é "como está repartido", não
     // "quanto de cada" — e a rosca responde isso de relance.
     const s = (R.por_situacao || []).filter((d) => d.n > 0);
@@ -141,6 +116,71 @@
         options: { plugins: { legend: { position: "right", labels: { boxWidth: 12, font: { size: 11 } } } } },
       });
     }
+  }
+
+  // Abertas × concluídas por semana. Barras lado a lado, e não empilhadas:
+  // a pergunta é "fechamos mais do que abrimos?", e isso é comparar a altura
+  // das duas, não somar.
+  function fluxo() {
+    const f = R.fluxo_semanal || [];
+    const ctx = document.getElementById("g-fluxo");
+    if (!ctx || !f.length) return;
+    if (charts.fluxo) charts.fluxo.destroy();
+    charts.fluxo = new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels: f.map((d) => d.rotulo),
+        datasets: [
+          { label: "Abertas", data: f.map((d) => d.abertas), backgroundColor: "#2c7be5" },
+          { label: "Concluídas", data: f.map((d) => d.concluidas), backgroundColor: "#00b074" },
+        ],
+      },
+      options: {
+        plugins: {
+          legend: { position: "top" },
+          tooltip: { callbacks: { title: (it) => "Semana de " + it[0].label } },
+        },
+        scales: { y: { beginAtZero: true, ticks: { precision: 0 } }, x: { grid: { display: false } } },
+      },
+    });
+  }
+
+  // Carga em aberto por responsável: status empilhados numa barra e as
+  // atrasadas numa barra vermelha AO LADO (outra pilha). Empilhar as
+  // atrasadas junto contaria a mesma ação duas vezes — ela já está no
+  // status dela.
+  function carga() {
+    const c = R.carga_por_pessoa || [];
+    const ctx = document.getElementById("g-carga");
+    if (!ctx) return;
+    if (!c.length) {
+      document.getElementById("box-carga").innerHTML = '<div class="vazio" style="padding:30px;">Nenhuma ação em aberto.</div>';
+      return;
+    }
+    // Uma linha por pessoa com altura decente, em vez de espremer 12 nomes
+    // nos 340px de sempre.
+    document.getElementById("box-carga").style.height = Math.max(240, c.length * 42 + 70) + "px";
+    const abertos = ["Não iniciada", "Em andamento", "Aguardando"];
+    if (charts.carga) charts.carga.destroy();
+    charts.carga = new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels: c.map((d) => d.nome),
+        datasets: abertos.map((s) => ({
+          label: s, data: c.map((d) => d.por_status[s] || 0), backgroundColor: COR[s], stack: "status",
+        })).concat([{
+          label: "Atrasadas", data: c.map((d) => d.atrasadas), backgroundColor: COR["Atrasada"], stack: "atraso",
+        }]),
+      },
+      options: {
+        indexAxis: "y",
+        plugins: { legend: { position: "top" } },
+        scales: {
+          x: { stacked: true, beginAtZero: true, ticks: { precision: 0 } },
+          y: { stacked: true, grid: { display: false } },
+        },
+      },
+    });
   }
 
   // Desenha ao carregar só se o Painel já estiver visível.

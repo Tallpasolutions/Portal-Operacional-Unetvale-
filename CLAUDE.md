@@ -288,6 +288,66 @@ material de referência (a lista de `#7403` com previsão) ficou de fora. Falha
 Massiva como *causa de reincidência* está dentro, nas Categorias 4 e 5 — e é a
 segunda maior.
 
+### Ações: quadro Kanban, painel lateral e cronograma
+
+A aba **Ações** (`/acoes?aba=acoes`) tem três visões — **Quadro**, **Lista** e
+**Cronograma** (`?visao=`) — debaixo de UMA barra de filtro (busca, pessoa,
+área, prioridade, etiqueta, agrupar e os atalhos Minhas/Atrasadas/Vencem em 7
+dias/Críticas e altas). Tudo desenhado pelo `acoes_quadro.js` a partir de
+`window.__ACOES__`; o estado inteiro fica na URL.
+
+**Filtro no cliente, recorte no servidor.** `acoes.listar` continua mandando só
+o que a pessoa pode ver; daí para baixo o filtro é de leitura. Recarregar a
+página a cada chip fecharia o painel lateral aberto. Links antigos com
+`?situacao=Atrasada` viram o atalho.
+
+**As colunas são `acoes.STATUS`, fixas.** Nenhuma coluna configurável, pelo
+mesmo motivo de o status ser fixo no código. A ordem dentro da coluna é a de
+urgência do servidor (atrasada → vence em breve → prioridade → prazo), sem
+ordenação manual: é a ordem em que a pauta é lida. Cancelada fica recolhida
+numa faixa fina (continua alvo de arrasto); Concluída mostra só os últimos 30
+dias, com o resto a um clique.
+
+**Arrastar = `acoes.atualizar`, com o comentário OPCIONAL** (decisão de
+29/09/2026). Em branco, o evento grava "Movida de X para Y." — quem e quando
+ficam, só o porquê não. As duas travas continuam: concluir exige evidência
+(constraint) e atrasada exige próximo passo. Texto só é opcional quando o
+status MUDA; atualização sem mudança e sem texto é recusada. O cartão muda de
+coluna na hora e o diálogo (`_acao_mover.html`, um só para arrasto e seletor)
+abre; cancelar ou o servidor recusar devolve o cartão. No celular não há
+arrasto: o quadro vira carrossel e o status muda pelo seletor do painel.
+
+**Painel lateral** (`/acoes/<id>/painel`) no lugar da troca de página. É um
+fragmento renderizado pelo SERVIDOR, com o mesmo parcial da página cheia
+(`_acao_painel.html`, incluído por `acao_detalhe.html`): uma definição só da
+tela da ação. `?acao=AC-007` abre direto (link copiável); abrir faz
+`pushState`, então "voltar" fecha. Depois de cada gravação o parcial volta do
+servidor inteiro — por isso todo ouvinte do `acao_painel.js` é delegado no
+contêiner. Texto longo editado no lugar NÃO recarrega (roubaria o foco do
+campo seguinte); select, data, apoio e etiquetas recarregam.
+
+As rotas JSON (`/mover`, `/campo`, `/checklist`, e `/atualizar` e `/comentar`
+quando o pedido é JSON) devolvem o cartão no formato do quadro (`_item_quadro`),
+e o evento `acaoatualizada` redesenha o quadro sem recarregar a página.
+
+**Checklist calcula o progresso** (migration `0017`, decisão de 29/09/2026).
+Com 1+ item, `progresso = feitos ÷ total`, GRAVADO em `acoes.progresso` pela
+função `acao_checklist_aplicar` — assim lista, pauta, eventos e Painel leem a
+mesma coluna sem conhecer checklist. O controle deslizante some. Concluir
+continua forçando 100% (o diálogo avisa os itens em aberto); reabrir volta ao
+que o checklist diz e apaga a `data_conclusao`. Apagar o último item deixa o %
+onde estava. Item se apaga de verdade (é plano, não registro); o concluído
+aparece na atividade pelo `feito_em`, lido junto dos eventos, sem gravar nada
+em `acao_eventos`.
+
+**Etiquetas** são `acoes.etiquetas text[]` (sem tabela: rótulo não tem dono nem
+cor). Comparação sem caixa, grafia da primeira vez, até 8 de 30 caracteres.
+
+O **Painel** ganhou "Fluxo semanal" (abertas × concluídas por `data_abertura` e
+`data_conclusao`, 12 semanas) e "Carga por pessoa" (só o responsável, não o
+apoio — senão a mesma ação pesaria duas vezes; atrasadas numa pilha ao lado,
+não empilhadas no status).
+
 ### Reuniões (dentro de Ações, aba `?aba=reunioes`)
 
 A reunião grava áudio pelo navegador, transcreve durante a própria reunião e
@@ -800,10 +860,22 @@ Os que nasceram no Dashboard:
 | `.par-mes` | par "mês fechado × mês corrente" numa moldura só |
 | `.regua` | contraste de duas partes numa barra (resolvido × não resolvido) |
 
+Os que nasceram no quadro de Ações:
+
+| Classe | O que é |
+|---|---|
+| `.avatar` (`.av-0`…`.av-5`) | iniciais da pessoa. A cor é a POSIÇÃO dela na lista de usuários por nome — a mesma regra no Jinja e no JS |
+| `.etiqueta` | rótulo curto, com `×` opcional |
+| `.gaveta` + `.gaveta-fundo` | painel lateral por cima da tela. Animado por `transform`, e sem `rAF` (§6) |
+| `.modal.modal-largo` | `<dialog>` com formulário. Escreva as DUAS classes: `.modal` vem depois no arquivo e o max-width de 400px dele venceria a classe solta |
+| `.editavel` | textarea que parece texto até o hover — campo que se lê mais do que se edita |
+| `.cartao-k` | cartão do quadro, com a faixa de prioridade à esquerda |
+
 **Cartão recolhido** (`.card.recolhido` + `hidden` no `.card-b`, com o botão no
 `.card-h`): o cartão vira uma linha só até alguém clicar. É para formulário que
-existe mas não é o motivo de a pessoa ter aberto a tela — o "Comentário do
-gestor" e a "Definição" do `acao_detalhe.html`. A regra do CSS tira a borda de
+existe mas não é o motivo de a pessoa ter aberto a tela (nasceu com o
+"Comentário do gestor" e a "Definição" da ação, que o painel lateral substituiu
+em 29/09/2026 pela caixa única de atividade e pelos campos editáveis no lugar). A regra do CSS tira a borda de
 baixo do cabeçalho enquanto está fechado; sem ela sobra um risco separando o
 nada. O estado **não** é guardado: depois de enviar, a página recarrega fechada,
 que é o estado de leitura. Quem abre uma ação vem ver o que ela é e o que foi
@@ -996,6 +1068,39 @@ Medido em 09/09/2026 no corpo do 400 do PostgREST: coluna inexistente devolve
 `code 42703`; uuid inválido, `22P02`. `supa.coluna_faltando` lê esse código e
 devolve **False** quando o corpo não é JSON — recuar "na dúvida" é justamente o
 que causou o problema. Qualquer recuo novo por migration passa por ela.
+
+Tabela que a migration ainda não criou dá outro erro: **HTTP 404 com `code
+PGRST205`** (medido em 29/09/2026 com `acao_checklist`). Para esse caso existe
+`supa.tabela_faltando(e)`, pela mesma razão.
+
+**Recuo sem nenhuma leitura ainda é "não sei", não "não existe".**
+`acoes.tem_etiquetas()` só sabia a resposta depois de alguma leitura de ação no
+processo; um cold start da Vercel caindo direto no `POST /acoes/nova` descartaria
+as etiquetas da primeira ação em silêncio. Hoje, sem saber, ela sonda uma linha.
+
+**Campo travado durante a gravação engole o que se digita.** O checklist
+desabilitava o campo enquanto o item ia ao servidor; medido no ensaio de
+29/09/2026, de três itens digitados em seguida entrou UM. Hoje o item aparece
+na hora (esmaecido), as gravações vão em FILA, o painel só recarrega quando a
+fila esvazia, e o recarregamento devolve o que estiver escrito no campo de
+novo item e na caixa de atividade.
+
+**Data de `timestamptz` cortada do texto ISO está em UTC.** `criado_em[:10]`
+põe o que foi feito às 21h de 29/09 em 30/09. Converta com o fuso fixo
+(`timezone(timedelta(hours=-3))`, como `dados.BR_TZ`) — é o `acoes._hora_local`.
+
+**O feed "Últimas atualizações" do Painel de Ações não tinha recorte** até
+29/09/2026: `ultimos_eventos()` trazia o texto dos eventos de TODAS as ações, e
+quem só enxerga as próprias lia os dos outros no Painel. Hoje recebe os ids que
+a pessoa vê.
+
+**Servidor de ensaio que bloqueia só tabela não bloqueia o Storage.** O
+`expurgar_audio` APAGA o arquivo antes de marcar a tabela. Em 29/09/2026 um
+servidor de verificação que recusava escrita em tabela real abriu a aba
+Reuniões, e dois trechos de áudio já vencidos (`81dc1245…/0000` e `0001`) foram
+apagados do Storage de produção, com a marcação na tabela recusada. Sem dano
+duradouro — o próximo expurgo trata "não existe" como sucesso e marca —, mas
+servidor de ensaio tem de recusar `storage_*` também.
 
 **`ignorarMassivas=S` é o padrão do `operacional31` e apaga a segunda maior
 causa.** Medido em 29/08/2026, IQI de 07/2026: com `S` vêm 156 linhas e 2 de
@@ -1460,6 +1565,13 @@ Não existe suíte de testes. O padrão é:
    `read_console_messages` limpo. **Mudança de layout exige screenshot.**
 7. **Celular** — `resize_window` no preset mobile e refazer o fluxo.
 
+Módulo cujo dado **nasce aqui** (Ações) não se testa gravando em produção.
+O padrão que funcionou em 29/09/2026: um servidor de ensaio que COPIA as tabelas
+do módulo para a memória na partida e troca `supa.select/insert/update/delete/
+upsert/rpc` por versões em memória para elas (o resto continua lendo produção),
+recusando escrita em qualquer tabela real **e no Storage** (§6). A função SQL
+é provada à parte, contra o banco, com `rollback`.
+
 Subir local:
 
 ```bash
@@ -1473,8 +1585,40 @@ a.run(port=5001, use_reloader=False)"
 
 ## 9. Estado atual e pendências
 
-- **Ações** entrou vazio: zero ação, zero gestor, 10 áreas. Só o admin cria
-  ação enquanto ninguém for marcado gestor em Configurações.
+- **Ações** entrou vazio: zero ação, zero gestor, 10 áreas. Em 29/09/2026
+  eram 11 ações e 3 gestores (Matheus Dias, Patricia Schveitzer, Renato Barreto).
+- **Ações em quadro Kanban** entrou em 29/09/2026, migration `0017`
+  (`acoes.etiquetas`, `acao_checklist`, `acao_checklist_aplicar`), aplicada em
+  produção no mesmo dia e conferida (coluna, tabela vazia com RLS, dois
+  índices, função executável só pela `service_role`). O porquê está no §4.
+
+  A função foi provada contra produção em transação com `rollback`: 3 de 5
+  itens = 60%, marcar de novo não reescreve `feito_em`, Concluída fica em 100,
+  item de outra ação, texto vazio e operação inventada recusados, e a
+  migration reaplicada sem erro.
+
+  Pelo `test_client`, sobre a cópia em memória das 11 ações de produção: 64
+  casos — o recorte (Renan recebe só as 5 dele e 404 nas seis rotas de ação
+  alheia), 20 entradas ruins todas `4xx`, o texto automático do arrasto, as
+  duas travas, o checklist governando o %, reabrir voltando ao checklist,
+  etiquetas limpas, apoio sem o dono. E 8 casos com a 0017 AUSENTE (deploy
+  antes da migration): a tela funciona sem etiquetas nem checklist.
+
+  No navegador, desktop e mobile, console limpo: arrasto com cancelar e com
+  concluir, painel por clique e por `?acao=`, Esc e "voltar" fechando, três
+  itens digitados em seguida, raias, lista ordenada, cronograma, gráficos
+  novos, modal de nova ação pela raia (dono já preenchido) e a página cheia.
+
+  **Ainda não exercitado:**
+  * **em produção** — tudo acima rodou no servidor de ensaio (§8);
+  * **arrastar com mouse de verdade** — o arrasto foi exercitado disparando os
+    `DragEvent` nos cartões, que passa pelos mesmos ouvintes, mas não pelo
+    gesto do navegador;
+  * **supervisor ou pessoa sem nenhuma ação** abrindo o quadro vazio.
+
+  ⚠️ `/acoes/<id>` (página cheia) continua **sem** `modulo_obrigatorio` —
+  era assim antes, e as rotas novas têm. Quem teve o módulo escondido ainda
+  abre uma ação sua pelo link direto.
 - **Troca de Poste: agrupamento por bairro, revisão com mapa e ensaio de OS**
   entrou em 04/09/2026, migration `0012` (`aplicar_revisao`,
   `criar_os_bairro_dia`, `status='ensaio'`, índice `agrupamentos_bairro_dia_uk`).

@@ -5,6 +5,7 @@ o cross-filter e os gráficos rodam no cliente (sem round-trip por clique).
 """
 import os
 import re
+import sys
 from datetime import datetime, timezone
 
 from flask import (
@@ -23,6 +24,11 @@ bp = Blueprint("dash", __name__)
 @bp.app_context_processor
 def injeta_status():
     """Disponibiliza o status de atualização e o usuário em todos os templates."""
+    # O fragmento do painel lateral de Ações não tem topbar: pagar a consulta
+    # do status da coleta a cada gravação no painel seria ida ao banco para
+    # nada (ele recarrega depois de cada item de checklist marcado).
+    if request.endpoint == "dash.acao_painel":
+        return {}
     try:
         st = dados.status_geral()
     except Exception:
@@ -796,15 +802,66 @@ def _acao_ou_404(acao_id, u, exigir=None):
     return a
 
 
+# Campos de cada ação que vão para o browser no quadro. Lista explícita, e não
+# a linha inteira: `observacoes` e `entrega_esperada` são texto longo que o
+# cartão não mostra, e o painel lateral busca a ação inteira quando abre.
+_CAMPOS_QUADRO = ("id", "codigo", "titulo", "area_id", "responsavel_id",
+                  "apoio_ids", "prazo", "data_abertura", "data_conclusao",
+                  "prioridade", "status", "progresso", "situacao", "dias",
+                  "atrasada", "proximo_passo", "etiquetas", "evidencia",
+                  "atualizado_em")
+
+
+def _item_quadro(a, u, cont, reun):
+    """Uma ação no formato do quadro: os campos + os contadores dos ícones +
+    o que ESTA pessoa pode fazer com ela. A permissão vai calculada do
+    servidor; o JS só decide se mostra a alça de arrastar."""
+    d = {k: a.get(k) for k in _CAMPOS_QUADRO}
+    c = cont.get(a["id"]) or {}
+    d.update(eventos=c.get("eventos", 0), chk_total=c.get("chk_total", 0),
+             chk_feitos=c.get("chk_feitos", 0), reunioes=reun.get(a["id"], 0),
+             pode_atualizar=acoes.pode_atualizar(u, a),
+             pode_gerir=acoes.pode_gerir(u, a))
+    return d
+
+
+def _reunioes_por_acao():
+    # Contador de enfeite: falhar aqui não pode derrubar o quadro.
+    try:
+        return reuniao_ia.reunioes_por_acao()
+    except Exception:
+        return {}
+
+
+def _item_de(acao_id, u):
+    """A ação recém-alterada, no formato do quadro — é o que as rotas JSON
+    devolvem para o cartão se redesenhar sem recarregar a página."""
+    a = acoes.obter(acao_id)
+    if not a:
+        return None
+    return _item_quadro(a, u, acoes.contagens([acao_id]), _reunioes_por_acao())
+
+
+def _nome(uid, usuarios):
+    for x in usuarios:
+        if x["id"] == uid:
+            return x.get("nome") or x["email"].split("@")[0]
+    return None
+
+
 @bp.route("/acoes")
 @login_obrigatorio
 @modulo_obrigatorio("acoes")
 def acoes_view():
     u = usuario_atual()
-    filtros = {k: (request.args.get(k) or "").strip() or None
-               for k in ("responsavel", "area", "status", "prioridade", "situacao")}
-    lista = acoes.listar(u, filtros)
+    # Sem filtro no servidor: o recorte de PERMISSÃO continua aqui (`listar`
+    # só devolve o que a pessoa pode ver), mas pessoa, área, prioridade,
+    # etiqueta e busca são aplicados no browser. As três visões (quadro,
+    # lista, cronograma) usam o mesmo dado, e recarregar a página a cada
+    # chip fecharia o painel lateral aberto.
+    lista = acoes.listar(u)
     aba = request.args.get("aba", "painel")
+    usuarios = _usuarios_para_escolha()
 
     # Só a aba Reuniões paga o custo do que é dela. As outras duas não podem
     # ficar mais lentas por causa de um card que elas nem mostram.
@@ -826,18 +883,50 @@ def acoes_view():
         recorrentes = reuniao_ia.recorrentes_pendentes()
         resumo_exec = reuniao_ia.resumo_executivo(lista=recorrentes)
 
-    # O Painel recebe a MESMA lista que a aba Ações, e não uma consulta
+    cont = acoes.contagens([a["id"] for a in lista])
+    reun = _reunioes_por_acao()
+    pacote = {
+        "acoes": [_item_quadro(a, u, cont, reun) for a in lista],
+        "usuarios": [{"id": x["id"], "nome": x.get("nome") or x["email"].split("@")[0]}
+                     for x in usuarios],
+        "areas": [{"id": x["id"], "nome": x["nome"]} for x in acoes.areas()],
+        "status": acoes.STATUS, "prioridades": acoes.PRIORIDADES,
+        "eu": u["id"], "pode_criar": acoes.pode_gerir(u),
+        "tem_etiquetas": acoes.tem_etiquetas(),
+        "hoje": datetime.now(timezone.utc).astimezone().date().isoformat(),
+    }
+
+    # O Painel recebe a MESMA lista que o quadro, e não uma consulta
     # própria: painel que refaz a consulta é painel que discorda da tabela.
+    resumo = acoes.resumo(lista)
+    for linha in resumo["carga_por_pessoa"]:
+        linha["nome"] = _nome(linha["responsavel_id"], usuarios) or "—"
     return render_template(
         "acoes.html", ativo="acoes", sem_sync=True, aba=aba,
-        acoes=lista, resumo=acoes.resumo(lista), filtros=filtros,
-        areas=acoes.areas(), usuarios=_usuarios_para_escolha(),
+        acoes=lista, resumo=resumo, pacote=pacote,
+        areas=acoes.areas(), usuarios=usuarios,
         status_opcoes=acoes.STATUS, prioridades=acoes.PRIORIDADES,
-        pode_criar=acoes.pode_gerir(u), ultimos=acoes.ultimos_eventos(),
+        pode_criar=acoes.pode_gerir(u), ultimos=acoes.ultimos_eventos([a["id"] for a in lista]),
+        tem_etiquetas=acoes.tem_etiquetas(), tem_checklist=acoes.tem_checklist(),
         reunioes=reunioes,
         recorrentes=recorrentes, resumo_exec=resumo_exec,
         resumo_exec_html=reuniao_ia.para_html(
             (resumo_exec or {}).get("markdown")))
+
+
+def _contexto_acao(a, u):
+    """O que o parcial `_acao_painel.html` precisa — o MESMO para o painel
+    lateral e para a página cheia, que são duas molduras do mesmo conteúdo."""
+    itens_chk = acoes.checklist(a["id"])
+    return dict(
+        acao=a, eventos=acoes.eventos(a["id"]),
+        atividade=acoes.atividade(a["id"], itens_chk),
+        checklist=itens_chk, areas=acoes.areas(),
+        itens_reuniao=reuniao_ia.itens_da_acao(a["id"]),
+        usuarios=_usuarios_para_escolha(),
+        status_opcoes=acoes.STATUS, prioridades=acoes.PRIORIDADES,
+        tem_etiquetas=acoes.tem_etiquetas(),
+        pode_gerir=acoes.pode_gerir(u, a), pode_atualizar=acoes.pode_atualizar(u, a))
 
 
 @bp.route("/acoes/<acao_id>")
@@ -845,13 +934,52 @@ def acoes_view():
 def acao_detalhe(acao_id):
     u = usuario_atual()
     a = _acao_ou_404(acao_id, u)
-    return render_template(
-        "acao_detalhe.html", ativo="acoes", sem_sync=True, acao=a,
-        eventos=acoes.eventos(acao_id), areas=acoes.areas(),
-        itens_reuniao=reuniao_ia.itens_da_acao(acao_id),
-        usuarios=_usuarios_para_escolha(),
-        status_opcoes=acoes.STATUS, prioridades=acoes.PRIORIDADES,
-        pode_gerir=acoes.pode_gerir(u, a), pode_atualizar=acoes.pode_atualizar(u, a))
+    return render_template("acao_detalhe.html", ativo="acoes", sem_sync=True,
+                           modo="pagina", **_contexto_acao(a, u))
+
+
+@bp.route("/acoes/<acao_id>/painel")
+@login_obrigatorio
+@modulo_obrigatorio("acoes")
+def acao_painel(acao_id):
+    """Fragmento HTML do painel lateral. Renderizado pelo servidor, e não
+    montado no JS a partir de JSON, para existir UMA definição da tela da
+    ação: a página cheia inclui o mesmo parcial."""
+    u = usuario_atual()
+    a = _acao_ou_404(acao_id, u)
+    # A página cheia também recarrega por aqui depois de cada gravação, e ela
+    # não tem painel para fechar nem "abrir em página cheia".
+    modo = "pagina" if request.args.get("modo") == "pagina" else "gaveta"
+    return render_template("_acao_painel.html", modo=modo, **_contexto_acao(a, u))
+
+
+def _resposta_json(acao_id, u, **extra):
+    return jsonify(dict({"ok": True, "acao": _item_de(acao_id, u)}, **extra))
+
+
+def _erro_json(e):
+    # ValueError é a regra de negócio recusando (evidência faltando, status
+    # inventado): é 400 e a mensagem vai para a tela. O resto é defeito.
+    if isinstance(e, ValueError):
+        return jsonify({"erro": str(e)}), 400
+    print(f"[acoes] erro inesperado: {e}", file=sys.stderr)
+    return jsonify({"erro": "Não foi possível salvar. Tente de novo."}), 500
+
+
+# Filtros do quadro que sobrevivem ao redirect da criação. Lista fechada, e só
+# a query string viaja — nunca um caminho —, para o campo não virar um
+# redirect para qualquer lugar.
+_ESTADO_QUADRO = ("q", "responsavel", "area", "prioridade", "etiqueta",
+                  "agrupar", "atalhos", "visao")
+
+
+def _estado_do_quadro(query):
+    from urllib.parse import parse_qs
+    try:
+        pares = parse_qs((query or "").lstrip("?"), max_num_fields=20)
+    except ValueError:
+        return {}
+    return {k: v[0][:100] for k, v in pares.items() if k in _ESTADO_QUADRO and v and v[0]}
 
 
 @bp.route("/acoes/nova", methods=["POST"])
@@ -860,14 +988,22 @@ def acao_nova():
     u = usuario_atual()
     if not acoes.pode_gerir(u):
         abort(403)
+    f = request.form
     try:
-        a = acoes.criar(request.form.to_dict(), u["id"],
-                        apoio_ids=request.form.getlist("apoio"))
+        dados = f.to_dict()
+        dados["etiquetas"] = f.getlist("etiqueta") or f.get("etiquetas")
+        a = acoes.criar(dados, u["id"], apoio_ids=f.getlist("apoio"),
+                        checklist_inicial=f.getlist("checklist"))
         flash(f"Ação {a['codigo']} criada.", "ok")
-        return redirect(url_for("dash.acao_detalhe", acao_id=a["id"]))
+        # Volta para o QUADRO com a ação aberta no painel: quem cria quase
+        # sempre quer conferir o que criou, mas no contexto das outras — e no
+        # MESMO recorte (quem criou dentro da raia da Ana volta às raias).
+        return redirect(url_for("dash.acoes_view", aba="acoes", acao=a["codigo"],
+                                **_estado_do_quadro(f.get("voltar"))))
     except Exception as e:
         flash(f"Erro ao criar a ação: {e}", "erro")
-        return redirect(url_for("dash.acoes_view", aba="acoes"))
+        return redirect(url_for("dash.acoes_view", aba="acoes",
+                                **_estado_do_quadro(f.get("voltar"))))
 
 
 @bp.route("/acoes/<acao_id>/editar", methods=["POST"])
@@ -884,12 +1020,73 @@ def acao_editar(acao_id):
     return redirect(url_for("dash.acao_detalhe", acao_id=acao_id))
 
 
+# O que o painel lateral edita campo a campo. `apoio_ids` e `etiquetas` são
+# listas; o resto, texto.
+_CAMPOS_EDITAVEIS = {"titulo", "entrega_esperada", "area_id", "responsavel_id",
+                     "prazo", "prioridade", "observacoes", "etiquetas", "apoio_ids"}
+
+
+@bp.route("/acoes/<acao_id>/campo", methods=["POST"])
+@login_obrigatorio
+@modulo_obrigatorio("acoes")
+def acao_campo(acao_id):
+    u = usuario_atual()
+    _acao_ou_404(acao_id, u, exigir=acoes.pode_gerir)
+    c = request.get_json(silent=True) or {}
+    campo, valor = c.get("campo"), c.get("valor")
+    if campo not in _CAMPOS_EDITAVEIS:
+        return jsonify({"erro": "campo não editável"}), 400
+    if campo in ("apoio_ids", "etiquetas") and not isinstance(valor, list):
+        return jsonify({"erro": "esperava uma lista"}), 400
+    if campo not in ("apoio_ids", "etiquetas") and not (valor is None or isinstance(valor, str)):
+        return jsonify({"erro": "valor inválido"}), 400
+    try:
+        if campo == "apoio_ids":
+            acoes.editar(acao_id, {}, apoio_ids=valor)
+        else:
+            acoes.editar(acao_id, {campo: valor})
+    except Exception as e:
+        return _erro_json(e)
+    return _resposta_json(acao_id, u)
+
+
+@bp.route("/acoes/<acao_id>/mover", methods=["POST"])
+@login_obrigatorio
+@modulo_obrigatorio("acoes")
+def acao_mover(acao_id):
+    """Troca de status pelo quadro (arrastar) ou pelo seletor do painel.
+
+    É a MESMA `acoes.atualizar` do formulário: as travas de evidência e de
+    próximo passo valem igual, e o evento é gravado junto.
+    """
+    u = usuario_atual()
+    _acao_ou_404(acao_id, u, exigir=acoes.pode_atualizar)
+    c = request.get_json(silent=True) or {}
+    if c.get("status") not in acoes.STATUS:
+        return jsonify({"erro": "status inválido"}), 400
+    textos = ("texto", "proximo_passo", "evidencia", "data_conclusao")
+    if any(not (c.get(k) is None or isinstance(c.get(k), str)) for k in textos):
+        return jsonify({"erro": "valor inválido"}), 400
+    try:
+        acoes.atualizar(
+            acao_id, u["id"], c.get("texto"), status=c["status"],
+            proximo_passo=c.get("proximo_passo"),
+            evidencia=(c.get("evidencia") or "").strip() or None,
+            data_conclusao=c.get("data_conclusao") or None)
+    except Exception as e:
+        return _erro_json(e)
+    return _resposta_json(acao_id, u)
+
+
 @bp.route("/acoes/<acao_id>/atualizar", methods=["POST"])
 @login_obrigatorio
 def acao_atualizar(acao_id):
     u = usuario_atual()
     _acao_ou_404(acao_id, u, exigir=acoes.pode_atualizar)
-    f = request.form
+    # O painel lateral manda JSON e quer JSON de volta (o cartão se redesenha
+    # sem recarregar); a página cheia e o celular antigo mandam formulário.
+    f = request.get_json(silent=True) if request.is_json else request.form
+    f = f or {}
     try:
         acoes.atualizar(
             acao_id, u["id"], f.get("texto"),
@@ -898,8 +1095,12 @@ def acao_atualizar(acao_id):
             proximo_passo=f.get("proximo_passo"),
             evidencia=f.get("evidencia") or None,
             data_conclusao=f.get("data_conclusao") or None)
+        if request.is_json:
+            return _resposta_json(acao_id, u)
         flash("Atualização registrada.", "ok")
     except Exception as e:
+        if request.is_json:
+            return _erro_json(e)
         flash(str(e), "erro")
     return redirect(url_for("dash.acao_detalhe", acao_id=acao_id))
 
@@ -909,6 +1110,13 @@ def acao_atualizar(acao_id):
 def acao_comentar(acao_id):
     u = usuario_atual()
     _acao_ou_404(acao_id, u, exigir=acoes.pode_gerir)
+    if request.is_json:
+        c = request.get_json(silent=True) or {}
+        try:
+            acoes.comentar(acao_id, u["id"], c.get("texto") if isinstance(c.get("texto"), str) else None)
+        except Exception as e:
+            return _erro_json(e)
+        return _resposta_json(acao_id, u)
     try:
         acoes.comentar(acao_id, u["id"], request.form.get("texto"),
                        reuniao_id=request.form.get("reuniao_id") or None)
@@ -919,6 +1127,25 @@ def acao_comentar(acao_id):
     if destino == "reuniao" and request.form.get("reuniao_id"):
         return redirect(url_for("dash.reuniao_detalhe", reuniao_id=request.form["reuniao_id"]))
     return redirect(url_for("dash.acao_detalhe", acao_id=acao_id))
+
+
+@bp.route("/acoes/<acao_id>/checklist", methods=["POST"])
+@login_obrigatorio
+@modulo_obrigatorio("acoes")
+def acao_checklist(acao_id):
+    """Quem pode atualizar a ação mexe no checklist — é o plano de trabalho
+    dela, e o % que sai dali é o mesmo que o responsável reportaria."""
+    u = usuario_atual()
+    _acao_ou_404(acao_id, u, exigir=acoes.pode_atualizar)
+    c = request.get_json(silent=True) or {}
+    if not all(c.get(k) is None or isinstance(c.get(k), str) for k in ("op", "item_id", "texto")):
+        return jsonify({"erro": "valor inválido"}), 400
+    try:
+        r = acoes.checklist_aplicar(acao_id, c.get("op"), u["id"],
+                                    item_id=c.get("item_id"), texto=c.get("texto"))
+    except Exception as e:
+        return _erro_json(e)
+    return _resposta_json(acao_id, u, checklist=r)
 
 
 @bp.route("/reunioes/nova", methods=["POST"])

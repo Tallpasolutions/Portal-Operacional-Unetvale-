@@ -68,6 +68,23 @@ def coluna_faltando(erro):
         return False
 
 
+# Tabela que a migration ainda não criou: o PostgREST responde 404 com este
+# código (medido em 29/09/2026 com `acao_checklist` antes da 0017). É irmão de
+# `coluna_faltando`, e pelo mesmo motivo só este código conta.
+_TABELA_FALTANDO = "PGRST205"
+
+
+def tabela_faltando(erro):
+    """O erro foi por tabela inexistente no cache do PostgREST."""
+    r = getattr(erro, "response", None)
+    if r is None:
+        return False
+    try:
+        return (r.json() or {}).get("code") == _TABELA_FALTANDO
+    except Exception:
+        return False
+
+
 def select(tabela, params=None, schema=None):
     """GET /rest/v1/<tabela> -> lista de dicts."""
     url, _ = _cfg()
