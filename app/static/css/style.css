@@ -561,6 +561,10 @@ tr.clicavel{ cursor:pointer; }
 .rank-linha.selecionado .rl{ color:var(--brand-d); font-weight:700; }
 .rank-linha.selecionado .rf{ background:var(--brand-d); }
 .rank-linha.apagado{ opacity:.55; }
+/* O mesmo cross-filter nas tabelas mês a mês do /iqi. */
+.tbl-mensal tr.clicavel{ cursor:pointer; }
+.tbl-mensal tr.selecionado td{ background:var(--brand-l); font-weight:700; }
+.tbl-mensal tr.apagado td{ opacity:.55; }
 
 /* Filtro global do Dashboard. Gruda sob a topbar só em tela larga: no celular
    a barra quebra em três ou quatro linhas, e grudada comeria metade da tela. */
