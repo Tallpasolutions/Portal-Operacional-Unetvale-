@@ -305,16 +305,26 @@ def coletar_ger_cancelamentos(full=False):
 def coletar_ger_idf(full=False):
     """Painel + lista de feedbacks a cada rodada; drill por setor/cidade 1x/dia.
 
-    O drill custa ~4 min por mês (dezenas de chamadas lentas ao `detalhes`) e
-    dobraria a rodada. Sai na primeira rodada do dia, no `--full`, e sempre
-    que algum mês pedido ainda não tiver drill nenhum.
+    O drill custa ~4 min por mês (dezenas de chamadas lentas ao `detalhes`;
+    medido em 29/09/2026: 501 s para dois meses). Por isso:
+      * mês CORRENTE: drill na primeira rodada do dia;
+      * mês anterior: só se ainda não tiver drill nenhum — ele já fechou, e o
+        setor de cada atendente e a nota por cidade quase não mudam mais;
+      * `--full`: todos.
+    Sem isso, a primeira rodada do dia passaria dos 15 min que o botão
+    "Atualizar" espera antes de alertar "coletor offline".
     """
     import gerencial as g
     anterior = supa_ler("ger_idf")
     meses = _meses(full)
     blocos = (anterior or {}).get("meses_dados") or {}
-    detalhar = full or any(
-        not _eh_de_hoje((blocos.get(m) or {}).get("detalhado_em")) for m in meses)
+    corrente = f"{date.today():%Y-%m}"
+
+    def precisa(m):
+        feito = (blocos.get(m) or {}).get("detalhado_em")
+        return not feito or (m == corrente and not _eh_de_hoje(feito))
+
+    detalhar = set(meses) if full else {m for m in meses if precisa(m)}
     supa_upsert("ger_idf", g.coletar_idf(
         _sessao(gestor=True), meses, anterior=anterior, detalhar=detalhar))
 

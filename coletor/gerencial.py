@@ -734,6 +734,13 @@ class IdfVazio(RuntimeError):
 
 
 def coletar_idf(sessao, meses, anterior=None, detalhar=True):
+    """Painel + feedbacks de cada mes; drill por setor/cidade so em `detalhar`.
+
+    `detalhar` e True (todos os meses), False (nenhum) ou a colecao de meses
+    que ganham drill nesta rodada — ver `coletar_ger_idf` no enviar.py.
+    """
+    if detalhar is True or detalhar is False:
+        detalhar = set(meses) if detalhar else set()
     csrf, _ = _csrf(sessao, "/relatorios/indicadores9")
     payload = dict(anterior or {})
     blocos = dict(payload.get("meses_dados") or {})
@@ -751,8 +758,8 @@ def coletar_idf(sessao, meses, anterior=None, detalhar=True):
         r.raise_for_status()
         antigo = blocos.get(mes) or {}
         blocos[mes] = parse_idf(_html_de_actions(r.text))
-        blocos[mes].update(idf_detalhado(sessao, csrf, ini, fim, textos, detalhar))
-        if not detalhar:
+        blocos[mes].update(idf_detalhado(sessao, csrf, ini, fim, textos, mes in detalhar))
+        if mes not in detalhar:
             # O drill por setor/cidade e o que pesa (~45 chamadas de ~5 s por
             # mes, medido em 29/09/2026: 4 min para 08/2026). Fora da rodada
             # diaria, fica o da ultima vez — setor de atendente e cidade do

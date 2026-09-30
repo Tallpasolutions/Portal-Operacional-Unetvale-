@@ -104,7 +104,7 @@ servidor, e cuidado redobrado com migration destrutiva.
 
 | Rota | Módulo | Origem do dado | Quem vê |
 |---|---|---|---|
-| `/dashboard` | **Dashboard** | `dados_modulo` (5 coletas `ger_*`) | todos |
+| `/dashboard` | **Dashboard** | `dados_modulo` (6 coletas `ger_*`) | todos |
 | `/produtividade` | Produtividade | `dados_modulo` (coletor) | todos; supervisor só o time dele |
 | `/iqi` | IQI / IQM | `dados_modulo` (coletor) | todos |
 | `/massivas` | Massivas | `dados_modulo` (coletor) | todos |
@@ -130,16 +130,17 @@ para relacionar reincidência com cancelamento, que é justamente a relação qu
 interessa. A ordem desce do indicador para a causa: qualidade → causa raiz →
 churn → fila → atendimento.
 
-Cinco coletas novas, todas no coletor (`coletor/gerencial.py`), gravando em
+Seis coletas, todas no coletor (`coletor/gerencial.py`), gravando em
 `dados_modulo` como os módulos antigos:
 
-| Módulo | Relatório do WVSA | Sessão |
-|---|---|---|
-| `ger_categorias` | `operacional31` — causa raiz (Cat 1..5) | padrão |
-| `ger_cancelamentos` | `indicadores13` — churn válido | padrão |
-| `ger_esteira` | `/operacional/os/query` — fila de agendamento | padrão |
-| `ger_idf` | `indicadores9` — nota dos feedbacks | **gestor** |
-| `ger_salas` | `operacional15` — Rocketchat | **gestor** |
+| Módulo | Relatório do WVSA | Sessão | Cadência |
+|---|---|---|---|
+| `ger_categorias` | `operacional31` — causa raiz (Cat 1..6) | padrão | rodada |
+| `ger_cancelamentos` | `indicadores13` (IGC) + `operacional19` (CMT) | padrão | rodada |
+| `ger_esteira` | `/operacional/os/query` — fila de agendamento | padrão | rodada |
+| `ger_idf` | `indicadores9` — painel, lista de feedbacks, drill setor/cidade | **gestor** | rodada; drill 1x/dia |
+| `ger_salas` | `operacional15` — Rocketchat | **gestor** | rodada |
+| `ger_atendimento` | `indicadores14` (RRO) — TMA/TMF do chat | **gestor** | **1x/dia** |
 
 **Duas sessões do WVSA, uma rodada.** O relatório é recortado por usuário:
 `w8_client.login()` usa `W8_USER`, `login_gestor()` usa `W8_USER_GESTOR`. As
@@ -150,9 +151,20 @@ uma linha por reincidência — com o **técnico** dentro —, no mesmo formato
 compacto da Produtividade (índices para listas de texto). Não é economia de
 espaço: é que a visualização "Causa raiz" do `/iqi` cruza empresa, supervisor e
 mês ao mesmo tempo, e contagem já agregada não se recorta depois. O Dashboard,
-que mostra o consolidado, agrega na hora em `gerencial.agregar_categorias`.
+que mostra o consolidado, também conta no browser desde 29/09/2026 (filtro
+global e cross-filter — ver adiante); `gerencial.agregar_categorias` ficou para
+o servidor.
 
-⚠️ As listas de texto (`tec`, `c1`…`c5`, `cid`) são **carregadas do payload
+**A Categoria 6 é MÚLTIPLA** (`<select multiple>` no WVSA; são os ajustes de
+Wi-Fi — BAND STEERING, Atualizado Firmware, IPV6…). No registro compacto ela é
+uma **lista de índices** e mora na posição 7, **no fim**: os meses não
+recoletados continuam com registros de 7 posições, e um campo novo no meio
+deslocaria `cidade` em todos eles. `multiplos` no payload diz quais campos são
+lista. Registro sem a posição 7 = "não coletada", que a tela distingue de `[]`
+("nenhum ajuste") — os meses anteriores a 29/09/2026 só ganham Cat 6 com
+`enviar.py --so ger_categorias --full`.
+
+⚠️ As listas de texto (`tec`, `c1`…`c6`, `cid`) são **carregadas do payload
 anterior e só crescem**. Os meses que não foram recoletados na rodada guardam
 índices que apontam para elas; reconstruí-las do zero deslocaria todo índice
 antigo e trocaria em silêncio a categoria de cada registro do histórico.
@@ -185,18 +197,93 @@ reincidência como "ONU - Gpon apagado". Quanto menos, melhor. A razão
 nenhuma das fontes coletadas**; se for pedida, precisa de relatório novo.
 
 **A causa raiz aparece em duas telas, com propósitos diferentes.** No
-`/dashboard` é o consolidado do mês, em ranking. No `/iqi` é uma tabela mensal
-(Cat 4 e Cat 5 nas linhas, meses nas colunas), dentro da visualização Tabela
-mensal. As duas leem `gerencial.causa_raiz()` e compartilham
-`dashboard_rank.js`; Categorias 1 e 2 só aparecem no Dashboard, porque dizem
-como o cliente pediu e como o N1 encerrou, não a causa.
+`/dashboard` é o mês, em ranking. No `/iqi` é uma tabela mensal (Cat 4, 5 e 6
+nas linhas, meses nas colunas), dentro da visualização Tabela mensal. As duas
+contam com **`Dash.contarCategorias`** (`dashboard_rank.js`), uma função só;
+Categorias 1 e 2 só aparecem no Dashboard, porque dizem como o cliente pediu e
+como o N1 encerrou, não a causa.
+
+**Cross-filter: clicar numa categoria filtra as OUTRAS pelos protocolos dela.**
+Nas duas telas. Ao contar um campo, aplica-se a seleção de todos os outros,
+menos a dele — o cartão clicado fica inteiro, com a linha marcada, e os demais
+recortam. ⚠️ O filtro é sobre **registros**, não uma árvore Cat 4 → Cat 5:
+medido em 08/2026, "Trocado Conector ONU" aparece sob Conector (6) **e** sob
+Equipamento (1). Uma árvore fixa esconderia um dos dois. O clique é **delegado
+no contêiner** (`Dash.rank` com `aoClicar`), porque a lista é redesenhada a
+cada filtro e ouvinte preso à linha morreria com ela.
+
+**Filtro global** (`dashboard_filtro.js`, dono do estado): Empresa, Supervisor,
+Técnico e "Só ofensores". Publica **`dashfiltro`** no `DOMContentLoaded` e
+responde `DashFiltro.passa(nome, {ind, mes})`. Empresa, apelido e alcance do
+supervisor vêm de `iqi_supervisor.js`; a regra de ofensor, de
+**`iqi_regras.js`** (`ofensoresDoMes`, usada também pelo bloco Ofensores do
+`/iqi`); o recorte operacional, de **`supervisores.so_operacional`** (saiu de
+`routes.py`). Uma definição de cada.
+
+| Bloco | O que o filtro global faz |
+|---|---|
+| IQI/IQM | vira **soma dos técnicos do recorte** (só operacional), rotulada — o consolidado do WVSA volta ao limpar |
+| Causa raiz | recorta os registros pelo técnico |
+| Cancelamentos | recorta **só** o técnico do último atendimento |
+| IDF | recorta **só** o canal OS (técnico); ligação/chat têm filtro próprio |
+| Esteira, salas, TMA/TMF | nada — e a seção mostra a etiqueta `.nao-recorta` |
+
+"Só ofensores" é por indicador e mês; sem indicador (cancelamento, OS do IDF),
+vale ser ofensor em IQI **ou** IQM naquele mês.
+
+**Cancelamentos: técnico do último atendimento.** Sai do CMT
+(`operacional19`), que lista por contrato cancelado as OS e o técnico de cada
+uma; o último atendimento é a **OS de maior número** (conferido: a `#579421`
+abriu em 11/08, o contrato cancelou em 20/08). A cidade e o motivo vêm do IGC,
+cuja resposta já trazia um `pivotUI([...])` **contrato a contrato** que ninguém
+lia — o cruzamento é pelo número do contrato (45 de 45 casaram em 08/2026).
+⚠️ Cobre **só o grupo PROBLEMA TECNICO e só quem teve OS**: 45 de 64 em
+08/2026. E o rótulo do motivo NÃO diz se houve OS — 7 "SEM HISTORICO" têm OS no
+CMT, e 5 "HISTORICO DE OS" não aparecem lá. A tela mostra a cobertura
+calculada, nunca promete 100%. A coluna "Usuário" do CMT é o **atendente** que
+registrou o cancelamento, não o cliente.
+
+Filtro por grupo/motivo reconta cidade, tempo de casa e grupos a partir do
+contrato a contrato; a **receita perdida vira "—"**, porque o pivot não traz o
+valor por contrato. A faixa de ticket saiu da tela em 29/09/2026 (o coletor
+não a guarda mais por contrato).
+
+**IDF: alerta, subsetor, cidade, atendente.** Alerta abaixo do limiar
+(`dashboard_metas.idf_alerta`, padrão 3; **3 exato não alerta**) na média do
+canal, na linha do atendente e numa lista das avaliações. Três fontes, porque
+nenhum endpoint entrega tudo: painel (números oficiais), `lista/{canal}`
+(feedback a feedback, **sem setor nem cidade**) e `detalhes` (drill por setor
+ou cidade → atendente, com qtd e média). Com cidade, os números vêm do drill —
+média ponderada, **sem % resolvido** (o WVSA não publica por cidade), e a lista
+de alertas some com o porquê.
+
+| Recorte | Ligação | Chat | OS |
+|---|---|---|---|
+| Subsetor (setor do IDF) | sim | sim | não (o "setor" de OS é a empresa) |
+| Cidade | **não** (vem tudo "Indefinido") | sim | sim |
+| Atendente | sim | sim | não — é o filtro global |
+
+Conferido em 08/2026: lista recontada = painel (4,61/88,84%, 4,48/91,15%,
+4,51/78,76%), subsetor N1 chats = 4,33 com 420 e Tijucas OS = 4,50 com 115,
+iguais ao drill do WVSA. Nome e telefone do cliente **não** são guardados; a
+observação só quando a nota é ≤ 3 (`IDF_OBS_ATE`).
+
+**TMA/TMF: do chat, pelo RRO.** O WVSA não tem relatório com esses nomes
+(ITA, `ligacoes6`, Ranking N1 e MRP conferidos). TMA = última mensagem −
+início, só conversa fechada com atendente humano; TMF = primeira resposta
+humana em "Tempos de resposta" (o bot não conta). O coletor agrega por
+(departamento, atendente) em **somas e faixas de duração** — a tela soma as
+partes e mostra a **mediana aproximada** ao lado da média, porque a média
+mente: em 09/2026, TMA médio de 200 min contra mediana ≤ 120 min.
 
 ⚠️ A visualização do `/iqi` conta **todo protocolo de reincidência, inclusive
 de equipes de infra**, que não entram no cálculo do `%`. O total dela não fecha
 com o das outras visualizações da mesma tela — é intencional, está escrito na
 tela, e o filtro de empresa separa.
 
-O que o módulo **não** faz, de propósito: o card "Massivas em aberto" do
+O que o módulo **não** faz, de propósito: TMA/TMF de **ligação** — nenhuma
+fonte com duração de chamada foi encontrada (o `ligacoes6` só conta por ramal e
+hora). O card "Massivas em aberto" do
 material de referência (a lista de `#7403` com previsão) ficou de fora. Falha
 Massiva como *causa de reincidência* está dentro, nas Categorias 4 e 5 — e é a
 segunda maior.
@@ -1257,6 +1344,46 @@ parece travado num estado que se resolve sozinho assim que a página é pintada.
 Ao investigar layout pelo preview, force a pintura (um screenshot serve) antes
 de concluir que há defeito.
 
+**Formato novo no payload derruba o app VELHO — deploy do app ANTES do
+coletor.** A Cat 6 virou lista dentro do registro, e o `agregar_categorias`
+anterior a 29/09/2026 fazia `reg[i] >= 0` em todo campo: com o coletor novo
+gravando antes de o app novo subir, `list >= int` é `TypeError` e o Dashboard
+de produção cai. A ordem é: mergear → Vercel publicar → só então copiar
+`coletor/*.py` para `~/unetvale-coletor` e rodar o backfill. Vale para
+qualquer mudança de formato em `dados_modulo`: o app tem de aceitar o formato
+novo E o antigo antes de o coletor começar a escrever.
+
+**O RRO devolve SEMPRE as conversas em aberto**, qualquer que seja o período.
+Pedindo só 01/09/2026 vieram 872 conversas de 01/09 e mais 69 abertas de
+28-29/09. O `fim` é respeitado; é o "aberto" que escapa. O corte é refeito
+por "Iniciado em" e a sala (id do link `/live/<id>`) deduplica entre janelas.
+
+**`data-order` da célula de tempo do RRO não é o tempo.** "30 minutos 19
+segundos" (1819 s) vinha com `data-order=654394`. Lê-se o texto.
+
+**A página do AII (`operacional31`) GRAVA ao trocar um select.** Cada Cat 4/5/6
+tem `onchange → POST /relatorios/operacional31/trocar-categoria`. O coletor
+usa `requests` e nunca dispara isso — mas **nenhum teste pode automatizar essa
+tela num navegador**: um `change` num select reclassifica o protocolo no WVSA
+de produção.
+
+**O drill do IDF é lento: ~5 s por chamada, ~45 chamadas por mês.** Medido em
+29/09/2026: 501 s para dois meses com drill, contra segundos sem ele. Por isso
+o drill sai 1x/dia e só no mês corrente (o anterior, só se nunca teve); a
+lista de feedbacks vai em toda rodada.
+
+**Módulo de cadência diária precisa ser ensinado ao Monitoramento.**
+`dados.CADENCIA_DIARIA`: o limiar de "desatualizado" é 26 h, não 3 h; e numa
+rodada em que ele já saiu hoje ele não conta no progresso nem fica "Na fila" —
+sem isso o botão mostraria "9/10" a rodada inteira. Quem encerra a rodada é o
+log `geral`, não o contador. O `enviar.py` registra "Já coletado hoje" no
+`coletor_log` em vez de "Atualizado".
+
+**Servidor local sem reloader não recarrega Python.** `use_reloader=False` +
+`jinja_env.auto_reload` recarrega TEMPLATE, não `gerencial.py`: a chave nova
+do pacote simplesmente não aparece no `window.__DASH__`. Reinicie o servidor
+depois de mexer em `.py`.
+
 **Pooler do Supabase: `aws-1-us-west-2`.** A região está no hostname; a errada
 dá "tenant not found".
 
@@ -1698,6 +1825,35 @@ a.run(port=5001, use_reloader=False)"
   por técnico (`except Exception: raw[nome] = None`) e o técnico simplesmente
   não aparece no ranking, sem erro em lugar nenhum. Na medição de 01/09/2026
   foram 0 falhas em 132, mas nada avisaria se não fosse.
+
+- **Dashboard: filtro global, cross-filter, Cat 6, IDF detalhado, TMA/TMF e
+  técnico ofensor do cancelamento** entrou em 29/09/2026, sem migration (tudo
+  em `dados_modulo`; metas novas `idf_alerta`, `tma_chat`, `tmf_chat` pela lista
+  de Configurações). O porquê de cada decisão está no §4; as armadilhas, no §6.
+
+  Exercitado contra o WVSA de verdade com as coletas gravando em ARQUIVO local
+  (nada no Supabase, pela ordem de deploy do §6): categorias 08-09/2026 (Cat 6
+  em 25 de 144 linhas, BAND STEERING 11), cancelamentos (527 contratos no
+  detalhe = 527 válidos; 45 e 30 com última OS), IDF (224/1.152/339 feedbacks,
+  médias iguais ao painel) e RRO de setembro (23.562 conversas em 106 s,
+  payload de 50 KB). No navegador, com esses payloads sobrepostos em memória,
+  desktop e mobile, console limpo: filtro por empresa, "Só ofensores",
+  técnico, cross-filter nas duas telas, filtros de motivo e de IDF. Rotas pelo
+  `test_client` com payload de produção, vazio, novo e malformado: todas 200.
+  A página do Dashboard vai de ~106 KB para ~244 KB com os dados novos.
+
+  **Ainda não exercitado:**
+  * **a coleta nova gravando em produção** — espera o deploy do app (§6);
+    depois, copiar o `coletor/` para `~/unetvale-coletor` e rodar
+    `enviar.py --so ger_categorias --full` (Cat 6 do ano) e `--so ger_atendimento --full`;
+  * **o supervisor no filtro global** com vínculos reais — o select aparece
+    para o admin, mas não foi exercitado com um alcance escolhido;
+  * **a cadência diária pelo launchd** — a decisão foi provada com Supabase e
+    WVSA substituídos, não num dia real.
+
+  ⚠️ Em aberto: por que 5 contratos "HISTORICO DE OS" de 08/2026 não aparecem
+  no CMT (232658, 236239, 236279, 232797, 230690). Olhar um deles no WVSA antes
+  de afirmar que o ranking de técnico cobre todo cancelamento com OS.
 
 - **Backup do Supabase não foi confirmado.** Ações e Troca de Poste não têm de
   onde ser recoletados. Confirme antes de qualquer operação destrutiva.
