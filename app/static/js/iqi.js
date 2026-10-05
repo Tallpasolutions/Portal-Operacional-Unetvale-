@@ -13,6 +13,8 @@
   let selecionado = null; // técnico filtrado por clique
   let chart = null;
 
+  const MESES_NOME = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
   const fmt = (v) => v.toFixed(2).replace(".", ",") + "%";
   const fmtMeta = (v) => (Number.isInteger(v) ? v.toString() : v.toFixed(1).replace(".", ",")) + "%";
   // Dentro da meta: ao menos MINOS OSs (>=, 10 conta) e % abaixo da meta.
@@ -120,11 +122,14 @@
 
     // O mês no título do gráfico, e não só no seletor lá em cima: quem rola até
     // aqui, ou recebe um print desta área, precisa saber de que mês é a barra.
-    // Mesmo texto da opção, então "(Parcial)" vem junto quando vale.
+    // Por extenso ("Agosto 2026"); o "(Parcial)" vem da opção do seletor, que
+    // é quem decide se o mês já fechou — uma regra só.
     const mesGrafico = document.getElementById("mesGrafico");
     if (mesGrafico) {
+      const [mm, yyyy] = DATA.meses[mesIdx].split("/");
       const op = document.getElementById("mes").selectedOptions[0];
-      mesGrafico.textContent = op ? op.textContent : DATA.meses[mesIdx];
+      const parcial = op && op.textContent.includes("(Parcial)") ? " (Parcial)" : "";
+      mesGrafico.textContent = `${MESES_NOME[+mm - 1] || mm} ${yyyy}${parcial}`;
     }
 
     // textos que mudam conforme a visão (dentro/fora da meta)
@@ -339,8 +344,6 @@
   document.querySelectorAll("#ordToggle button").forEach((b) => b.addEventListener("click", () => {
     document.querySelectorAll("#ordToggle button").forEach((x) => x.classList.toggle("active", x === b));
     ordem = b.dataset.o;
-    const t = document.getElementById("ordemTxt");
-    if (t) t.textContent = ordem === "stars" ? "por recorrência ★ (crescente)" : "(crescente)";
     desenhar();
   }));
 
