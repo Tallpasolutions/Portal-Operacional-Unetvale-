@@ -34,9 +34,39 @@
       : DATA.tecnicos;
     return base.filter((t) => crit(t.m[idx])).map((t) => ({
       nome: t.nome, curto: t.nome.split(" - ").pop(),
-      empresa: t.nome.includes(" - ") ? t.nome.split(" - ")[0] : "",
+      empresa: window.__iqiSupervisor ? window.__iqiSupervisor.empresaDe(t.nome)
+        : (t.nome.includes(" - ") ? t.nome.split(" - ")[0] : ""),
       iqi: t.m[idx][2], os: t.m[idx][0], cham: t.m[idx][1], stars: st(t.m, idx),
     }));
+  }
+
+  /** Rótulo do eixo X em várias linhas: o nome quebrado por palavra e a
+   * empresa na última. Quebrar, em vez de cortar, porque o nome inteiro é o
+   * que se lê na reunião. `max` = caracteres que cabem na largura da barra.
+   */
+  function rotuloEixo(d, max) {
+    const linhas = [];
+    let atual = "";
+    for (const p of d.curto.split(/\s+/)) {
+      if (atual && (atual + " " + p).length > max) { linhas.push(atual); atual = p; }
+      else atual = atual ? atual + " " + p : p;
+    }
+    if (atual) linhas.push(atual);
+    if (d.empresa) linhas.push(d.empresa);
+    return linhas;
+  }
+  // Abaixo disso a quebra viraria uma palavra por linha e o rótulo ficaria
+  // mais alto que o próprio gráfico: aí vira UMA linha "Nome · EMPRESA" em pé.
+  // Uma, e não duas, porque no celular a barra tem ~20px e duas linhas
+  // inclinadas se atropelam com as da barra vizinha.
+  const PX_POR_CHAR = 7, MIN_CHARS = 10;
+  // Em pé, o rótulo inteiro passa da altura que o Chart.js reserva ao eixo e
+  // sai cortado no pé do gráfico ("Evandro Marques Monpean Duarte · INNOVA").
+  // Primeiro e último nome ficam inteiros — é por eles que a equipe se chama.
+  function abreviado(nome) {
+    const p = nome.split(/\s+/).filter((x) => !/^(da|de|do|das|dos|e)$/i.test(x));
+    if (p.length <= 2) return p.join(" ");
+    return [p[0], ...p.slice(1, -1).map((x) => x[0] + "."), p[p.length - 1]].join(" ");
   }
 
   /** Estado do filtro único da visualização Gráfico.
@@ -163,8 +193,18 @@
       },
     };
 
+    // Cabe quantos caracteres por barra? Recalculado a cada redimensionamento,
+    // porque o mesmo gráfico com 14 técnicos cabe deitado numa tela larga e
+    // não cabe no notebook. O Chart.js decide inclinar pela linha mais larga
+    // do rótulo — sem a quebra, "Alex Sandro Rodrigues Paschoal" inclinava
+    // todos os outros.
+    const charsPorBarra = (w) => Math.floor((w - 60) / Math.max(chartData.length, 1) / PX_POR_CHAR);
+    const deitado = (w) => charsPorBarra(w) >= MIN_CHARS;
+    const canvas = document.getElementById("g-iqi");
+    const w0 = canvas.parentElement.clientWidth;
+
     if (chart) chart.destroy();
-    chart = new Chart(document.getElementById("g-iqi"), {
+    chart = new Chart(canvas, {
       type: "bar",
       data: {
         labels: chartData.map((d) => d.curto),
@@ -185,7 +225,29 @@
             return [`${d.nome}`, `${IND}: ${fmt(d.iqi)} | OSs: ${d.os} | c/ chamado: ${d.cham} | recorrência: ${d.stars} ${d.stars > 1 ? "meses" : "mês"}`];
           } } },
         },
-        scales: { y: { beginAtZero: true, ticks: { callback: (v) => v + "%" } } },
+        scales: {
+          y: { beginAtZero: true, ticks: { callback: (v) => v + "%" } },
+          // autoSkip desligado: com o rótulo mais alto o Chart.js passaria a
+          // pular técnico, e barra sem nome embaixo não serve para nada.
+          x: { ticks: {
+            autoSkip: false,
+            // min = max: deixado livre, o Chart.js para no ângulo que poupa
+            // altura (~43° no celular) e os rótulos se atropelam.
+            minRotation: deitado(w0) ? 0 : 90,
+            maxRotation: deitado(w0) ? 0 : 90,
+            font: (c) => ({ size: deitado(c.chart.width) ? 12 : 10 }),
+            callback: function (v, i) {
+              const d = chartData[i]; if (!d) return "";
+              const w = this.chart.width;
+              return deitado(w) ? rotuloEixo(d, charsPorBarra(w))
+                : [abreviado(d.curto), d.empresa].filter(Boolean).join(" · ");
+            },
+          } },
+        },
+        onResize: (ch, size) => {
+          const t = ch.options.scales.x.ticks;
+          t.minRotation = t.maxRotation = deitado(size.width) ? 0 : 90;
+        },
         onClick: (evt) => {
           const pts = chart.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
           if (!pts.length) return;
