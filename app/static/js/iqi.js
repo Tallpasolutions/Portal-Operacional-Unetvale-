@@ -118,6 +118,15 @@
     const fora = modo === "fora";
     const base = ranking(mesIdx);
 
+    // O mês no título do gráfico, e não só no seletor lá em cima: quem rola até
+    // aqui, ou recebe um print desta área, precisa saber de que mês é a barra.
+    // Mesmo texto da opção, então "(Parcial)" vem junto quando vale.
+    const mesGrafico = document.getElementById("mesGrafico");
+    if (mesGrafico) {
+      const op = document.getElementById("mes").selectedOptions[0];
+      mesGrafico.textContent = op ? op.textContent : DATA.meses[mesIdx];
+    }
+
     // textos que mudam conforme a visão (dentro/fora da meta)
     document.getElementById("qtd").textContent = base.length;
     document.getElementById("rec").textContent = base.length ? Math.max(...base.map((d) => d.stars)) : 0;
