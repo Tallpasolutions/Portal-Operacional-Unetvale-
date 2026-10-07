@@ -793,46 +793,55 @@ def _nomes(ids):
         return []
 
 
-def _mencoes_por_acao(excluir_reuniao=None):
+def _mencoes_por_acao(excluir_reuniao=None, acao_id=None):
     """{acao_id: set(reuniao_id)} — em quantas reuniões distintas cada ação apareceu.
 
     Conta as duas formas de uma ação entrar numa reunião: item extraído da
     ata e comentário que o gestor registrou na própria reunião. Contar só
     uma delas subestimaria justamente as reuniões sem gravação.
+
+    Com `acao_id`, conta só aquela: é o caso de toda gravação no quadro, que
+    redesenha UM cartão e lia as duas tabelas inteiras para isso. As duas
+    leituras são independentes e vão em paralelo.
     """
     mapa = {}
+    alvo = f"eq.{acao_id}" if acao_id else "not.is.null"
 
-    def somar(acao_id, reuniao_id):
-        if not acao_id or not reuniao_id or reuniao_id == excluir_reuniao:
+    def somar(a, reuniao_id):
+        if not a or not reuniao_id or reuniao_id == excluir_reuniao:
             return
-        mapa.setdefault(acao_id, set()).add(reuniao_id)
+        mapa.setdefault(a, set()).add(reuniao_id)
 
-    try:
-        for i in supa.select("reuniao_ata_itens", {
-                "select": "acao_id,reuniao_id", "acao_id": "not.is.null",
-                "limit": "1000"}):
-            somar(i.get("acao_id"), i.get("reuniao_id"))
-    except Exception as e:
-        _falhou("_mencoes_por_acao/itens", e)
+    def de_itens():
+        try:
+            return supa.select("reuniao_ata_itens", {
+                "select": "acao_id,reuniao_id", "acao_id": alvo, "limit": "1000"})
+        except Exception as e:
+            _falhou("_mencoes_por_acao/itens", e)
+            return []
 
-    try:
-        for e_ in supa.select("acao_eventos", {
+    def de_eventos():
+        try:
+            return supa.select("acao_eventos", {
                 "select": "acao_id,reuniao_id", "tipo": "eq.comentario",
-                "reuniao_id": "not.is.null", "limit": "1000"}):
-            somar(e_.get("acao_id"), e_.get("reuniao_id"))
-    except Exception as e:
-        _falhou("_mencoes_por_acao/eventos", e)
+                "acao_id": alvo, "reuniao_id": "not.is.null", "limit": "1000"})
+        except Exception as e:
+            _falhou("_mencoes_por_acao/eventos", e)
+            return []
 
+    for linhas in supa.paralelo(de_itens, de_eventos):
+        for l in linhas:
+            somar(l.get("acao_id"), l.get("reuniao_id"))
     return mapa
 
 
-def reunioes_por_acao():
+def reunioes_por_acao(acao_id=None):
     """{acao_id: nº de reuniões distintas} — o ↻ do cartão no quadro.
 
     Mesma contagem de `recorrentes_pendentes`, sem o corte de 2+: o cartão
     mostra desde a primeira vez que a ação foi à mesa.
     """
-    return {a: len(r) for a, r in _mencoes_por_acao().items()}
+    return {a: len(r) for a, r in _mencoes_por_acao(acao_id=acao_id).items()}
 
 
 def recorrentes_pendentes(acao_ids=None, excluir_reuniao=None):
