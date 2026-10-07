@@ -3,11 +3,69 @@
 Tudo roda no servidor (Flask) — a chave nunca vai para o browser. Mantemos
 dependências mínimas (só `requests`) para ficar leve na função serverless.
 """
+import contextvars
 import os
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import requests
+from requests.adapters import HTTPAdapter
 
 TIMEOUT = 15
+
+# Uma sessão por processo, e não `requests.get` solto. Medido em 07/10/2026:
+# cada chamada solta abria TCP + TLS do zero até o Supabase — ~3 viagens a
+# mais por consulta, e uma tela de Ações faz ~17 consultas. Com a sessão, a
+# conexão fica aberta entre consultas e entre requisições do mesmo container.
+# O pool comporta as consultas que `paralelo` dispara de uma vez.
+_sessao = requests.Session()
+_sessao.mount("https://", HTTPAdapter(pool_connections=4, pool_maxsize=16))
+_sessao.mount("http://", HTTPAdapter(pool_connections=4, pool_maxsize=16))
+
+# Consultas independentes em paralelo (`paralelo`). Poucos trabalhadores de
+# propósito: o gargalo é a viagem até o Supabase, não CPU, e mais threads só
+# disputariam o mesmo pool de conexões.
+_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="supa")
+_trava_contagem = threading.Lock()
+
+
+def paralelo(*funcoes):
+    """Roda funções sem argumento em paralelo e devolve os resultados na ordem.
+
+    Cada uma roda numa CÓPIA do contexto atual (`contextvars`), e é isso que
+    deixa o `flask.g` da requisição visível dentro da thread — os caches por
+    requisição de `auth.py` continuam valendo, e a contagem do `Server-Timing`
+    soma tudo. Exceção de qualquer uma sobe aqui, como se fosse em série.
+    """
+    futuros = [_pool.submit(contextvars.copy_context().run, f) for f in funcoes]
+    return [f.result() for f in futuros]
+
+
+def _contar(inicio):
+    """Soma a ida ao `Server-Timing` da requisição (ver `app/__init__.py`).
+
+    Fora de requisição (scripts, coletor) não há onde somar e não faz nada.
+    """
+    try:
+        from flask import g, has_app_context
+        if not has_app_context():
+            return
+        ms = (time.perf_counter() - inicio) * 1000
+        with _trava_contagem:
+            g._supa_n = getattr(g, "_supa_n", 0) + 1
+            g._supa_ms = getattr(g, "_supa_ms", 0.0) + ms
+    except Exception:
+        pass
+
+
+def _pedir(metodo, url, **kwargs):
+    """Toda ida ao Supabase passa por aqui: sessão persistente + contagem."""
+    inicio = time.perf_counter()
+    try:
+        return _sessao.request(metodo, url, **kwargs)
+    finally:
+        _contar(inicio)
 
 
 def _cfg():
@@ -88,7 +146,8 @@ def tabela_faltando(erro):
 def select(tabela, params=None, schema=None):
     """GET /rest/v1/<tabela> -> lista de dicts."""
     url, _ = _cfg()
-    r = requests.get(
+    r = _pedir(
+        "GET",
         f"{url}/rest/v1/{tabela}",
         headers=_headers(schema=schema),
         params=params or {},
@@ -106,7 +165,8 @@ def select_one(tabela, params=None, schema=None):
 def insert(tabela, registro, schema=None):
     """POST /rest/v1/<tabela> -> registro criado."""
     url, _ = _cfg()
-    r = requests.post(
+    r = _pedir(
+        "POST",
         f"{url}/rest/v1/{tabela}",
         headers=_headers({"Prefer": "return=representation"}, schema=schema),
         json=registro,
@@ -124,7 +184,8 @@ def update(tabela, match, mudancas, schema=None):
     """
     url, _ = _cfg()
     params = {k: f"eq.{v}" for k, v in match.items()}
-    r = requests.patch(
+    r = _pedir(
+        "PATCH",
         f"{url}/rest/v1/{tabela}",
         headers=_headers({"Prefer": "return=representation"}, schema=schema),
         params=params,
@@ -156,7 +217,8 @@ def delete(tabela, match):
             params[k] = f"in.({','.join(str(x) for x in v)})"
         else:
             params[k] = f"eq.{v}"
-    r = requests.delete(
+    r = _pedir(
+        "DELETE",
         f"{url}/rest/v1/{tabela}",
         headers=_headers(),
         params=params,
@@ -168,7 +230,8 @@ def delete(tabela, match):
 def upsert(tabela, registro, on_conflict, schema=None):
     """POST com Prefer: resolution=merge-duplicates (upsert por `on_conflict`)."""
     url, _ = _cfg()
-    r = requests.post(
+    r = _pedir(
+        "POST",
         f"{url}/rest/v1/{tabela}",
         headers=_headers({"Prefer": f"resolution=merge-duplicates,return=representation"},
                          schema=schema),
@@ -191,7 +254,8 @@ def rpc(funcao, argumentos=None, schema=None):
     numa função no Postgres e daqui sai uma requisição.
     """
     url, _ = _cfg()
-    r = requests.post(
+    r = _pedir(
+        "POST",
         f"{url}/rest/v1/rpc/{funcao}",
         headers=_headers(schema=schema),
         json=argumentos or {},
@@ -237,7 +301,8 @@ def storage_assinar_upload(bucket, caminho):
     front é onde barra duplicada e host errado aparecem.
     """
     url, _ = _cfg()
-    r = requests.post(
+    r = _pedir(
+        "POST",
         f"{url}/storage/v1/object/upload/sign/{bucket}/{caminho}",
         # Duas exigências da API de Storage, ambas descobertas na marra:
         #
@@ -260,7 +325,8 @@ def storage_assinar_upload(bucket, caminho):
 def storage_baixar(bucket, caminho):
     """Lê o objeto de volta, em bytes. É o que alimenta a transcrição."""
     url, _ = _cfg()
-    r = requests.get(
+    r = _pedir(
+        "GET",
         f"{url}/storage/v1/object/{bucket}/{caminho}",
         headers=_headers(),
         timeout=TIMEOUT_ARQUIVO,
@@ -283,7 +349,8 @@ def storage_apagar(bucket, caminho):
     cabecalhos = _headers()
     cabecalhos.pop("Content-Type", None)
 
-    r = requests.delete(
+    r = _pedir(
+        "DELETE",
         f"{url}/storage/v1/object/{bucket}/{caminho}",
         headers=cabecalhos,
         timeout=TIMEOUT,

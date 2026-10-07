@@ -6,8 +6,6 @@
   <title>{% block title %}Portal Operacional Unetvale{% endblock %}</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/unetvale-mark.png') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-  <script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/chart-setup.js') }}"></script>
 </head>
 <body>
   <script>try{ if((localStorage.getItem('sidebar')||'collapsed')==='collapsed'){ document.body.classList.add('collapsed'); } }catch(e){}</script>
@@ -114,6 +112,12 @@
     </div>
   </div>
 
+  {# O Chart.js mora no fim do body, e não no <head>: ali ele travava a
+     pintura de TODA página (~200 KB lidos antes do primeiro pixel). Também
+     não pode ser `defer` — os scripts de página logo abaixo rodariam antes
+     dele e encontrariam `Chart` indefinido. #}
+  <script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/chart-setup.js') }}"></script>
   <script src="{{ url_for('static', filename='js/app.js') }}"></script>
   {% block scripts %}{% endblock %}
 </body>

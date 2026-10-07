@@ -92,10 +92,18 @@ servidor, e cuidado redobrado com migration destrutiva.
   cabeçalhos `Accept-Profile`/`Content-Profile`, já tratados em `_headers`).
   `supa.rpc()` chama função no Postgres: é como se faz o que precisa ser
   **atômico**, já que não há transação entre requisições do PostgREST.
+  Toda ida passa por `_pedir`: **sessão HTTP persistente** (a conexão fica
+  aberta entre consultas) e contagem para o `Server-Timing`. Consultas
+  independentes vão juntas com **`supa.paralelo(f1, f2, …)`**, que preserva o
+  `flask.g` da requisição dentro das threads (§6). Tabela filha com FK vem
+  **embutida** na mesma leitura (`acao_apoio(usuario_id)`,
+  `reuniao_participantes(usuario_id)`), não numa segunda ida.
 - **Chart.js 4** vendorizado (`app/static/vendor/`), configurado em
   `app/static/js/chart-setup.js`. **Não** troque por outra biblioteca.
 - **Leaflet 1.9.4** vendorizado, só no mapa da Troca de Poste.
-- Deploy: Vercel (`@vercel/python`, entrypoint `api/index.py`).
+- Deploy: Vercel (`@vercel/python`, entrypoint `api/index.py`). A função
+  roda em **`pdx1`** (Oregon, junto do Supabase) e o **estático sai pela CDN**
+  (`@vercel/static`, cache de um ano), nunca pelo Python — ver §6.
 - **Sem framework de teste.** Verificação é por script e pelo navegador (§8).
 
 ---
@@ -1492,6 +1500,44 @@ depois de mexer em `.py`.
 **Pooler do Supabase: `aws-1-us-west-2`.** A região está no hostname; a errada
 dá "tenant not found".
 
+**A função rodava do outro lado dos EUA, e o estático passava pelo Python.**
+Medido em 07/10/2026: `x-vercel-id: gru1::iad1::…` — a borda em São Paulo e a
+FUNÇÃO em Washington (`iad1`, o padrão da Vercel), com o Supabase em Oregon.
+Cada consulta atravessava o continente, sem reaproveitar conexão (cada
+`requests.get` solto fazia TCP + TLS do zero), em série: `/acoes` fazia 15
+idas e levava ~5,6 s; o painel lateral, ~3,5 s; arrastar um cartão, ~4,4 s
+(medidos daqui, ~250 ms por ida). E o `vercel.json` mandava `/(.*)` para o
+Python — todo CSS e JS invocava o Flask, com `no-cache`.
+
+Hoje: `"regions": ["pdx1"]`, sessão persistente, `supa.paralelo` e leituras
+embutidas, e o estático pela CDN com `immutable`. Medido no mesmo dia, mesma
+máquina: `/acoes` 0,83 s, painel 0,80 s, mover 1,08 s, `/dashboard` de 5,35 s
+para 0,99 s — e o HTML das 22 páginas comparadas (admin e usuário comum) saiu
+IGUAL ao da `main`. Três consequências:
+
+* **todo arquivo estático passa por `url_for('static', …)`.** O
+  `@app.url_defaults` do `create_app` acrescenta `?v=<commit>`; é isso que faz
+  o navegador buscar o JS novo depois de um deploy. Um caminho `/static/…`
+  escrito à mão ficaria preso no cache de quem já abriu o portal por um ano;
+* **`supa.paralelo` roda cada função numa cópia do contexto (`contextvars`).**
+  É o que mantém o `flask.g` — os caches por requisição do `auth.py` e a
+  contagem do `Server-Timing` — visível dentro das threads. Uma
+  `ThreadPoolExecutor` crua perderia o `g` e cada thread refaria as consultas
+  do usuário;
+* **o `Chart.js` mora no fim do `<body>`, não no `<head>`.** Ali ele travava a
+  pintura de toda página (205 KB antes do primeiro pixel). E não pode ser
+  `defer`: os scripts de página logo abaixo rodariam antes dele.
+
+**O `Server-Timing` é a régua.** Toda resposta traz
+`supa;desc="N idas";dur=X, total;dur=Y` (aba Network → Timing) e uma linha
+`[tempo]` no log da Vercel. `supa` é a SOMA das idas: passar do `total` é o
+paralelo funcionando. Ao mexer numa rota, compare as idas antes e depois.
+
+⚠️ **A Produtividade baixa 6,3 MB do banco a cada abertura** (o payload inteiro
+de `dados_modulo`, 53.992 OS) e manda tudo para o navegador. É hoje a tela
+mais lenta (~1,7 s só no download do Supabase, daqui) e não foi mexida em
+07/10/2026: emagrecer o payload muda o contrato com o coletor.
+
 ---
 
 ## 7. Ambiente
@@ -1564,6 +1610,10 @@ Não existe suíte de testes. O padrão é:
 6. **Navegador** — `preview_start` em `localhost:5001`, exercitar o fluxo real,
    `read_console_messages` limpo. **Mudança de layout exige screenshot.**
 7. **Celular** — `resize_window` no preset mobile e refazer o fluxo.
+8. **Velocidade** — mudança em rota compara o `Server-Timing` (idas e ms)
+   antes e depois. Mudança "só de desempenho" compara também o HTML servido
+   contra a `main` (worktree + `test_client`, escritas trocadas por falsos):
+   foi o que pegou a ordem do `apoio_ids` mudando ao embutir a leitura.
 
 Módulo cujo dado **nasce aqui** (Ações) não se testa gravando em produção.
 O padrão que funcionou em 29/09/2026: um servidor de ensaio que COPIA as tabelas
@@ -1998,6 +2048,20 @@ a.run(port=5001, use_reloader=False)"
   ⚠️ Em aberto: por que 5 contratos "HISTORICO DE OS" de 08/2026 não aparecem
   no CMT (232658, 236239, 236279, 232797, 230690). Olhar um deles no WVSA antes
   de afirmar que o ranking de técnico cobre todo cancelamento com OS.
+
+- **Velocidade** (07/10/2026, sem migration): região `pdx1`, estático pela
+  CDN, sessão persistente, consultas em paralelo e leituras embutidas. O
+  porquê e os números estão no §6. Primeiro passo do plano que segue com Ações
+  em tempo real, avisos e Safari.
+
+  Exercitado: as sete rotas medidas antes/depois pelo `test_client`; o HTML de
+  22 páginas (admin e usuário comum) igual ao da `main`; entrada ruim nas
+  rotas de ação (`4xx`); navegador com Dashboard, IQI, Produtividade,
+  Massivas, quadro e painel lateral, console limpo.
+
+  **Ainda não exercitado:** o `vercel.json` novo (região e build estático) só
+  se prova no deploy — conferir `x-vercel-id: …::pdx1::…` e, no CSS,
+  `cache-control: …immutable`.
 
 - **Backup do Supabase não foi confirmado.** Ações e Troca de Poste não têm de
   onde ser recoletados. Confirme antes de qualquer operação destrutiva.

@@ -264,19 +264,37 @@ def _select_acoes(params, paginar=False):
     ler = (lambda p: _paginado("acoes", p)) if paginar else (lambda p: supa.select("acoes", p))
     if _tem_etiquetas is not False:
         try:
-            linhas = ler(dict(params, select=f"{_CAMPOS},{_COL_ETIQUETAS}"))
+            linhas = ler(dict(params, select=f"{_CAMPOS},{_COL_ETIQUETAS},{_EMBUTE_APOIO}",
+                              **_ORDEM_APOIO))
             _tem_etiquetas = True
             for l in linhas:
                 l["etiquetas"] = l.get("etiquetas") or []
-            return linhas
+            return _com_apoio(linhas)
         except Exception as e:
             if not supa.coluna_faltando(e):
                 raise
             _falhou("_select_acoes (migration 0017 ainda não aplicada?)", e)
             _tem_etiquetas = False
-    linhas = ler(dict(params, select=_CAMPOS))
+    linhas = ler(dict(params, select=f"{_CAMPOS},{_EMBUTE_APOIO}", **_ORDEM_APOIO))
     for l in linhas:
         l["etiquetas"] = []
+    return _com_apoio(linhas)
+
+
+# O apoio vem EMBUTIDO na leitura da ação (o PostgREST segue a FK de
+# `acao_apoio.acao_id`), e não numa segunda consulta. Eram duas idas em
+# sequência em toda leitura de ação — inclusive duas vezes por arrasto de
+# cartão. Medido em 07/10/2026: uma ida a menos em cada uma.
+_EMBUTE_APOIO = "acao_apoio(usuario_id)"
+# Ordem fixa: a consulta separada saía na ordem da chave primária, e é ela que
+# decide a ordem dos avatares de apoio no cartão. Sem isto, o embutido devolve
+# na ordem que o plano do banco quiser e os avatares trocam de lugar.
+_ORDEM_APOIO = {"acao_apoio.order": "usuario_id.asc"}
+
+
+def _com_apoio(linhas):
+    for l in linhas:
+        l["apoio_ids"] = [x["usuario_id"] for x in l.pop("acao_apoio", None) or []]
     return linhas
 
 
@@ -301,21 +319,6 @@ def limpar_etiquetas(bruto):
     return saida[:8]
 
 
-def _apoio_por_acao(ids):
-    if not ids:
-        return {}
-    try:
-        linhas = supa.select("acao_apoio", {
-            "select": "acao_id,usuario_id", "acao_id": f"in.({','.join(ids)})"})
-    except Exception as e:
-        _falhou("apoio", e)
-        return {}
-    out = {}
-    for l in linhas:
-        out.setdefault(l["acao_id"], []).append(l["usuario_id"])
-    return out
-
-
 def listar(usuario, filtros=None):
     """Ações que `usuario` pode ver, já com os campos derivados.
 
@@ -329,10 +332,6 @@ def listar(usuario, filtros=None):
     except Exception as e:
         _falhou("listar", e)
         return []
-
-    apoio = _apoio_por_acao([l["id"] for l in linhas])
-    for l in linhas:
-        l["apoio_ids"] = apoio.get(l["id"], [])
 
     linhas = [l for l in linhas if pode_ver(usuario, l)]
 
@@ -377,9 +376,7 @@ def obter(acao_id):
         return None
     if not achadas:
         return None
-    a = achadas[0]
-    a["apoio_ids"] = _apoio_por_acao([a["id"]]).get(a["id"], [])
-    return _decorar(a)
+    return _decorar(achadas[0])
 
 
 def _definicao(dados, parcial):
@@ -493,7 +490,7 @@ def editar(acao_id, dados, apoio_ids=None):
 
 
 def atualizar(acao_id, autor_id, texto, status=None, progresso=None,
-              proximo_passo=None, evidencia=None, data_conclusao=None):
+              proximo_passo=None, evidencia=None, data_conclusao=None, atual=None):
     """Atualização do responsável: move a ação E grava o evento, junto.
 
     As duas coisas andam juntas de propósito. Na planilha dava para mexer no
@@ -506,8 +503,12 @@ def atualizar(acao_id, autor_id, texto, status=None, progresso=None,
     Atualização SEM mudança de status e sem texto não registra fato nenhum, e
     essa continua recusada. As travas de evidência e de próximo passo abaixo
     não mudaram.
+
+    `atual` é a ação que a rota JÁ leu para conferir a permissão: relê-la
+    aqui era uma ida ao banco a mais em todo arrasto. Devolve a ação como
+    ficou, para a rota redesenhar o cartão sem ler de novo.
     """
-    atual = obter(acao_id)
+    atual = atual or obter(acao_id)
     if not atual:
         raise ValueError("Ação não encontrada.")
 
@@ -578,6 +579,7 @@ def atualizar(acao_id, autor_id, texto, status=None, progresso=None,
         "progresso_novo": mudancas.get("progresso", atual.get("progresso")),
         "evidencia": evidencia or None,
     })
+    return _decorar(dict(atual, **mudancas))
 
 
 def comentar(acao_id, autor_id, texto, reuniao_id=None):
@@ -707,36 +709,53 @@ def contagens(ids):
     """{acao_id: {eventos, chk_total, chk_feitos}} — os ícones do cartão.
 
     Uma ida ao banco por tabela (em lotes de ids), e não uma por ação: o
-    quadro mostra todas de uma vez.
+    quadro mostra todas de uma vez. As duas tabelas são lidas em paralelo.
     """
     out = {i: {"eventos": 0, "chk_total": 0, "chk_feitos": 0} for i in ids}
-    for lote in _lotes(ids):
-        filtro = f"in.({','.join(lote)})"
+
+    def ler_eventos(filtro):
         try:
             for e in _paginado("acao_eventos", {
                     "select": "acao_id", "acao_id": filtro, "order": "id.asc"}):
                 out[e["acao_id"]]["eventos"] += 1
         except Exception as e:
             _falhou("contagens/eventos", e)
+
+    def ler_checklist(filtro):
+        global _tem_checklist
         try:
-            for c in _paginado("acao_checklist", {
-                    "select": "acao_id,feito", "acao_id": filtro, "order": "id.asc"}):
-                out[c["acao_id"]]["chk_total"] += 1
-                out[c["acao_id"]]["chk_feitos"] += 1 if c.get("feito") else 0
+            itens = _paginado("acao_checklist", {
+                "select": "acao_id,feito", "acao_id": filtro, "order": "id.asc"})
+            _tem_checklist = True
         except Exception as e:
-            if not supa.tabela_faltando(e):
+            if supa.tabela_faltando(e):
+                _tem_checklist = False
+            else:
                 _falhou("contagens/checklist", e)
+            return
+        for c in itens:
+            out[c["acao_id"]]["chk_total"] += 1
+            out[c["acao_id"]]["chk_feitos"] += 1 if c.get("feito") else 0
+
+    for lote in _lotes(ids):
+        filtro = f"in.({','.join(lote)})"
+        supa.paralelo(lambda: ler_eventos(filtro), lambda: ler_checklist(filtro))
     return out
 
 
-def atividade(acao_id, itens_checklist=None):
+def atividade(acao_id, itens_checklist=None, lista_eventos=None):
     """Linha do tempo da ação: eventos + itens de checklist concluídos.
 
     Mistura na LEITURA, sem gravar nada novo em `acao_eventos`: marcar um
     item é reversível, e o registro append-only guardaria para sempre um
     "concluído" que alguém desfez um minuto depois.
+
+    `lista_eventos` é a que o chamador já leu — o painel lia os mesmos
+    eventos duas vezes por abertura.
     """
-    linhas = [dict(e, quando=e.get("criado_em")) for e in eventos(acao_id)]
+    if lista_eventos is None:
+        lista_eventos = eventos(acao_id)
+    linhas = [dict(e, quando=e.get("criado_em")) for e in lista_eventos]
     for i in itens_checklist or []:
         if i.get("feito") and i.get("feito_em"):
             linhas.append({"tipo": "checklist", "autor_id": i.get("feito_por"),
@@ -915,7 +934,7 @@ _tem_colunas_gravacao = None
 _desde_degrau = 0
 
 
-def _select_reunioes(filtro, extras):
+def _select_reunioes(filtro, extras, embutir=None):
     """Lê reuniões recuando UM degrau por vez enquanto a migration não sobe.
 
     Do mais novo para o mais antigo: os degraus de `_DEGRAUS_OPCIONAIS`, as
@@ -925,12 +944,16 @@ def _select_reunioes(filtro, extras):
     apagava `gravacao_status` e `ata_markdown` da tela de TODAS as reuniões —
     a coluna nova estava no conjunto estendido, como manda o CLAUDE.md, mas o
     estendido inteiro caía junto com ela.
+
+    `embutir` é uma tabela filha trazida na MESMA leitura (vale em todos os
+    degraus, inclusive no base).
     """
     global _tem_colunas_gravacao, _desde_degrau
+    fim = f",{embutir}" if embutir else ""
     if _tem_colunas_gravacao is not False:
         while _desde_degrau < len(_DEGRAUS_OPCIONAIS):
             cols = ",".join([_COLS_REUNIAO, extras]
-                            + _DEGRAUS_OPCIONAIS[_desde_degrau:])
+                            + _DEGRAUS_OPCIONAIS[_desde_degrau:]) + fim
             try:
                 linhas = supa.select("reunioes", dict(filtro, select=cols))
                 _tem_colunas_gravacao = True
@@ -947,7 +970,7 @@ def _select_reunioes(filtro, extras):
                 _desde_degrau += 1
         try:
             linhas = supa.select("reunioes", dict(
-                filtro, select=f"{_COLS_REUNIAO},{extras}"))
+                filtro, select=f"{_COLS_REUNIAO},{extras}{fim}"))
             _tem_colunas_gravacao = True
             return linhas
         except Exception as e:
@@ -955,7 +978,7 @@ def _select_reunioes(filtro, extras):
                 raise
             _falhou("_select_reunioes (migration 0006 ainda não aplicada?)", e)
             _tem_colunas_gravacao = False
-    return supa.select("reunioes", dict(filtro, select=_COLS_REUNIAO))
+    return supa.select("reunioes", dict(filtro, select=f"{_COLS_REUNIAO}{fim}"))
 
 
 def listar_reunioes(usuario, limite=30):
@@ -964,25 +987,19 @@ def listar_reunioes(usuario, limite=30):
     try:
         # `gravacao_status` e `ata_markdown` entram para a lista poder mostrar
         # o selo e as primeiras linhas do resumo sem abrir a reunião.
+        # Os participantes vêm embutidos na mesma leitura: eram uma segunda
+        # ida, em série, que esticava a abertura de toda a tela de Ações.
         linhas = _select_reunioes(
             {"order": "data.desc", "limit": str(limite)},
-            "gravacao_status,ata_markdown,ata_gerada_em,convidados")
-        if not linhas:
-            return []
-        ids = [l["id"] for l in linhas]
-        parts = supa.select("reuniao_participantes", {
-            "select": "reuniao_id,usuario_id", "reuniao_id": f"in.({','.join(ids)})"})
+            "gravacao_status,ata_markdown,ata_gerada_em,convidados",
+            embutir="reuniao_participantes(usuario_id)")
     except Exception as e:
         _falhou("listar_reunioes", e)
         return []
 
-    por_reuniao = {}
-    for p in parts:
-        por_reuniao.setdefault(p["reuniao_id"], []).append(p["usuario_id"])
-
     saida = []
     for l in linhas:
-        l["participantes"] = por_reuniao.get(l["id"], [])
+        l["participantes"] = [p["usuario_id"] for p in l.pop("reuniao_participantes", None) or []]
         if (usuario.get("is_admin") or l.get("criada_por") == usuario.get("id")
                 or usuario.get("id") in l["participantes"]):
             saida.append(l)

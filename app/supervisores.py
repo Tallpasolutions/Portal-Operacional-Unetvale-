@@ -119,29 +119,38 @@ def listar():
         if not marcados:
             return []
         ids = [m["usuario_id"] for m in marcados]
-        usuarios = supa.select("usuarios", {
-            "select": "id,nome,email", "id": f"in.({','.join(ids)})",
-        })
-        vinculos = supa.select("supervisor_equipes", {
-            "select": "usuario_id,equipe", "usuario_id": f"in.({','.join(ids)})",
-            "order": "equipe.asc",
-        })
     except Exception as e:
         _falhou("listar", e)
         return []
 
     # Num try próprio de propósito: enquanto a migration 0004 não roda, esta
-    # tabela não existe. Junto com o bloco acima, a falha apagaria a lista
+    # tabela não existe. Junto com o bloco de baixo, a falha apagaria a lista
     # inteira de supervisores da tela — o recurso novo derrubaria o antigo.
     # Assim o vínculo por equipe continua funcionando e só o avulso some.
+    def ler_avulsos():
+        try:
+            return supa.select("supervisor_tecnicos", {
+                "select": "usuario_id,tecnico,rotulo", "usuario_id": f"in.({','.join(ids)})",
+                "order": "rotulo.asc",
+            })
+        except Exception as e:
+            _falhou("listar/tecnicos", e)
+            return []
+
+    # As três leituras dependem só dos ids e vão juntas ao banco.
     try:
-        avulsos = supa.select("supervisor_tecnicos", {
-            "select": "usuario_id,tecnico,rotulo", "usuario_id": f"in.({','.join(ids)})",
-            "order": "rotulo.asc",
-        })
+        usuarios, vinculos, avulsos = supa.paralelo(
+            lambda: supa.select("usuarios", {
+                "select": "id,nome,email", "id": f"in.({','.join(ids)})",
+            }),
+            lambda: supa.select("supervisor_equipes", {
+                "select": "usuario_id,equipe", "usuario_id": f"in.({','.join(ids)})",
+                "order": "equipe.asc",
+            }),
+            ler_avulsos)
     except Exception as e:
-        _falhou("listar/tecnicos", e)
-        avulsos = []
+        _falhou("listar", e)
+        return []
 
     por_usuario = {}
     for v in vinculos:

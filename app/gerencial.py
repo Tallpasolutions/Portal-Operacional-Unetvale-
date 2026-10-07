@@ -520,9 +520,12 @@ def _sem_prefixo_do_grupo(motivos):
 # Pacote da tela
 # ==========================================================================
 def pacote():
-    p = _payloads()
-    mapa = metas()
-    cfg = config()
+    # Seis leituras independentes, juntas ao banco (07/10/2026: eram seis
+    # viagens em série). Os payloads de IQI e IQM entram aqui só para aquecer
+    # o cache da requisição (`dados.get_modulo`): quem os usa é `qualidade`.
+    p, mapa, cfg, movimento, _, _ = supa.paralelo(
+        _payloads, metas, config, movimento_esteira,
+        lambda: dados.get_modulo("iqi"), lambda: dados.get_modulo("iqm"))
     quantos = meses_visiveis(cfg)
 
     def payload(m):
@@ -564,7 +567,7 @@ def pacote():
         "cancelamentos": cancelamentos(payload("ger_cancelamentos"), mapa, quantos),
         "esteira": {
             **esteira,
-            "movimento": movimento_esteira(),
+            "movimento": movimento,
             "vs_meta_util": _vs_meta(esteira.get("util"), "esteira_util", mapa),
             "vs_meta_retiradas": _vs_meta(esteira.get("retiradas"), "retiradas", mapa),
         },

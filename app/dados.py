@@ -71,15 +71,38 @@ def _idade_texto(minutos):
     return f"há {minutos // (60 * 24)} d"
 
 
+def _cache_leitura():
+    """Dicionário que vive só a requisição GET atual, ou None fora dela.
+
+    O payload do IQI é lido pela tela do `/iqi` e também pelo bloco de
+    qualidade do Dashboard; com o cache, a rota pode pedi-lo em paralelo com
+    o resto e quem vier depois na mesma requisição não vai ao banco de novo.
+    Só em GET: numa gravação, ler o que estava antes dela seria mentir.
+    """
+    try:
+        from flask import g, has_request_context, request
+        if has_request_context() and request.method == "GET":
+            return g.setdefault("_modulos_lidos", {})
+    except Exception:
+        pass
+    return None
+
+
 def get_modulo(modulo):
     """Retorna {payload, atualizado_em, status} do módulo, ou None se ainda não houver."""
+    cache = _cache_leitura()
+    if cache is not None and modulo in cache:
+        return cache[modulo]
     try:
-        return supa.select_one(
+        row = supa.select_one(
             "dados_modulo",
             {"modulo": f"eq.{modulo}", "select": "modulo,payload,atualizado_em,status"},
         )
     except Exception:
         return None
+    if cache is not None:
+        cache[modulo] = row
+    return row
 
 
 def get_todos():

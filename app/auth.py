@@ -89,16 +89,23 @@ def _areas_gestor_cache(uid):
 
 
 def usuario_atual():
+    # Uma montagem por requisição: o context processor, os decoradores e a
+    # rota pedem o usuário várias vezes na mesma requisição.
+    if hasattr(g, "_usuario_atual"):
+        return g._usuario_atual
     email = session.get("email")
     uid = session.get("uid")
-    eh_sup = _eh_supervisor_cache(uid)
     eh_admin = bool(email) and email == _admin_email()
-    areas_gestor = _areas_gestor_cache(uid)
+    # As três leituras são independentes e vão juntas ao banco: em série eram
+    # três viagens até o Supabase antes de qualquer tela começar (07/10/2026).
     # O admin nunca perde módulo: é ele quem edita esta lista, e trancá-lo para
     # fora exigiria um UPDATE no banco para destravar.
-    bloqueados = set() if eh_admin else _bloqueados_cache(uid)
+    eh_sup, areas_gestor, bloqueados = supa.paralelo(
+        lambda: _eh_supervisor_cache(uid),
+        lambda: _areas_gestor_cache(uid),
+        lambda: set() if eh_admin else _bloqueados_cache(uid))
     visiveis = [m for m in MODULOS if m not in bloqueados]
-    return {
+    g._usuario_atual = {
         "id": session.get("uid"),
         "nome": session.get("nome"),
         "email": email,
@@ -118,6 +125,7 @@ def usuario_atual():
         "areas_gestor": areas_gestor,
         "is_gestor_acoes": eh_admin or bool(areas_gestor),
     }
+    return g._usuario_atual
 
 
 def modulo_obrigatorio(modulo):

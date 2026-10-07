@@ -21,19 +21,53 @@ from .auth import (login_obrigatorio, admin_obrigatorio, modulo_obrigatorio,
 bp = Blueprint("dash", __name__)
 
 
+def _status_coleta():
+    """Status da coleta para a topbar, uma vez por requisição.
+
+    As rotas que mostram a topbar o pedem junto com as próprias leituras
+    (`supa.paralelo`); quem não pede paga a ida só se o template ler.
+    """
+    from flask import g
+    if not hasattr(g, "_status_coleta"):
+        try:
+            g._status_coleta = dados.status_geral()
+        except Exception:
+            g._status_coleta = {"tem_dados": False, "ultima": "—", "status": "sem_dados",
+                                "proxima": "—", "horarios": dados.HORARIOS}
+    return g._status_coleta
+
+
+class _StatusPreguicoso:
+    """O status da coleta, consultado só quando o template LÊ um campo dele.
+
+    Antes a consulta saía em toda página, inclusive nas que nem mostram o
+    status (Ações e Reuniões têm `sem_sync=True`). Assim, quem não lê não paga
+    a ida ao banco, e quem lê paga uma vez só.
+    """
+
+    def _carregar(self):
+        return _status_coleta()
+
+    def __getattr__(self, nome):
+        if nome.startswith("_"):
+            raise AttributeError(nome)
+        try:
+            return self._carregar()[nome]
+        except KeyError:
+            raise AttributeError(nome)
+
+    def __getitem__(self, nome):
+        return self._carregar()[nome]
+
+
 @bp.app_context_processor
 def injeta_status():
     """Disponibiliza o status de atualização e o usuário em todos os templates."""
-    # O fragmento do painel lateral de Ações não tem topbar: pagar a consulta
-    # do status da coleta a cada gravação no painel seria ida ao banco para
-    # nada (ele recarrega depois de cada item de checklist marcado).
+    # O fragmento do painel lateral de Ações não tem topbar nem lê o usuário
+    # do contexto: recebe da rota o que precisa.
     if request.endpoint == "dash.acao_painel":
         return {}
-    try:
-        st = dados.status_geral()
-    except Exception:
-        st = {"tem_dados": False, "ultima": "—", "status": "sem_dados", "proxima": "—", "horarios": dados.HORARIOS}
-    return {"status_upd": st, "usuario": usuario_atual()}
+    return {"status_upd": _StatusPreguicoso(), "usuario": usuario_atual()}
 
 
 # Endpoint de cada módulo, na ordem da sidebar. Serve para a raiz saber para
@@ -78,9 +112,11 @@ def dashboard():
     separá-los obrigaria a trocar de tela para relacionar reincidência com
     cancelamento — que é justamente a relação que interessa.
     """
+    u = usuario_atual()
+    pac, sups, _ = supa.paralelo(gerencial.pacote,
+                                 lambda: _supervisores_para_filtro(u), _status_coleta)
     return render_template("dashboard.html", ativo="dashboard",
-                           pacote=gerencial.pacote(),
-                           supervisores=_supervisores_para_filtro(usuario_atual()),
+                           pacote=pac, supervisores=sups,
                            apelidos_empresa=supervisores.APELIDOS_EMPRESA)
 
 
@@ -88,9 +124,10 @@ def dashboard():
 @login_obrigatorio
 @modulo_obrigatorio("produtividade")
 def produtividade():
-    row = dados.get_modulo("produtividade")
-    payload = (row or {}).get("payload") or {"registros": [], "total": 0}
     u = usuario_atual()
+    row, sups, _ = supa.paralelo(lambda: dados.get_modulo("produtividade"),
+                                 lambda: _supervisores_para_filtro(u), _status_coleta)
+    payload = (row or {}).get("payload") or {"registros": [], "total": 0}
     # Supervisor só enxerga as próprias equipes: o recorte é aplicado no
     # servidor, não escondendo no cliente — dado que não deve ser visto não
     # chega ao browser.
@@ -110,7 +147,7 @@ def produtividade():
         p2["total"] = len(p2["registros"])
         payload = p2
     return render_template("produtividade.html", ativo="produtividade", payload=payload,
-                           meta=_meta(row), supervisores=_supervisores_para_filtro(u),
+                           meta=_meta(row), supervisores=sups,
                            apelidos_empresa=supervisores.APELIDOS_EMPRESA)
 
 
@@ -118,17 +155,19 @@ def produtividade():
 @login_obrigatorio
 @modulo_obrigatorio("iqi")
 def iqi():
-    iqi_row = dados.get_modulo("iqi")
-    iqm_row = dados.get_modulo("iqm")
+    u = usuario_atual()
+    iqi_row, iqm_row, causa, sups, _ = supa.paralelo(
+        lambda: dados.get_modulo("iqi"), lambda: dados.get_modulo("iqm"),
+        gerencial.causa_raiz, lambda: _supervisores_para_filtro(u), _status_coleta)
     pacote = {}
     if iqi_row and iqi_row.get("payload"):
         pacote["IQI"] = supervisores.so_operacional(iqi_row["payload"])
     if iqm_row and iqm_row.get("payload"):
         pacote["IQM"] = supervisores.so_operacional(iqm_row["payload"])
     return render_template("iqi.html", ativo="iqi", pacote=pacote,
-                           causa_raiz=gerencial.causa_raiz(),
+                           causa_raiz=causa,
                            meta=_meta(iqi_row or iqm_row),
-                           supervisores=_supervisores_para_filtro(usuario_atual()),
+                           supervisores=sups,
                            apelidos_empresa=supervisores.APELIDOS_EMPRESA)
 
 
@@ -136,7 +175,7 @@ def iqi():
 @login_obrigatorio
 @modulo_obrigatorio("massivas")
 def massivas():
-    row = dados.get_modulo("massivas")
+    row, _ = supa.paralelo(lambda: dados.get_modulo("massivas"), _status_coleta)
     payload = (row or {}).get("payload") or {"meses": [], "metricas": [], "diario": [], "cidades": [], "totais_mes": []}
     return render_template("massivas.html", ativo="massivas", payload=payload,
                            meta=_meta(row))
@@ -825,21 +864,29 @@ def _item_quadro(a, u, cont, reun):
     return d
 
 
-def _reunioes_por_acao():
+def _reunioes_por_acao(acao_id=None):
     # Contador de enfeite: falhar aqui não pode derrubar o quadro.
     try:
-        return reuniao_ia.reunioes_por_acao()
+        return reuniao_ia.reunioes_por_acao(acao_id)
     except Exception:
         return {}
 
 
-def _item_de(acao_id, u):
+def _item_de(acao_id, u, a=None):
     """A ação recém-alterada, no formato do quadro — é o que as rotas JSON
-    devolvem para o cartão se redesenhar sem recarregar a página."""
-    a = acoes.obter(acao_id)
+    devolvem para o cartão se redesenhar sem recarregar a página.
+
+    `a` é a ação como a gravação a deixou (`acoes.atualizar` a devolve): com
+    ela, não se relê a linha que acabou de ser escrita. Os contadores dos
+    ícones e o ↻ de reuniões vão juntos ao banco, e só desta ação.
+    """
+    if a is None:
+        a = acoes.obter(acao_id)
     if not a:
         return None
-    return _item_quadro(a, u, acoes.contagens([acao_id]), _reunioes_por_acao())
+    cont, reun = supa.paralelo(lambda: acoes.contagens([acao_id]),
+                               lambda: _reunioes_por_acao(acao_id))
+    return _item_quadro(a, u, cont, reun)
 
 
 def _nome(uid, usuarios):
@@ -854,18 +901,26 @@ def _nome(uid, usuarios):
 @modulo_obrigatorio("acoes")
 def acoes_view():
     u = usuario_atual()
+    aba = request.args.get("aba", "painel")
     # Sem filtro no servidor: o recorte de PERMISSÃO continua aqui (`listar`
     # só devolve o que a pessoa pode ver), mas pessoa, área, prioridade,
     # etiqueta e busca são aplicados no browser. As três visões (quadro,
     # lista, cronograma) usam o mesmo dado, e recarregar a página a cada
     # chip fecharia o painel lateral aberto.
-    lista = acoes.listar(u)
-    aba = request.args.get("aba", "painel")
-    usuarios = _usuarios_para_escolha()
+    #
+    # Tudo que não depende da lista vai junto ao banco, e o que depende dela
+    # vai junto logo depois (07/10/2026): eram ~15 idas em série, e cada uma
+    # é uma viagem até o Supabase.
+    lista, usuarios, reunioes, areas, _ = supa.paralelo(
+        lambda: acoes.listar(u), _usuarios_para_escolha,
+        lambda: acoes.listar_reunioes(u), acoes.areas, acoes.tem_checklist)
+    ids = [a["id"] for a in lista]
+    cont, reun, ultimos = supa.paralelo(
+        lambda: acoes.contagens(ids), _reunioes_por_acao,
+        lambda: acoes.ultimos_eventos(ids))
 
     # Só a aba Reuniões paga o custo do que é dela. As outras duas não podem
     # ficar mais lentas por causa de um card que elas nem mostram.
-    reunioes = acoes.listar_reunioes(u)
     for r in reunioes:
         # Trecho do resumo na lista: reconhecer a reunião sem precisar abrir.
         r["resumo"] = reuniao_ia.resumo_curto(r.get("ata_markdown"))
@@ -883,13 +938,11 @@ def acoes_view():
         recorrentes = reuniao_ia.recorrentes_pendentes()
         resumo_exec = reuniao_ia.resumo_executivo(lista=recorrentes)
 
-    cont = acoes.contagens([a["id"] for a in lista])
-    reun = _reunioes_por_acao()
     pacote = {
         "acoes": [_item_quadro(a, u, cont, reun) for a in lista],
         "usuarios": [{"id": x["id"], "nome": x.get("nome") or x["email"].split("@")[0]}
                      for x in usuarios],
-        "areas": [{"id": x["id"], "nome": x["nome"]} for x in acoes.areas()],
+        "areas": [{"id": x["id"], "nome": x["nome"]} for x in areas],
         "status": acoes.STATUS, "prioridades": acoes.PRIORIDADES,
         "eu": u["id"], "pode_criar": acoes.pode_gerir(u),
         "tem_etiquetas": acoes.tem_etiquetas(),
@@ -904,9 +957,9 @@ def acoes_view():
     return render_template(
         "acoes.html", ativo="acoes", sem_sync=True, aba=aba,
         acoes=lista, resumo=resumo, pacote=pacote,
-        areas=acoes.areas(), usuarios=usuarios,
+        areas=areas, usuarios=usuarios,
         status_opcoes=acoes.STATUS, prioridades=acoes.PRIORIDADES,
-        pode_criar=acoes.pode_gerir(u), ultimos=acoes.ultimos_eventos([a["id"] for a in lista]),
+        pode_criar=acoes.pode_gerir(u), ultimos=ultimos,
         tem_etiquetas=acoes.tem_etiquetas(), tem_checklist=acoes.tem_checklist(),
         reunioes=reunioes,
         recorrentes=recorrentes, resumo_exec=resumo_exec,
@@ -916,14 +969,21 @@ def acoes_view():
 
 def _contexto_acao(a, u):
     """O que o parcial `_acao_painel.html` precisa — o MESMO para o painel
-    lateral e para a página cheia, que são duas molduras do mesmo conteúdo."""
-    itens_chk = acoes.checklist(a["id"])
+    lateral e para a página cheia, que são duas molduras do mesmo conteúdo.
+
+    As cinco leituras são independentes e vão juntas ao banco; os eventos são
+    lidos uma vez e servem também à linha do tempo (eram lidos duas vezes).
+    """
+    itens_chk, evs, areas, itens_reuniao, usuarios = supa.paralelo(
+        lambda: acoes.checklist(a["id"]), lambda: acoes.eventos(a["id"]),
+        acoes.areas, lambda: reuniao_ia.itens_da_acao(a["id"]),
+        _usuarios_para_escolha)
     return dict(
-        acao=a, eventos=acoes.eventos(a["id"]),
-        atividade=acoes.atividade(a["id"], itens_chk),
-        checklist=itens_chk, areas=acoes.areas(),
-        itens_reuniao=reuniao_ia.itens_da_acao(a["id"]),
-        usuarios=_usuarios_para_escolha(),
+        acao=a, eventos=evs,
+        atividade=acoes.atividade(a["id"], itens_chk, lista_eventos=evs),
+        checklist=itens_chk, areas=areas,
+        itens_reuniao=itens_reuniao,
+        usuarios=usuarios,
         status_opcoes=acoes.STATUS, prioridades=acoes.PRIORIDADES,
         tem_etiquetas=acoes.tem_etiquetas(),
         pode_gerir=acoes.pode_gerir(u, a), pode_atualizar=acoes.pode_atualizar(u, a))
@@ -1060,7 +1120,7 @@ def acao_mover(acao_id):
     próximo passo valem igual, e o evento é gravado junto.
     """
     u = usuario_atual()
-    _acao_ou_404(acao_id, u, exigir=acoes.pode_atualizar)
+    atual = _acao_ou_404(acao_id, u, exigir=acoes.pode_atualizar)
     c = request.get_json(silent=True) or {}
     if c.get("status") not in acoes.STATUS:
         return jsonify({"erro": "status inválido"}), 400
@@ -1068,35 +1128,35 @@ def acao_mover(acao_id):
     if any(not (c.get(k) is None or isinstance(c.get(k), str)) for k in textos):
         return jsonify({"erro": "valor inválido"}), 400
     try:
-        acoes.atualizar(
+        nova = acoes.atualizar(
             acao_id, u["id"], c.get("texto"), status=c["status"],
             proximo_passo=c.get("proximo_passo"),
             evidencia=(c.get("evidencia") or "").strip() or None,
-            data_conclusao=c.get("data_conclusao") or None)
+            data_conclusao=c.get("data_conclusao") or None, atual=atual)
     except Exception as e:
         return _erro_json(e)
-    return _resposta_json(acao_id, u)
+    return jsonify({"ok": True, "acao": _item_de(acao_id, u, nova)})
 
 
 @bp.route("/acoes/<acao_id>/atualizar", methods=["POST"])
 @login_obrigatorio
 def acao_atualizar(acao_id):
     u = usuario_atual()
-    _acao_ou_404(acao_id, u, exigir=acoes.pode_atualizar)
+    atual = _acao_ou_404(acao_id, u, exigir=acoes.pode_atualizar)
     # O painel lateral manda JSON e quer JSON de volta (o cartão se redesenha
     # sem recarregar); a página cheia e o celular antigo mandam formulário.
     f = request.get_json(silent=True) if request.is_json else request.form
     f = f or {}
     try:
-        acoes.atualizar(
+        nova = acoes.atualizar(
             acao_id, u["id"], f.get("texto"),
             status=f.get("status") or None,
             progresso=f.get("progresso") if f.get("progresso") not in (None, "") else None,
             proximo_passo=f.get("proximo_passo"),
             evidencia=f.get("evidencia") or None,
-            data_conclusao=f.get("data_conclusao") or None)
+            data_conclusao=f.get("data_conclusao") or None, atual=atual)
         if request.is_json:
-            return _resposta_json(acao_id, u)
+            return jsonify({"ok": True, "acao": _item_de(acao_id, u, nova)})
         flash("Atualização registrada.", "ok")
     except Exception as e:
         if request.is_json:
