@@ -74,7 +74,7 @@ data mais próxima primeiro (§6). A varredura do passado segue manual:
 | Tipo | Módulos | Se o dado sumir |
 |---|---|---|
 | **Espelho** do WVSA | Produtividade, IQI/IQM, Massivas | recoleta-se |
-| **Dado nasce aqui** | **Ações**, Troca de Poste (OS/revisão) | **não há de onde recoletar** |
+| **Dado nasce aqui** | **Ações**, **Processos**, Troca de Poste (OS/revisão) | **não há de onde recoletar** |
 
 Nos módulos do segundo tipo: histórico append-only, recorte de permissão no
 servidor, e cuidado redobrado com migration destrutiva.
@@ -108,7 +108,7 @@ servidor, e cuidado redobrado com migration destrutiva.
 
 ---
 
-## 4. Os seis módulos
+## 4. Os sete módulos
 
 | Rota | Módulo | Origem do dado | Quem vê |
 |---|---|---|---|
@@ -118,6 +118,7 @@ servidor, e cuidado redobrado com migration destrutiva.
 | `/massivas` | Massivas | `dados_modulo` (coletor) | todos |
 | `/troca-poste` | Troca de Poste | schema `troca_poste` | todos menos supervisor |
 | `/acoes` | **Ações** | `public.acoes` e cia. | cada um as suas; gestor a área dele |
+| `/processos` | **Processos** | `public.processos` e cia. (migration `0018`) | todos editam; gestor da área aprova. **Só admin** até `PROCESSOS_LIBERADO=true` |
 
 Mais `/usuarios`, `/monitoramento` (admin) e `/configuracoes` (todos).
 
@@ -471,6 +472,63 @@ gera o arquivo é o navegador — sem biblioteca de PDF na função serverless.
 tabela é de quem tem login — é dela que sai a pauta, e pauta exige ação, que
 exige usuário. Convidado só aparece na lista de quem estava, na ata e no PDF.
 
+### Processos: mapa de processos, fluxograma e instrução de trabalho
+
+Nasceu em 08/10/2026 para a **Infraestrutura**, que tem dois times com
+trabalho muito diferente: o **interno** (projeto, abertura de OS, atendimento
+ao técnico) e o de **campo** (o técnico que executa). Nenhum dos dois processos
+estava escrito. O módulo mapeia o processo, desenha o fluxo numa folha com as
+formas oficiais (ISO 5807) e gera a instrução de trabalho (IT), que vai para o
+técnico **em PDF** — técnico de campo não tem login, e não precisa ter.
+
+```
+Processo  PR-INF-003   (público: interno | campo | ambos)
+ ├─ Fluxos             documento jsonb desenhado na folha (1..n)
+ └─ Instruções  IT-INF-007   (executa: interno | campo)
+       └─ Revisões 00, 01…  rascunho → em aprovação → aprovada (vigente) → substituída
+```
+
+**Os códigos são por área e não mudam** (`processo_proximo_codigo`, com a
+sigla de `acao_areas.sigla`; área sem sigla cai em `GER`). Trocar a área de
+um processo depois de criado não é permitido: um `PR-INF` que passasse a ser
+de Projetos mentiria no papel.
+
+**Todos editam, gestor aprova** (decisão de 08/10/2026). Qualquer pessoa com o
+módulo cria processo, desenha e redige rascunho; aprovar, devolver, obsoletar
+e arquivar é do gestor da área (`acao_gestores`) ou do admin. **Quem elaborou
+ou enviou a revisão não a aprova** — trava no banco (`instrucao_aprovar`), não
+na rota, porque é a regra que não pode depender de alguém lembrar.
+
+**Nada se apaga** (dado que nasce aqui, §2): processo se **arquiva**, IT se
+**obsoleta**, tudo com `on delete restrict`. Revisão aprovada é imutável por
+trigger (`instrucao_revisao_protegida`); a única transição depois de aprovar é
+`aprovada → substituida`, feita pela próxima aprovação. `instrucao_eventos` e
+`processo_fluxo_versoes` são append-only.
+
+**O que é atômico mora em função** (`supa.rpc`): criar processo (código +
+processo + primeiro fluxo), criar IT (código + IT + Rev. 00 + evento),
+salvar fluxo e rascunho (**concorrência otimista** por `versao` — conflito
+volta como dado, `{erro: "conflito", por, em}`, nunca sobrescreve em
+silêncio), enviar, aprovar (congela o fluxo na revisão e no histórico),
+devolver e abrir nova revisão.
+
+**A folha nasce com as raias do público** (`processos.documento_inicial`):
+são elas que viram o "Quem" de cada passo da IT, e fluxo sem raia gera passo
+sem responsável.
+
+**O servidor confere a ESTRUTURA do documento, não o catálogo de formas**
+(`processos.validar_documento`): id único, ligação para forma que existe,
+número que é número, tamanho < 1 MB. O tipo da forma só precisa ser slug —
+a lista de formas mora no JS, e uma segunda cópia em Python divergiria dela
+(a armadilha dos dois normalizadores, §6).
+
+**Código na URL é conferido antes do banco** (`_CODIGO`): `/processos/%00`
+chegava ao PostgREST como byte nulo e voltava 500. Medido em 08/10/2026 no
+servidor de ensaio.
+
+**Entra em fases, uma por PR**, com o módulo visível só para o admin até
+`PROCESSOS_LIBERADO=true` (§4, "Quais módulos cada um enxerga").
+
 ### IQI/IQM: duas visualizações, um filtro cada
 
 O `.view-switch` do `/iqi` tem **duas** entradas, e cada uma empilha os blocos
@@ -736,13 +794,19 @@ Três, independentes — a pessoa pode ser um, vários ou nenhum:
 - **admin** — `email == ADMIN_EMAIL` (variável de ambiente, **não** coluna).
 - **supervisor** — linha em `supervisores`; vê só o time dele em Produtividade
   e IQI.
-- **gestor de ações** — linha em `acao_gestores`; manda nas ações das áreas dele.
+- **gestor de ações** — linha em `acao_gestores`; manda nas ações das áreas dele
+  e, em Processos, aprova instrução de trabalho e arquiva processo dessas áreas.
 
 ### Quais módulos cada um enxerga
 
 Configuração, não código, desde 04/09/2026 (migration `0014`). O admin marca em
 *Configurações → Acesso aos módulos* o que cada pessoa vê; `auth.MODULOS` lista
-os seis configuráveis.
+os sete configuráveis.
+
+Por cima disso, `auth.em_construcao()` esconde de quem não é admin o módulo que
+ainda está sendo entregue em fases (hoje: Processos, até `PROCESSOS_LIBERADO=
+true`). A grade de Configurações continua mostrando a coluna, rotulada "só
+admin, em construção": a marcação já vale para quando ele for liberado.
 
 ⚠️ A tabela `usuario_modulos_bloqueados` guarda o que foi **TIRADO**, não o que
 foi liberado. Sem linha = vê — que é como o portal sempre funcionou, e por isso
@@ -785,6 +849,11 @@ app/static/js/<modulo>.js    IIFE, sem framework, sem build
 
 `app/acoes.py` é a referência mais recente e mais completa. `app/supervisores.py`
 é a referência para "tabela de vínculo".
+
+Exceção de tamanho: as rotas de Processos moram em `app/routes_processos.py`,
+no **mesmo** blueprint `dash` (endpoints `dash.*`). `routes.py` já passava de
+1.600 linhas; o arquivo é importado em `create_app` antes do registro do
+blueprint.
 
 ### Abas dentro de um módulo
 
@@ -1634,6 +1703,24 @@ a.run(port=5001, use_reloader=False)"
 ---
 
 ## 9. Estado atual e pendências
+
+- **Processos — fase 1 (fundação)** em 08/10/2026, migration `0018`
+  (todas as tabelas e funções do módulo: processos, fluxos, fotos do fluxo,
+  instruções, revisões, eventos e contadores de código). Catálogo, página do
+  processo (Visão geral) e criar/editar/arquivar. Só o admin vê até
+  `PROCESSOS_LIBERADO=true`.
+
+  A `0018` **não foi aplicada em produção**. Provada num Postgres descartável
+  (PGlite, sem tocar o Supabase): aplicada e REAPLICADA sem erro, e 49 travas
+  conferidas — códigos sequenciais por área e sem colisão, conflito de versão
+  no fluxo e no rascunho, documento > 1 MB recusado, elaborador e quem enviou
+  sem poder aprovar, aprovada imutável (UPDATE, DELETE e volta de status
+  recusados), uma revisão aberta por IT, eventos e fotos append-only, e as
+  funções sem EXECUTE para `anon`.
+
+  Rotas pelo `test_client` sobre esse mesmo banco: 49 casos — chave desligada
+  (só admin), módulo bloqueado (404), gestor de outra área (403 ao arquivar),
+  entrada ruim toda `4xx` ou aviso, nenhum `5xx`.
 
 - **Ações** entrou vazio: zero ação, zero gestor, 10 áreas. Em 29/09/2026
   eram 11 ações e 3 gestores (Matheus Dias, Patricia Schveitzer, Renato Barreto).

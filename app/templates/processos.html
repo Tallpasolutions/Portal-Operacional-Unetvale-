@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block title %}Processos · Unetvale{% endblock %}
+{% block page_title %}Processos{% endblock %}
+{% block content %}
+
+{% if sem_migracao %}
+<div class="vazio">
+  <b>O módulo ainda não tem onde guardar os processos.</b><br>
+  Aplique a migration <code>0018_processos.sql</code> no SQL Editor do Supabase e recarregue.
+</div>
+{% else %}
+
+<div class="view-bar">
+  <div class="view-switch" id="pr-abas">
+    <button data-aba="processos" class="{{ 'active' if aba == 'processos' }}">Processos</button>
+    <button data-aba="instrucoes" class="{{ 'active' if aba == 'instrucoes' }}">Instruções de trabalho</button>
+  </div>
+  <button class="btn" type="button" data-abrir="dlg-novo-processo" style="margin-left:auto;">+ Novo processo</button>
+</div>
+
+<div class="kpis">
+  <div class="kpi"><div class="v">{{ resumo.processos }}</div><div class="l">Processos ativos</div></div>
+  <div class="kpi"><div class="v">{{ resumo.fluxos }}</div><div class="l">Fluxos desenhados</div></div>
+  <div class="kpi"><div class="v" style="color:var(--success)">{{ resumo.vigentes }}</div><div class="l">Instruções vigentes</div></div>
+  <div class="kpi"><div class="v" style="color:var(--warning)">{{ resumo.em_aprovacao }}</div><div class="l">Aguardando aprovação</div></div>
+</div>
+
+{# Um filtro só, valendo para as duas abas: a busca acha o processo e as
+   instruções dele; o público recorta as duas do mesmo jeito. #}
+<div class="ac-barra">
+  <input type="search" id="pr-busca" class="ac-busca" placeholder="Buscar por código, nome ou dono"
+         aria-label="Buscar processo ou instrução">
+  <div class="fchips" id="pr-publico" role="group" aria-label="Quem executa">
+    <button type="button" class="fchip on" data-publico="">Todos</button>
+    {% for chave, rotulo in publicos.items() %}
+    <button type="button" class="fchip" data-publico="{{ chave }}">{{ rotulo }}</button>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- ===================== Processos ===================== -->
+<section data-painel="processos" {% if aba != 'processos' %}hidden{% endif %}>
+  {% if processos %}
+  <div class="card">
+    <div class="tabela-wrap">
+      <table class="tbl pr-tabela">
+        <thead><tr>
+          <th>Código</th><th>Processo</th><th>Área</th><th>Executa</th><th>Dono</th>
+          <th class="num">Fluxos</th><th class="num">Instruções</th><th>Atualizado</th>
+        </tr></thead>
+        <tbody>
+        {% for p in processos %}
+          {% set c = contagens.get(p.id, {}) %}
+          {% set area = (areas|selectattr('id', 'equalto', p.area_id)|list or [{}])[0] %}
+          <tr class="clicavel" data-href="{{ url_for('dash.processo_detalhe', codigo=p.codigo) }}"
+              data-publico="{{ p.publico }}"
+              data-busca="{{ (p.codigo ~ ' ' ~ p.titulo ~ ' ' ~ (nomes.get(p.dono_id) or ''))|lower }}">
+            <td class="cod"><b>{{ p.codigo }}</b></td>
+            <td><a href="{{ url_for('dash.processo_detalhe', codigo=p.codigo) }}">{{ p.titulo }}</a></td>
+            <td>{{ area.nome or '—' }}</td>
+            <td><span class="badge pub-{{ p.publico }}">{{ publicos[p.publico] }}</span></td>
+            <td>{{ nomes.get(p.dono_id) or '—' }}</td>
+            <td class="num">{{ c.fluxos or 0 }}</td>
+            <td class="num">{% if c.instrucoes %}{{ c.vigentes }}/{{ c.instrucoes }} vigentes{% else %}—{% endif %}</td>
+            <td>{{ p.atualizado_em|data_br }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <p class="vazio pr-sem-resultado" hidden>Nenhum processo com esse filtro.</p>
+  {% else %}
+  <div class="vazio">
+    <b>Mapeie o primeiro processo.</b><br>
+    Comece pelo que mais gera dúvida no dia a dia — a abertura de OS, a troca de poste — e desenhe o fluxo
+    com as raias do time interno e do técnico de campo.<br><br>
+    <button class="btn" type="button" data-abrir="dlg-novo-processo">+ Novo processo</button>
+  </div>
+  {% endif %}
+</section>
+
+<!-- ===================== Instruções ===================== -->
+<section data-painel="instrucoes" {% if aba != 'instrucoes' %}hidden{% endif %}>
+  {% if instrucoes %}
+  <div class="card">
+    <div class="tabela-wrap">
+      <table class="tbl pr-tabela">
+        <thead><tr>
+          <th>Código</th><th>Instrução</th><th>Processo</th><th>Executa</th>
+          <th>Vigente</th><th>Em andamento</th>
+        </tr></thead>
+        <tbody>
+        {% for it in instrucoes %}
+          <tr class="clicavel" data-href="{{ url_for('dash.processo_detalhe', codigo=it.processo.codigo, aba='instrucoes') }}"
+              data-publico="{{ it.processo.publico }}"
+              data-busca="{{ (it.codigo ~ ' ' ~ it.titulo ~ ' ' ~ it.processo.codigo ~ ' ' ~ it.processo.titulo)|lower }}">
+            <td class="cod"><b>{{ it.codigo }}</b></td>
+            <td>{{ it.titulo }}</td>
+            <td><span class="subnote" style="margin:0">{{ it.processo.codigo }}</span> {{ it.processo.titulo }}</td>
+            <td>{{ executa[it.executa] }}</td>
+            <td>{% if it.revisao_vigente is not none %}<span class="badge badge-verde">Rev. {{ '%02d' % it.revisao_vigente }}</span>{% else %}<span class="badge badge-cinza">Nunca aprovada</span>{% endif %}</td>
+            <td>{% if it.aberta %}<span class="badge {{ 'badge-ambar' if it.aberta.status == 'em_aprovacao' else ('badge-vermelho' if it.aberta.status == 'devolvida' else 'badge-azul') }}">Rev. {{ '%02d' % it.aberta.numero }} · {{ status_revisao[it.aberta.status] }}</span>{% else %}—{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <p class="vazio pr-sem-resultado" hidden>Nenhuma instrução com esse filtro.</p>
+  {% else %}
+  <div class="vazio">
+    <b>Nenhuma instrução de trabalho ainda.</b><br>
+    A instrução nasce dentro do processo, a partir do fluxo desenhado: abra um processo e use
+    <b>Gerar instrução</b> na aba Instruções.
+  </div>
+  {% endif %}
+</section>
+
+<dialog class="modal modal-largo" id="dlg-novo-processo" aria-labelledby="dlg-novo-processo-t">
+  <form method="post" action="{{ url_for('dash.processo_novo') }}">
+    <h3 id="dlg-novo-processo-t">Novo processo</h3>
+    <div class="field">
+      <label for="np-titulo">Processo <span class="rotulo-leve">do gatilho ao resultado</span></label>
+      <input type="text" id="np-titulo" name="titulo" required minlength="3" maxlength="160"
+             placeholder="Troca de poste: do aviso da Celesc à OS">
+    </div>
+    <div class="grid nova-grade">
+      <div class="field"><label for="np-area">Área</label>
+        <select id="np-area" name="area_id" required>
+          {% for a in areas %}<option value="{{ a.id }}" {{ 'selected' if a.nome == 'Infraestrutura' }}>{{ a.nome }}{% if a.sigla %} ({{ a.sigla }}){% endif %}</option>{% endfor %}
+        </select></div>
+      <div class="field"><label for="np-publico">Quem executa</label>
+        <select id="np-publico" name="publico">
+          {% for chave, rotulo in publicos.items() %}<option value="{{ chave }}">{{ rotulo }}</option>{% endfor %}
+        </select></div>
+      <div class="field"><label for="np-dono">Dono do processo</label>
+        <select id="np-dono" name="dono_id">
+          <option value="">Ninguém ainda</option>
+          {% for x in usuarios %}<option value="{{ x.id }}" {{ 'selected' if x.id == usuario.id }}>{{ x.nome or x.email }}</option>{% endfor %}
+        </select></div>
+    </div>
+    <div class="field">
+      <label for="np-objetivo">Objetivo <span class="rotulo-leve">opcional — para que o processo existe</span></label>
+      <textarea id="np-objetivo" name="objetivo" rows="3" maxlength="2000"
+                placeholder="Garantir que toda troca de poste da Celesc tenha OS aberta antes do desligamento."></textarea>
+    </div>
+    <p class="subnote" style="margin:0;">O código (ex.: PR-INF-004) sai da sigla da área e não muda depois.
+      A folha nasce com as raias de quem executa.</p>
+    <div class="modal-acoes">
+      <button type="button" class="btn sec" data-fechar>Cancelar</button>
+      <button type="submit" class="btn">Criar e desenhar o fluxo</button>
+    </div>
+  </form>
+</dialog>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/processos.js') }}"></script>
+{% endblock %}

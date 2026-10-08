@@ -42,7 +42,8 @@ def _eh_supervisor_cache(uid):
 # `configuracoes` ficam de fora: os dois primeiros já são admin, e o terceiro é
 # onde a pessoa troca a própria senha — esconder aquilo trancaria alguém para
 # fora da própria conta.
-MODULOS = ("dashboard", "produtividade", "iqi", "massivas", "troca-poste", "acoes")
+MODULOS = ("dashboard", "produtividade", "iqi", "massivas", "troca-poste", "acoes",
+           "processos")
 
 ROTULO_MODULO = {
     "dashboard": "Dashboard",
@@ -51,7 +52,23 @@ ROTULO_MODULO = {
     "massivas": "Massivas",
     "troca-poste": "Troca de Poste",
     "acoes": "Ações",
+    "processos": "Processos",
 }
+
+
+def em_construcao():
+    """Módulos que só o admin enxerga enquanto não são liberados no ambiente.
+
+    Processos entra em fases (um PR por fase, todos na `main`). Sem esta chave,
+    a primeira fase já apareceria para os 12 usuários — "sem linha bloqueada =
+    vê" (migration 0014) — com o editor ainda pela metade. É variável de
+    ambiente, como `OS_ENVIO_HABILITADO`: liberar é decisão de operação, não
+    deploy.
+    """
+    fora = set()
+    if (os.environ.get("PROCESSOS_LIBERADO", "") or "").strip().lower() != "true":
+        fora.add("processos")
+    return fora
 
 
 def _bloqueados_cache(uid):
@@ -104,7 +121,8 @@ def usuario_atual():
         lambda: _eh_supervisor_cache(uid),
         lambda: _areas_gestor_cache(uid),
         lambda: set() if eh_admin else _bloqueados_cache(uid))
-    visiveis = [m for m in MODULOS if m not in bloqueados]
+    construcao = set() if eh_admin else em_construcao()
+    visiveis = [m for m in MODULOS if m not in bloqueados and m not in construcao]
     g._usuario_atual = {
         "id": session.get("uid"),
         "nome": session.get("nome"),

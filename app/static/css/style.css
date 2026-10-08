@@ -968,3 +968,42 @@ textarea.acao-p-titulo{ resize:none; overflow:hidden; font-size:19px; font-weigh
    Sem o realce nada diz que ali tem mais coisa — e o que tem é justamente
    onde a equipe vai encostar. */
 .tp-cand:hover{ background:var(--brand-l); }
+
+/* ===== Módulo Processos ==================================================
+   Mapa de processos, fluxograma e instrução de trabalho. Reaproveita
+   `.view-switch`, `.card`, `.tbl`, `.badge-*`, `.modal`, `.acao-p-campos`;
+   o que nasce aqui é só o que não existia. */
+
+/* Cabeçalho do processo: migalha + código + nome numa linha só. */
+.pr-cab{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:-4px 0 16px; font-size:14px; }
+.pr-voltar{ color:var(--muted); font-weight:600; }
+.pr-voltar:hover{ color:var(--brand-d); }
+.pr-sep{ color:var(--muted-l); }
+.pr-cod{ font-weight:700; color:var(--muted); font-variant-numeric:tabular-nums; }
+.pr-titulo{ font-size:15px; color:var(--ink-d); }
+
+/* Quem executa. Interno no azul da casa, campo no laranja das raias do
+   fluxo: a mesma cor na tabela, no selo e na raia, para o olho ligar os três. */
+.badge.pub-interno{ background:var(--brand-l); color:var(--brand-d); }
+.badge.pub-campo{ background:#fdeede; color:#b65a16; }
+.badge.pub-ambos{ background:var(--fundo); color:var(--ink); }
+
+.pr-visao{ display:grid; grid-template-columns:minmax(0, 1fr) 300px; gap:16px; align-items:start; }
+@media (max-width:900px){ .pr-visao{ grid-template-columns:minmax(0, 1fr); } }
+
+/* Entra -> processo -> sai. */
+.pr-es{ display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); gap:14px; align-items:stretch; }
+.pr-es-lado h4{ margin:0 0 6px; font-size:11.5px; font-weight:800; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+.pr-es-lado p{ margin:0; font-size:13.5px; white-space:pre-wrap; }
+.pr-es-meio{ display:flex; align-items:center; }
+.pr-es-meio span{ background:var(--brand-l); color:var(--brand-d); font-weight:700; font-size:12px; border-radius:8px;
+  padding:8px 12px; position:relative; white-space:nowrap; }
+@media (max-width:600px){ .pr-es{ grid-template-columns:minmax(0,1fr); } .pr-es-meio{ justify-content:center; } }
+
+/* Item de lista lateral (fluxos, instruções): título + linha de estado. */
+.pr-item{ display:block; padding:8px 10px; margin:0 -10px; border-radius:8px; }
+.pr-item:hover{ background:var(--brand-l); }
+.pr-item b{ display:block; font-size:13.5px; color:var(--ink-d); }
+.pr-item span{ display:block; font-size:12px; color:var(--muted); margin-top:2px; }
+.pr-arquivar{ margin-top:14px; text-align:right; }
+.pr-tabela td a{ color:var(--ink-d); font-weight:600; }
