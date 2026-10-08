@@ -570,8 +570,12 @@ ou "salvar a minha como cópia" (fluxo novo no mesmo processo). O documento não
 salvo fica no `localStorage` e a tela oferece recuperar ao reabrir. Presença
 (`editando_por`, pulso de 60 s) avisa antes do conflito.
 
-**Ligar a uma forma que já existe** tem três caminhos: arrastar da bolinha
-e soltar sobre a forma (ou perto da borda — ímã de 18 px); clicar na bolinha
+**Ligar a uma forma que já existe** tem três caminhos. Em todos, enquanto a
+seta está sendo ligada, **as bolinhas de todas as outras formas aparecem**, e
+a mais próxima do mouse (até 16 px na tela) fica verde e maior: soltar ali
+liga exatamente naquela porta (`destinoSob`). Sem bolinha perto, soltar no
+corpo da forma (ou a até 18 px da borda) liga pela porta que olha para a
+origem. Os caminhos: arrastar da bolinha e soltar; clicar na bolinha
 SEM arrastar, que entra no modo ligar (a seta acompanha o mouse, contorno verde
 no destino, o próximo clique fecha, Esc cancela); e, ao soltar no vazio, a
 primeira opção do menu "Criar e ligar" é "Ligar a uma forma existente".
