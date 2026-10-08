@@ -570,6 +570,12 @@ ou "salvar a minha como cópia" (fluxo novo no mesmo processo). O documento não
 salvo fica no `localStorage` e a tela oferece recuperar ao reabrir. Presença
 (`editando_por`, pulso de 60 s) avisa antes do conflito.
 
+**Ligar a uma forma que já existe** tem três caminhos: arrastar da bolinha
+e soltar sobre a forma (ou perto da borda — ímã de 18 px); clicar na bolinha
+SEM arrastar, que entra no modo ligar (a seta acompanha o mouse, contorno verde
+no destino, o próximo clique fecha, Esc cancela); e, ao soltar no vazio, a
+primeira opção do menu "Criar e ligar" é "Ligar a uma forma existente".
+
 **Abaixo de 900 px a folha é só leitura**, com pan e pinça. Processo
 arquivado também abre só para leitura.
 
@@ -1570,6 +1576,20 @@ do banco não é reescrito pelo portal — `status` segue o que está lá e a te
 `ultima_coleta` filtram `status in.(ok,parcial)`. Quem mentia era só o
 histórico.
 
+**Com `setPointerCapture`, o `ev.target` do arrasto é quem capturou.** A
+folha do fluxograma captura o ponteiro para o arrasto não morrer fora dela —
+e daí em diante todo `pointermove`/`pointerup` chega com `ev.target` = a
+folha. A seta perguntava ao evento qual forma estava embaixo e ouvia sempre
+"nenhuma": soltar em cima de uma forma abria o menu de forma NOVA, e ligar a
+uma forma existente era impossível (relatado em 08/10/2026, um dia depois de
+o módulo entrar). Durante arrasto com captura, a forma sob o mouse sai de
+`document.elementFromPoint` (`fluxo_editor.formaSob`).
+
+O teste não pegou porque disparava o `pointerup` direto no elemento de
+destino — o que o navegador nunca faz com captura ligada. **Evento sintético
+tem de chegar onde o navegador o entregaria**: com captura, na folha. Hoje o
+gesto também é conferido com o mouse de verdade do preview (`left_click_drag`).
+
 **`L.marker` do Leaflet vendorizado nasce quebrado.** O ícone padrão busca
 `vendor/images/marker-icon.png`, `-2x` e `-shadow` — três PNGs que a
 vendorização não trouxe. Dá 404 e o pino vira retângulo. O mapa de
@@ -1870,8 +1890,10 @@ a.run(port=5001, use_reloader=False)"
   restauração (com a foto "antes de restaurar" e Ctrl+Z desfazendo),
   exportação SVG e PNG.
 
-  **Ainda não exercitado:** o gesto real de mouse e trackpad (os eventos foram
-  sintéticos), a pinça num celular de verdade e o Safari.
+  **Ainda não exercitado:** a pinça num celular de verdade e o Safari. O
+  gesto real de mouse foi exercitado em 08/10/2026, ao corrigir a ligação a
+  uma forma existente — e foi ele que mostrou que os eventos sintéticos
+  escondiam o defeito (§6, `setPointerCapture`).
 
 - **Processos — fases 4 e 5 (instrução de trabalho e PDF)** em 08/10/2026,
   sem migration nova (tudo já estava na `0018`). Gerador e mescla por script

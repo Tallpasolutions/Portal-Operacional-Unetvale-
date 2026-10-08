@@ -1083,6 +1083,8 @@ textarea.acao-p-titulo{ resize:none; overflow:hidden; font-size:19px; font-weigh
 .fluxo-folha[data-ferramenta=selecao] .fx-no, .fluxo-folha[data-ferramenta=selecao] .fx-livre{ cursor:move; }
 .fluxo-folha[data-ferramenta=selecao] .fx-lig, .fluxo-folha [data-parte=cab]{ cursor:pointer; }
 .fluxo-folha[data-ferramenta=conector] .fx-no{ cursor:crosshair; }
+.fluxo-folha[data-ferramenta=ligando], .fluxo-folha[data-ferramenta=ligando] .fx-no{ cursor:crosshair; }
+.fluxo-proxima .fluxo-proxima-existente{ font-weight:600; color:var(--brand-d); border-bottom:1px solid var(--borda); border-radius:7px 7px 0 0; margin-bottom:2px; }
 .fx-porta{ cursor:crosshair; }
 .fx-alca-nw, .fx-alca-se{ cursor:nwse-resize; } .fx-alca-ne, .fx-alca-sw{ cursor:nesw-resize; }
 .fx-alca-n, .fx-alca-s{ cursor:ns-resize; } .fx-alca-e, .fx-alca-w{ cursor:ew-resize; }

@@ -55,6 +55,10 @@
   let formaPendente = null;
   let pairando = null;
   let arrasto = null;
+  // Modo "ligar": clicou na bolinha (ou no "Ligar a uma forma existente")
+  // sem arrastar — a seta acompanha o mouse e o próximo clique numa forma
+  // fecha a ligação. Arrastar e soltar em cima da forma continua valendo.
+  let ligando = null;
   let espaco = false;
   const desfazer = [], refazer = [];
 
@@ -183,14 +187,7 @@
         const r = arrasto.ret;
         s += `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" fill="rgba(44,123,229,.08)" stroke="#2c7be5" stroke-width="${lw}" pointer-events="none"/>`;
       }
-      if (arrasto.tipo === "porta" && arrasto.ate) {
-        const o = arrasto.origem;
-        s += `<path d="M${o.x} ${o.y}L${arrasto.ate.x} ${arrasto.ate.y}" stroke="#2c7be5" stroke-width="${1.8 / z}" stroke-dasharray="${5 / z} ${4 / z}" fill="none" pointer-events="none"/>`;
-        if (arrasto.alvo) {
-          const t = no(arrasto.alvo);
-          s += `<rect x="${t.x - 5 / z}" y="${t.y - 5 / z}" width="${t.w + 10 / z}" height="${t.h + 10 / z}" rx="${6 / z}" fill="none" stroke="#00b074" stroke-width="${2 / z}" pointer-events="none"/>`;
-        }
-      }
+      if (arrasto.tipo === "porta") s += setaProvisoria(arrasto, z);
       (arrasto.guias || []).forEach((g) => {
         s += `<line x1="${g[0]}" y1="${g[1]}" x2="${g[2]}" y2="${g[3]}" stroke="#e63757" stroke-width="${1 / z}" stroke-dasharray="${3 / z} ${3 / z}" pointer-events="none"/>`;
       });
@@ -201,7 +198,21 @@
         s += `<path d="M${arrasto.de.x} ${arrasto.de.y}L${arrasto.ate.x} ${arrasto.ate.y}" stroke="#344050" stroke-width="2" fill="none" pointer-events="none"/>`;
       }
     }
+    if (ligando && !arrasto) s += setaProvisoria(ligando, z);
     camada.sobre.innerHTML = s;
+  }
+
+  // Seta tracejada da origem até o mouse, e o contorno verde na forma que vai
+  // receber a ligação se a pessoa soltar (ou clicar) ali.
+  function setaProvisoria(t, z) {
+    if (!t.ate) return "";
+    const o = t.origem;
+    let s = `<path d="M${o.x} ${o.y}L${t.ate.x} ${t.ate.y}" stroke="#2c7be5" stroke-width="${1.8 / z}" stroke-dasharray="${5 / z} ${4 / z}" fill="none" pointer-events="none"/>`;
+    const alvo = t.alvo && no(t.alvo);
+    if (alvo) {
+      s += `<rect x="${alvo.x - 5 / z}" y="${alvo.y - 5 / z}" width="${alvo.w + 10 / z}" height="${alvo.h + 10 / z}" rx="${6 / z}" fill="none" stroke="#00b074" stroke-width="${2 / z}" pointer-events="none"/>`;
+    }
+    return s;
   }
 
   // ===========================================================================
@@ -428,6 +439,55 @@
     return { tipo: "vazio" };
   }
 
+  // Forma sob o ponteiro, achada pela POSIÇÃO. Durante o arrasto a folha
+  // captura o ponteiro, e aí todo evento chega com `ev.target` = a folha:
+  // perguntar ao evento qual forma está embaixo devolvia sempre "nenhuma", e
+  // soltar a seta em cima de uma forma abria o menu de forma nova (defeito
+  // relatado em 08/10/2026). Com ímã: perto da borda (18 px na tela) também
+  // conta, que é onde a mão erra.
+  function formaSob(ev, excluir) {
+    const el = document.elementFromPoint(ev.clientX, ev.clientY);
+    const porta = el && el.closest && el.closest("[data-porta]");
+    if (porta && porta.dataset.no !== excluir && no(porta.dataset.no)) return porta.dataset.no;
+    const g = el && el.closest && el.closest("#fx-nos .fx-no");
+    if (g && g.dataset.id !== excluir && no(g.dataset.id)) return g.dataset.id;
+    const p = noMundo(ev), m = 18 / vista.zoom;
+    let melhor = null, dist = Infinity;
+    doc.nos.forEach((x) => {
+      if (x.id === excluir || F.forma(x.tipo).grupo === "raias") return;
+      if (p.x < x.x - m || p.x > x.x + x.w + m || p.y < x.y - m || p.y > x.y + x.h + m) return;
+      const d = Math.hypot(p.x - (x.x + x.w / 2), p.y - (x.y + x.h / 2));
+      if (d < dist) { dist = d; melhor = x.id; }
+    });
+    return melhor;
+  }
+
+  // Fecha a ligação de `t` (arrasto ou modo ligar) na forma `alvoId`.
+  function concluirLigacao(t, alvoId, p) {
+    registrar();
+    const alvo = no(alvoId);
+    // Em cima de uma porta: vale ela. No corpo: a que olha para a origem.
+    const naPorta = F.forma(alvo.tipo).portas.map((k) => ({ k, pt: F.porta(alvo, k) }))
+      .filter((o) => Math.hypot(o.pt.x - p.x, o.pt.y - p.y) * vista.zoom < 10)[0];
+    const l = ligar(t.de, t.porta, alvoId, naPorta ? naPorta.k : "auto");
+    if (l) sel = new Set([l.id]);
+    mudou();
+  }
+
+  function entrarLigando(de, porta, origem, ate) {
+    ligando = { de, porta, origem, ate: ate || origem, alvo: null };
+    folha.dataset.ferramenta = "ligando";
+    aviso("Clique na forma de destino. Esc cancela.");
+    desenharSobre();
+  }
+
+  function sairLigando() {
+    ligando = null;
+    folha.dataset.ferramenta = formaPendente ? "forma" : ferramenta;
+    pairando = null;
+    desenharSobre();
+  }
+
   function selecionar(id, somar) {
     if (somar) { if (sel.has(id)) sel.delete(id); else sel.add(id); }
     else if (!sel.has(id)) sel = new Set([id]);
@@ -453,6 +513,14 @@
     }
     if (ev.button !== 0) return;
 
+    if (ligando) {
+      const t = ligando, alvoId = formaSob(ev, t.de);
+      sairLigando();
+      if (alvoId) concluirLigacao(t, alvoId, p);
+      else abrirProxima(t, p, ev);
+      return;
+    }
+
     if (formaPendente) {
       registrar();
       const x = criarNo(formaPendente, p.x, p.y);
@@ -477,12 +545,12 @@
 
     if (alvo.tipo === "porta") {
       const o = F.porta(no(alvo.no), alvo.porta);
-      arrasto = { tipo: "porta", de: alvo.no, porta: alvo.porta, origem: o, ate: p };
+      arrasto = { tipo: "porta", de: alvo.no, porta: alvo.porta, origem: o, ate: p, p0: p };
       return;
     }
     if (ferramenta === "conector" && alvo.tipo === "no") {
       const o = no(alvo.id);
-      arrasto = { tipo: "porta", de: alvo.id, porta: "auto", origem: { x: o.x + o.w / 2, y: o.y + o.h / 2 }, ate: p };
+      arrasto = { tipo: "porta", de: alvo.id, porta: "auto", origem: { x: o.x + o.w / 2, y: o.y + o.h / 2 }, ate: p, p0: p };
       return;
     }
     if (alvo.tipo === "alca") {
@@ -534,6 +602,13 @@
     }
     if (arrasto && arrasto.tipo === "pinca" && ponteiros.size === 2) { pinca(); return; }
     const p = noMundo(ev);
+    if (!arrasto && ligando) {
+      ligando.ate = p;
+      ligando.alvo = formaSob(ev, ligando.de);
+      pairando = ligando.alvo;
+      desenharSobre();
+      return;
+    }
     if (!arrasto) {
       if (leitura) return;
       const alvo = alvoDo(ev);
@@ -569,8 +644,7 @@
       desenhar();
     } else if (a.tipo === "porta") {
       a.ate = p;
-      const alvo = alvoDo(ev);
-      a.alvo = (alvo.tipo === "no" && alvo.id !== a.de) ? alvo.id : (alvo.tipo === "porta" && alvo.no !== a.de ? alvo.no : null);
+      a.alvo = formaSob(ev, a.de);
       pairando = a.alvo;
       desenharSobre();
     } else if (a.tipo === "caneta") {
@@ -608,19 +682,11 @@
     } else if (a.tipo === "marquee") {
       desenhar(); montarProps();
     } else if (a.tipo === "porta") {
-      if (a.alvo) {
-        registrar();
-        const t = no(a.alvo);
-        // Soltou em cima de uma porta: vale ela. No corpo da forma: a que
-        // olha para a origem.
-        const naPorta = F.forma(t.tipo).portas.map((k) => ({ k, pt: F.porta(t, k) }))
-          .filter((o) => Math.hypot(o.pt.x - p.x, o.pt.y - p.y) * vista.zoom < 10)[0];
-        const l = ligar(a.de, a.porta, a.alvo, naPorta ? naPorta.k : "auto");
-        if (l) sel = new Set([l.id]);
-        mudou();
-      } else if (Math.hypot(p.x - a.origem.x, p.y - a.origem.y) * vista.zoom > 24) {
-        abrirProxima(a, p, ev);
-      } else desenharSobre();
+      const alvoId = formaSob(ev, a.de);
+      const andou = Math.hypot(p.x - a.p0.x, p.y - a.p0.y) * vista.zoom;
+      if (alvoId && andou > 6) concluirLigacao(a, alvoId, p);
+      else if (andou <= 6) entrarLigando(a.de, a.porta, a.origem, p);
+      else abrirProxima(a, p, ev);
     } else if (a.tipo === "caneta") {
       if (a.pontos.length > 1) {
         registrar();
@@ -773,12 +839,16 @@
   function abrirProxima(a, p, ev) {
     if (!menuProxima) return;
     const r = folha.getBoundingClientRect();
-    menuProxima.innerHTML = `<div class="fluxo-proxima-t">Criar e ligar</div>` + PROXIMAS.map((t) =>
+    menuProxima.innerHTML = `<button type="button" class="fluxo-proxima-existente" data-proxima="__existente">` +
+      `<svg viewBox="0 0 36 22" aria-hidden="true"><path d="M3 11h22" stroke="#2c7be5" stroke-width="2" stroke-dasharray="4 3" fill="none"/>` +
+      `<rect x="24" y="4" width="10" height="14" rx="2" fill="#e3f6ee" stroke="#00b074" stroke-width="1.6"/></svg>` +
+      `<span>Ligar a uma forma existente</span></button>` +
+      `<div class="fluxo-proxima-t">Criar e ligar</div>` + PROXIMAS.map((t) =>
       `<button type="button" data-proxima="${t}" title="${esc(F.forma(t).nome)}">${miniatura(t)}<span>${esc(F.forma(t).nome)}</span></button>`).join("");
     menuProxima.style.left = Math.min(r.width - 200, ev.clientX - r.left + 6) + "px";
     menuProxima.style.top = Math.min(r.height - 230, ev.clientY - r.top + 6) + "px";
     menuProxima.hidden = false;
-    menuProxima._dados = { de: a.de, porta: a.porta, p };
+    menuProxima._dados = { de: a.de, porta: a.porta, p, origem: a.origem };
   }
   function fecharProxima() { if (menuProxima) menuProxima.hidden = true; }
   if (menuProxima) menuProxima.addEventListener("click", (ev) => {
@@ -786,6 +856,7 @@
     if (!b) return;
     const d = menuProxima._dados;
     fecharProxima();
+    if (b.dataset.proxima === "__existente") { entrarLigando(d.de, d.porta, d.origem, d.p); return; }
     registrar();
     const f = F.forma(b.dataset.proxima);
     // A forma nova nasce com o lado de entrada no ponto onde a seta parou.
@@ -907,6 +978,7 @@
     if (mod && k === "v") { ev.preventDefault(); colar(); return; }
     if (mod && k === "d") { ev.preventDefault(); if (copiar()) colar(24); return; }
     if (k === "delete" || k === "backspace") { ev.preventDefault(); apagarSelecao(); return; }
+    if (k === "escape" && ligando) { sairLigando(); return; }
     if (k === "escape") {
       if (formaPendente || ferramenta !== "selecao") { formaPendente = null; marcarFerramenta("selecao"); return; }
       fecharProxima(); sel.clear(); desenhar(); montarProps(); return;
