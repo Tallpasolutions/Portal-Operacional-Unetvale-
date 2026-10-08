@@ -22,6 +22,11 @@
     });
   }
 
+  // Seletor que troca de página (o fluxo aberto, na aba Fluxograma).
+  document.querySelectorAll("select[data-navegar]").forEach((s) => {
+    s.addEventListener("change", () => { location.href = s.value; });
+  });
+
   // ---- diálogos -------------------------------------------------------------
   // `<dialog>` da casa, nunca `confirm()` (CLAUDE.md §5).
   document.addEventListener("click", (e) => {

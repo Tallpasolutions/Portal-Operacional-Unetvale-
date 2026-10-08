@@ -168,7 +168,85 @@
 
 {% elif aba == 'fluxograma' %}
 {# ===================== Fluxograma ===================== #}
-<div class="vazio">O editor de fluxos chega na próxima entrega.</div>
+{% if fluxo %}
+<div class="fluxo-topo">
+  {% if fluxos|length > 1 %}
+  <label class="ind-label">Fluxo
+    <select data-navegar aria-label="Escolher o fluxo">
+      {% for f in fluxos %}<option value="{{ url_aba }}?aba=fluxograma&fluxo={{ f.id }}" {{ 'selected' if f.id == fluxo.id }}>{{ f.titulo }}</option>{% endfor %}
+    </select>
+  </label>
+  {% else %}
+  <b class="fluxo-titulo">{{ fluxo.titulo }}</b>
+  {% endif %}
+  <span class="subnote" style="margin:0">versão {{ fluxo.versao }} · {{ fluxo.atualizado_em|data_hora_br }}{% if nomes.get(fluxo.atualizado_por) %} · {{ nomes.get(fluxo.atualizado_por) }}{% endif %}</span>
+  {% if not arquivado %}
+  <span class="fluxo-topo-acoes">
+    <button type="button" class="btn-ghost" data-abrir="dlg-versao">Salvar versão</button>
+    <button type="button" class="btn-ghost" data-abrir="dlg-versoes">Versões</button>
+    <button type="button" class="btn-ghost" data-abrir="dlg-renomear-fluxo">Renomear</button>
+    <button type="button" class="btn-ghost" data-abrir="dlg-novo-fluxo">+ Novo fluxo</button>
+  </span>
+  {% endif %}
+</div>
+{% include "_fluxo_editor.html" %}
+
+{% if not arquivado %}
+<dialog class="modal" id="dlg-versao" aria-labelledby="dlg-versao-t">
+  <form id="form-versao">
+    <h3 id="dlg-versao-t">Salvar uma versão</h3>
+    <p>Uma foto do fluxo como está agora, para voltar a ela depois. O salvamento automático continua; isto é um marco com nome.</p>
+    <div class="field" style="margin-top:12px;"><label for="versao-nome">Nome</label>
+      <input type="text" id="versao-nome" name="nome" maxlength="120" placeholder="Antes da reunião com o campo"></div>
+    <div class="modal-acoes">
+      <button type="button" class="btn sec" data-fechar>Cancelar</button>
+      <button type="submit" class="btn">Salvar versão</button>
+    </div>
+  </form>
+</dialog>
+{% endif %}
+
+<dialog class="modal modal-largo" id="dlg-versoes" aria-labelledby="dlg-versoes-t">
+  <h3 id="dlg-versoes-t">Versões de {{ fluxo.titulo }}</h3>
+  <p>Restaurar põe a versão escolhida na folha como uma alteração nova — a atual fica guardada antes, e o Ctrl+Z desfaz.</p>
+  <div class="fluxo-versoes" id="lista-versoes"><p class="acao-p-vazio">Carregando…</p></div>
+  <div class="modal-acoes"><button type="button" class="btn sec" data-fechar>Fechar</button></div>
+</dialog>
+
+{% if not arquivado %}
+<dialog class="modal" id="dlg-renomear-fluxo" aria-labelledby="dlg-renomear-t">
+  <form method="post" action="{{ url_for('dash.fluxo_renomear', fluxo_id=fluxo.id) }}">
+    <h3 id="dlg-renomear-t">Renomear o fluxo</h3>
+    <div class="field" style="margin-top:12px;"><label for="renomear-titulo">Nome</label>
+      <input type="text" id="renomear-titulo" name="titulo" required maxlength="120" value="{{ fluxo.titulo }}"></div>
+    <div class="modal-acoes">
+      <button type="button" class="btn sec" data-fechar>Cancelar</button>
+      <button type="submit" class="btn">Renomear</button>
+    </div>
+  </form>
+</dialog>
+{% endif %}
+{% else %}
+<div class="vazio">
+  <b>Nenhum fluxo neste processo.</b><br>
+  {% if not arquivado %}<br><button class="btn" type="button" data-abrir="dlg-novo-fluxo">+ Novo fluxo</button>{% endif %}
+</div>
+{% endif %}
+
+{% if not arquivado %}
+<dialog class="modal" id="dlg-novo-fluxo" aria-labelledby="dlg-novo-fluxo-t">
+  <form method="post" action="{{ url_for('dash.fluxo_novo', codigo=processo.codigo) }}">
+    <h3 id="dlg-novo-fluxo-t">Novo fluxo</h3>
+    <p>Um processo pode ter mais de um fluxo — o principal e os de exceção, por exemplo. A folha nasce com as raias de {{ publicos[processo.publico]|lower }}.</p>
+    <div class="field" style="margin-top:12px;"><label for="novo-fluxo-titulo">Nome</label>
+      <input type="text" id="novo-fluxo-titulo" name="titulo" required maxlength="120" placeholder="Exceção: poste de terceiro"></div>
+    <div class="modal-acoes">
+      <button type="button" class="btn sec" data-fechar>Cancelar</button>
+      <button type="submit" class="btn">Criar fluxo</button>
+    </div>
+  </form>
+</dialog>
+{% endif %}
 
 {% else %}
 {# ===================== Instruções ===================== #}
@@ -179,4 +257,11 @@
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/processos.js') }}"></script>
+{% if aba == 'fluxograma' and editor %}
+<script>window.__FLUXO__ = {{ editor|tojson }};</script>
+<script src="{{ url_for('static', filename='js/fluxo_formas.js') }}"></script>
+<script src="{{ url_for('static', filename='js/fluxo_render.js') }}"></script>
+<script src="{{ url_for('static', filename='js/fluxo_gerar_it.js') }}"></script>
+<script src="{{ url_for('static', filename='js/fluxo_editor.js') }}"></script>
+{% endif %}
 {% endblock %}

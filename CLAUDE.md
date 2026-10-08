@@ -529,6 +529,51 @@ servidor de ensaio.
 **Entra em fases, uma por PR**, com o módulo visível só para o admin até
 `PROCESSOS_LIBERADO=true` (§4, "Quais módulos cada um enxerga").
 
+#### A folha de desenho
+
+Editor próprio em SVG, JS puro (decisão de 08/10/2026, contra draw.io
+embutido e Excalidraw): visual do portal, formas ISO 5807 e raias, e o MESMO
+desenho alimenta a IT e o PDF. Quatro arquivos, e a separação importa:
+
+| Arquivo | Papel |
+|---|---|
+| `fluxo_formas.js` | catálogo das formas — **único** lugar da geometria (20 formas ISO, fase, livres, ícones da Infra) e da paleta de cores em hex |
+| `fluxo_render.js` | documento → **string** de SVG, função pura. Editor, PNG/SVG exportado e anexo do PDF desenham por aqui |
+| `fluxo_gerar_it.js` | conferência do fluxo (e, na fase 4, o gerador da IT). Puro: roda em `node` |
+| `fluxo_editor.js` | interação: ferramentas, arrasto, portas, raias, desfazer, autosave |
+
+Os três primeiros exportam por `module.exports` também — é como o teste por
+script os carrega.
+
+**Documento** (`processo_fluxos.documento`, `v: 1`): `raias` (empilhadas,
+sem vão), `nos` (`tipo`, caixa, `texto`, `raia`), `ligacoes` (`de`/`para` com
+`porta` n/s/e/w ou `auto`, `rota`, `meio` arrastado, `texto`) e `livres`
+(caneta, seta, linha). A vista (zoom/pan) **não** vai no documento: é de quem
+olha, e salvá-la geraria uma gravação a cada rolagem — mora no `localStorage`.
+
+**Redesenha tudo a cada mudança**, sem `requestAnimationFrame`: com algumas
+centenas de formas custa milissegundos, e com o painel oculto o rAF nem roda
+(§6). Todo texto do usuário passa por `esc` antes de virar SVG.
+
+**Raia é quem executa.** A forma ganha a `raia` pela posição do centro; mudar
+altura ou ordem de uma raia reempilha todas e leva as formas de cada uma
+junto. Raia **não se arrasta** — a ordem muda pelos botões ↑/↓ do painel:
+arrastar a primeira deslocava o diagrama inteiro.
+
+**Salvar é automático** (1,5 s depois da última mudança) com a `versao` lida.
+Conflito volta 409 com quem e quando, e a faixa oferece "ver a versão dele"
+ou "salvar a minha como cópia" (fluxo novo no mesmo processo). O documento não
+salvo fica no `localStorage` e a tela oferece recuperar ao reabrir. Presença
+(`editando_por`, pulso de 60 s) avisa antes do conflito.
+
+**Abaixo de 900 px a folha é só leitura**, com pan e pinça. Processo
+arquivado também abre só para leitura.
+
+Decisão nasce com "Sim" na primeira saída e "Não" na segunda; seta para ou de
+anotação nasce tracejada e sem ponta. A conferência do fluxo (painel, quando
+nada está selecionado) avisa e não bloqueia: falta Início/Fim, decisão sem
+saída rotulada, forma solta, conector sem par, fim inalcançável.
+
 ### IQI/IQM: duas visualizações, um filtro cada
 
 O `.view-switch` do `/iqi` tem **duas** entradas, e cada uma empilha os blocos
@@ -936,6 +981,16 @@ Os que nasceram no Dashboard:
 | `.rank` / `.rank-linha` | ranking horizontal: rótulo · barra · valor. **Não** confundir com `.barra`, que é progresso de 70px dentro de célula |
 | `.par-mes` | par "mês fechado × mês corrente" numa moldura só |
 | `.regua` | contraste de duas partes numa barra (resolvido × não resolvido) |
+
+Os que nasceram em Processos:
+
+| Classe | O que é |
+|---|---|
+| `.pr-cab` | migalha + código + nome do processo, numa linha |
+| `.badge.pub-interno/campo/ambos` | quem executa — azul, laranja, neutro; as mesmas cores das raias |
+| `.fluxo-*` / `.fx-*` | a folha do fluxograma (barra, paleta, folha, painel de propriedades) |
+| `.fluxo-menu` | `<details>` que abre uma LISTA DE AÇÕES (o `.dropdown` abre caixas de marcar) |
+| `body.fluxo-foco` | "tela cheia" dentro do app, sem a Fullscreen API |
 
 Os que nasceram no quadro de Ações:
 
@@ -1684,6 +1739,17 @@ Não existe suíte de testes. O padrão é:
    contra a `main` (worktree + `test_client`, escritas trocadas por falsos):
    foi o que pegou a ordem do `apoio_ids` mudando ao embutir a leitura.
 
+**Banco de ensaio sem produção nenhuma (08/10/2026).** Para módulo cuja
+migration ainda não subiu, o servidor de ensaio pode falar com um Postgres
+DESCARTÁVEL: PGlite (Postgres em WASM, `npm i @electric-sql/pglite
+@electric-sql/pglite-socket`) servindo em `127.0.0.1:54329`, com stubs de
+`usuarios`/`acao_areas`/`acao_gestores` e a migration aplicada; e um `supa`
+falso que traduz select/insert/update/rpc em SQL via `psycopg`. Funções e
+triggers são os de verdade. Duas armadilhas do socket do PGlite: use
+`prepare_threshold=None` e `ClientCursor` (protocolo simples), e **reconecte
+depois de todo erro** — senão a resposta de uma consulta chega para a
+seguinte.
+
 Módulo cujo dado **nasce aqui** (Ações) não se testa gravando em produção.
 O padrão que funcionou em 29/09/2026: um servidor de ensaio que COPIA as tabelas
 do módulo para a memória na partida e troca `supa.select/insert/update/delete/
@@ -1721,6 +1787,26 @@ a.run(port=5001, use_reloader=False)"
   Rotas pelo `test_client` sobre esse mesmo banco: 49 casos — chave desligada
   (só admin), módulo bloqueado (404), gestor de outra área (403 ao arquivar),
   entrada ruim toda `4xx` ou aviso, nenhum `5xx`.
+
+- **Processos — fases 2 e 3 (folha de desenho)** em 08/10/2026, sem
+  migration. Renderizador por script (`node`): as 31 formas desenham sem
+  `NaN`, texto e tipo maliciosos saem escapados, rotas em ângulo só com
+  trechos retos, conferência do fluxo nos sete casos. Rotas pelo
+  `test_client`: 54 casos — 16 documentos ruins recusados com `4xx` sem
+  gravar nada, conflito 409 com nome e hora, presença vista dos dois lados,
+  versão de outro fluxo 404, processo arquivado só leitura, módulo bloqueado
+  404 nas seis rotas.
+
+  No navegador (eventos de ponteiro disparados pelo JS — a janela do preview
+  não pintava): criar, ligar com Sim/Não automático, raia atribuída pela
+  posição, desfazer/refazer, apagar, colar deslocado, duplicar, setas, painel,
+  subir raia levando as formas, autosave gravando no banco, conflito com a
+  faixa e "salvar como cópia" preservando as duas versões, versão com nome e
+  restauração (com a foto "antes de restaurar" e Ctrl+Z desfazendo),
+  exportação SVG e PNG.
+
+  **Ainda não exercitado:** o gesto real de mouse e trackpad (os eventos foram
+  sintéticos), a pinça num celular de verdade e o Safari.
 
 - **Ações** entrou vazio: zero ação, zero gestor, 10 áreas. Em 29/09/2026
   eram 11 ações e 3 gestores (Matheus Dias, Patricia Schveitzer, Renato Barreto).
