@@ -173,9 +173,12 @@
              ` fill="#fff" stroke="#2c7be5" stroke-width="${lw}" class="fx-alca fx-alca-s"/>`;
       }
     }
-    // Portas da forma sob o mouse: é dali que se puxa a seta.
+    // Portas da forma sob o mouse: é dali que se puxa a seta. Enquanto uma
+    // seta está sendo ligada, quem desenha as portas (de TODAS as formas) é
+    // a `setaProvisoria`.
+    const ligandoAgora = (arrasto && arrasto.tipo === "porta") || ligando;
     const alvo = pairando && no(pairando);
-    if (alvo && (ferramenta === "selecao" || ferramenta === "conector") && !(arrasto && arrasto.tipo !== "porta")) {
+    if (alvo && !ligandoAgora && (ferramenta === "selecao" || ferramenta === "conector") && !arrasto) {
       F.forma(alvo.tipo).portas.forEach((p) => {
         const pt = F.porta(alvo, p);
         s += `<circle data-porta="${p}" data-no="${esc(alvo.id)}" cx="${pt.x}" cy="${pt.y}" r="${5.5 / z}"` +
@@ -202,14 +205,30 @@
     camada.sobre.innerHTML = s;
   }
 
-  // Seta tracejada da origem até o mouse, e o contorno verde na forma que vai
-  // receber a ligação se a pessoa soltar (ou clicar) ali.
+  // Enquanto a seta é ligada: as portas de TODAS as outras formas aparecem
+  // (é para onde ela pode ir — pedido de 08/10/2026: "não aparecem as
+  // bolinhas dos outros desenhos"), a porta que vai receber a seta fica verde
+  // e maior, e a seta provisória gruda nela. Soltar no corpo da forma (sem
+  // porta perto) marca a forma inteira de verde: liga pelo lado que olha
+  // para a origem.
   function setaProvisoria(t, z) {
     if (!t.ate) return "";
+    let s = "";
+    doc.nos.forEach((x) => {
+      if (x.id === t.de) return;
+      F.forma(x.tipo).portas.forEach((k) => {
+        const pt = F.porta(x, k);
+        s += `<circle cx="${pt.x}" cy="${pt.y}" r="${4.5 / z}" fill="#fff" stroke="#2c7be5" stroke-width="${1.4 / z}" opacity=".85" pointer-events="none"/>`;
+      });
+    });
     const o = t.origem;
-    let s = `<path d="M${o.x} ${o.y}L${t.ate.x} ${t.ate.y}" stroke="#2c7be5" stroke-width="${1.8 / z}" stroke-dasharray="${5 / z} ${4 / z}" fill="none" pointer-events="none"/>`;
-    const alvo = t.alvo && no(t.alvo);
-    if (alvo) {
+    const fimPorta = t.alvoPorta && no(t.alvoPorta.no) && F.porta(no(t.alvoPorta.no), t.alvoPorta.porta);
+    const fim = fimPorta || t.ate;
+    s += `<path d="M${o.x} ${o.y}L${fim.x} ${fim.y}" stroke="#2c7be5" stroke-width="${1.8 / z}" stroke-dasharray="${5 / z} ${4 / z}" fill="none" pointer-events="none"/>`;
+    if (fimPorta) {
+      s += `<circle cx="${fimPorta.x}" cy="${fimPorta.y}" r="${8 / z}" fill="#00b074" fill-opacity=".25" stroke="#00b074" stroke-width="${2.2 / z}" pointer-events="none"/>`;
+    } else if (t.alvo && no(t.alvo)) {
+      const alvo = no(t.alvo);
       s += `<rect x="${alvo.x - 5 / z}" y="${alvo.y - 5 / z}" width="${alvo.w + 10 / z}" height="${alvo.h + 10 / z}" rx="${6 / z}" fill="none" stroke="#00b074" stroke-width="${2 / z}" pointer-events="none"/>`;
     }
     return s;
@@ -445,6 +464,30 @@
   // soltar a seta em cima de uma forma abria o menu de forma nova (defeito
   // relatado em 08/10/2026). Com ímã: perto da borda (18 px na tela) também
   // conta, que é onde a mão erra.
+  // Destino da seta: a porta mais perto do mouse (até 16 px na tela) vale
+  // ela; senão, a forma sob o mouse (com ímã) vale a forma, porta "auto".
+  function destinoSob(ev, excluir) {
+    const p = noMundo(ev), raio = 16 / vista.zoom;
+    let perto = null, dist = Infinity;
+    doc.nos.forEach((x) => {
+      if (x.id === excluir) return;
+      F.forma(x.tipo).portas.forEach((k) => {
+        const pt = F.porta(x, k), d = Math.hypot(pt.x - p.x, pt.y - p.y);
+        if (d <= raio && d < dist) { dist = d; perto = { no: x.id, porta: k }; }
+      });
+    });
+    if (perto) return perto;
+    const id = formaSob(ev, excluir);
+    return id ? { no: id, porta: "auto" } : null;
+  }
+
+  function marcarDestino(t, ev) {
+    const d = destinoSob(ev, t.de);
+    t.alvo = d ? d.no : null;
+    t.alvoPorta = d && d.porta !== "auto" ? d : null;
+    return d;
+  }
+
   function formaSob(ev, excluir) {
     const el = document.elementFromPoint(ev.clientX, ev.clientY);
     const porta = el && el.closest && el.closest("[data-porta]");
@@ -462,14 +505,11 @@
     return melhor;
   }
 
-  // Fecha a ligação de `t` (arrasto ou modo ligar) na forma `alvoId`.
-  function concluirLigacao(t, alvoId, p) {
+  // Fecha a ligação de `t` (arrasto ou modo ligar) no destino `d`
+  // ({no, porta}): a porta verde, ou a forma inteira (porta "auto").
+  function concluirLigacao(t, d) {
     registrar();
-    const alvo = no(alvoId);
-    // Em cima de uma porta: vale ela. No corpo: a que olha para a origem.
-    const naPorta = F.forma(alvo.tipo).portas.map((k) => ({ k, pt: F.porta(alvo, k) }))
-      .filter((o) => Math.hypot(o.pt.x - p.x, o.pt.y - p.y) * vista.zoom < 10)[0];
-    const l = ligar(t.de, t.porta, alvoId, naPorta ? naPorta.k : "auto");
+    const l = ligar(t.de, t.porta, d.no, d.porta);
     if (l) sel = new Set([l.id]);
     mudou();
   }
@@ -514,9 +554,9 @@
     if (ev.button !== 0) return;
 
     if (ligando) {
-      const t = ligando, alvoId = formaSob(ev, t.de);
+      const t = ligando, d = destinoSob(ev, t.de);
       sairLigando();
-      if (alvoId) concluirLigacao(t, alvoId, p);
+      if (d) concluirLigacao(t, d);
       else abrirProxima(t, p, ev);
       return;
     }
@@ -604,8 +644,7 @@
     const p = noMundo(ev);
     if (!arrasto && ligando) {
       ligando.ate = p;
-      ligando.alvo = formaSob(ev, ligando.de);
-      pairando = ligando.alvo;
+      marcarDestino(ligando, ev);
       desenharSobre();
       return;
     }
@@ -644,8 +683,7 @@
       desenhar();
     } else if (a.tipo === "porta") {
       a.ate = p;
-      a.alvo = formaSob(ev, a.de);
-      pairando = a.alvo;
+      marcarDestino(a, ev);
       desenharSobre();
     } else if (a.tipo === "caneta") {
       const u = a.pontos[a.pontos.length - 1];
@@ -682,9 +720,9 @@
     } else if (a.tipo === "marquee") {
       desenhar(); montarProps();
     } else if (a.tipo === "porta") {
-      const alvoId = formaSob(ev, a.de);
+      const d = destinoSob(ev, a.de);
       const andou = Math.hypot(p.x - a.p0.x, p.y - a.p0.y) * vista.zoom;
-      if (alvoId && andou > 6) concluirLigacao(a, alvoId, p);
+      if (d && andou > 6) concluirLigacao(a, d);
       else if (andou <= 6) entrarLigando(a.de, a.porta, a.origem, p);
       else abrirProxima(a, p, ev);
     } else if (a.tipo === "caneta") {
