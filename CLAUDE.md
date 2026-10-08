@@ -118,7 +118,7 @@ servidor, e cuidado redobrado com migration destrutiva.
 | `/massivas` | Massivas | `dados_modulo` (coletor) | todos |
 | `/troca-poste` | Troca de Poste | schema `troca_poste` | todos menos supervisor |
 | `/acoes` | **Ações** | `public.acoes` e cia. | cada um as suas; gestor a área dele |
-| `/processos` | **Processos** | `public.processos` e cia. (migration `0018`) | todos editam; gestor da área aprova. **Só admin** até `PROCESSOS_LIBERADO=true` |
+| `/processos` | **Processos** | `public.processos` e cia. (migration `0018`) | todos (pela matriz de Configurações); todos editam; gestor da área aprova |
 
 Mais `/usuarios`, `/monitoramento` (admin) e `/configuracoes` (todos).
 
@@ -526,8 +526,12 @@ a lista de formas mora no JS, e uma segunda cópia em Python divergiria dela
 chegava ao PostgREST como byte nulo e voltava 500. Medido em 08/10/2026 no
 servidor de ensaio.
 
-**Entra em fases, uma por PR**, com o módulo visível só para o admin até
-`PROCESSOS_LIBERADO=true` (§4, "Quais módulos cada um enxerga").
+**Quem vê é a matriz de Configurações, como nos outros módulos.** Ele entrou
+atrás de uma chave de ambiente (`PROCESSOS_LIBERADO`, só admin) e foi liberado
+no mesmo dia, 08/10/2026, por decisão do Jhoni: a chave saiu do código. Como
+produção não tinha nenhum bloqueio na matriz, os 12 usuários passaram a ver
+Processos, e a coluna nova aparece marcada para todos — tirar de alguém é
+desmarcar a caixa, que grava a linha em `usuario_modulos_bloqueados`.
 
 #### A folha de desenho
 
@@ -913,11 +917,6 @@ Três, independentes — a pessoa pode ser um, vários ou nenhum:
 Configuração, não código, desde 04/09/2026 (migration `0014`). O admin marca em
 *Configurações → Acesso aos módulos* o que cada pessoa vê; `auth.MODULOS` lista
 os sete configuráveis.
-
-Por cima disso, `auth.em_construcao()` esconde de quem não é admin o módulo que
-ainda está sendo entregue em fases (hoje: Processos, até `PROCESSOS_LIBERADO=
-true`). A grade de Configurações continua mostrando a coluna, rotulada "só
-admin, em construção": a marcação já vale para quando ele for liberado.
 
 ⚠️ A tabela `usuario_modulos_bloqueados` guarda o que foi **TIRADO**, não o que
 foi liberado. Sem linha = vê — que é como o portal sempre funcionou, e por isso
@@ -1839,10 +1838,10 @@ a.run(port=5001, use_reloader=False)"
 - **Processos — fase 1 (fundação)** em 08/10/2026, migration `0018`
   (todas as tabelas e funções do módulo: processos, fluxos, fotos do fluxo,
   instruções, revisões, eventos e contadores de código). Catálogo, página do
-  processo (Visão geral) e criar/editar/arquivar. Só o admin vê até
-  `PROCESSOS_LIBERADO=true`.
+  processo (Visão geral) e criar/editar/arquivar.
 
-  A `0018` **não foi aplicada em produção**. Provada num Postgres descartável
+  A `0018` foi aplicada em produção em 08/10/2026 (conferido: as tabelas
+  respondem e Infraestrutura tem a sigla `INF`). Antes, foi provada num Postgres descartável
   (PGlite, sem tocar o Supabase): aplicada e REAPLICADA sem erro, e 49 travas
   conferidas — códigos sequenciais por área e sem colisão, conflito de versão
   no fluxo e no rascunho, documento > 1 MB recusado, elaborador e quem enviou
@@ -1907,14 +1906,19 @@ a.run(port=5001, use_reloader=False)"
   Suítes finais, todas sobre o banco de ensaio: rotas 49 + 54 + 75 casos,
   nenhum `5xx`; renderizador 23 e gerador 21 por `node`.
 
-  **Para entrar em produção, nesta ordem:**
-  1. confirmar o backup do Supabase (o dado deste módulo nasce aqui);
-  2. aplicar a `0018` no SQL Editor (ela foi provada só no PGlite);
-  3. mergear — o módulo fica visível só para o admin;
-  4. conferir em produção como admin (criar, desenhar, gerar, aprovar com
-     outra pessoa, PDF);
-  5. decidir quem vê em *Configurações → Acesso aos módulos* e então pôr
-     `PROCESSOS_LIBERADO=true` na Vercel.
+  Mergeado em 08/10/2026 (#45), com a `0018` aplicada em produção.
+
+- **Processos liberado pela matriz** em 08/10/2026: a chave
+  `PROCESSOS_LIBERADO` saiu, e quem vê o módulo é só a matriz de
+  Configurações. Produção tinha 12 usuários e zero bloqueios, então todos
+  passaram a ver Processos, e a matriz mostra a coluna marcada para todos.
+  Provado pelo `test_client` (23 casos): sete colunas com Processos depois de
+  Ações; desmarcar Processos de uma pessoa grava SÓ essa linha, ela recebe
+  404 e some do menu, e as outras colunas e pessoas ficam como estavam;
+  devolver apaga o bloqueio; admin nunca perde o módulo.
+
+  **Ainda não exercitado em produção:** uma pessoa sem ser admin abrindo o
+  módulo depois do deploy.
 
   **Ainda não medido:** o `Server-Timing` das rotas novas contra o Supabase
   de verdade — o banco de ensaio não passa pela contagem de idas.
