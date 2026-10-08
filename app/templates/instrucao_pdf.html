@@ -58,6 +58,14 @@
   /* Na impressão a largura é a da folha (que no anexo é deitada); o limite
      de 190 mm é só para a prévia na tela. */
   @media print{ .barra-tela{ display:none; } .pdf{ padding:0; max-width:none; } }
+  /* Prévia aberta no celular (o link vai por WhatsApp): empilha o que no
+     papel é coluna em milímetro. Não vale para a impressão. */
+  @media screen and (max-width:600px){
+    .pdf{ padding:10px 12px; }
+    .cab, .assinaturas{ grid-template-columns:1fr; }
+    .cab > div + div{ border-left:none; border-top:1px solid #344050; }
+    .ficha-pdf{ grid-template-columns:1fr 1fr; }
+  }
 </style>
 </head>
 <body>

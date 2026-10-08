@@ -141,13 +141,18 @@
           {% for x in usuarios %}<option value="{{ x.id }}" {{ 'selected' if x.id == usuario.id }}>{{ x.nome or x.email }}</option>{% endfor %}
         </select></div>
     </div>
+    <div class="field"><label for="np-modelo">Começar de</label>
+      <select id="np-modelo" name="modelo">
+        <option value="">Folha em branco, com as raias de quem executa</option>
+        {% for chave, m in modelos.items() %}<option value="{{ chave }}">Modelo: {{ m.titulo }}</option>{% endfor %}
+      </select></div>
     <div class="field">
       <label for="np-objetivo">Objetivo <span class="rotulo-leve">opcional — para que o processo existe</span></label>
       <textarea id="np-objetivo" name="objetivo" rows="3" maxlength="2000"
                 placeholder="Garantir que toda troca de poste da Celesc tenha OS aberta antes do desligamento."></textarea>
     </div>
     <p class="subnote" style="margin:0;">O código (ex.: PR-INF-004) sai da sigla da área e não muda depois.
-      A folha nasce com as raias de quem executa.</p>
+      O modelo é um ponto de partida: tudo nele se edita.</p>
     <div class="modal-acoes">
       <button type="button" class="btn sec" data-fechar>Cancelar</button>
       <button type="submit" class="btn">Criar e desenhar o fluxo</button>

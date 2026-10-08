@@ -256,6 +256,14 @@
     if (l.texto) {
       const m = meioDoCaminho(ps);
       const tam = 12, w = largura(l.texto, tam, 600) + 10, h = tam + 8;
+      // Seta curta: o rótulo no meio cobriria a ponta. Vai para o lado do
+      // trecho, e a seta fica inteira à vista.
+      let comp = 0;
+      for (let i = 1; i < ps.length; i++) comp += Math.hypot(ps[i].x - ps[i - 1].x, ps[i].y - ps[i - 1].y);
+      if (comp < 64 && m.seg && ps[m.seg]) {
+        const vertical = Math.abs(ps[m.seg].x - ps[m.seg - 1].x) < 0.5;
+        if (vertical) m.x += w / 2 + 4; else m.y -= h / 2 + 3;
+      }
       s += `<rect x="${n(m.x - w / 2)}" y="${n(m.y - h / 2)}" width="${n(w)}" height="${n(h)}" rx="4" fill="#ffffff" fill-opacity="0.94"/>` +
            `<text x="${n(m.x)}" y="${n(m.y + tam * 0.36)}" text-anchor="middle" font-family="${FAMILIA}" font-size="${tam}"` +
            ` font-weight="600" fill="${sel ? "#1f5fc0" : "#5e6e82"}">${esc(l.texto)}</text>`;

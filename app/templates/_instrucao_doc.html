@@ -19,17 +19,17 @@
 
 {% if c.responsabilidades %}
 <section class="it-sec">{{ titulo('Responsabilidades') }}
-  <table class="it-tab"><thead><tr><th style="width:30%">Quem</th><th>Responde por</th></tr></thead><tbody>
+  <div class="tabela-wrap"><table class="it-tab"><thead><tr><th style="width:30%">Quem</th><th>Responde por</th></tr></thead><tbody>
   {% for r in c.responsabilidades %}<tr><td><b>{{ r.papel or '—' }}</b></td><td>{{ r.descricao or '—' }}</td></tr>{% endfor %}
-  </tbody></table>
+  </tbody></table></div>
 </section>
 {% endif %}
 
 {% if c.definicoes %}
 <section class="it-sec">{{ titulo('Definições e siglas') }}
-  <table class="it-tab"><tbody>
+  <div class="tabela-wrap"><table class="it-tab"><tbody>
   {% for d in c.definicoes %}<tr><td style="width:30%"><b>{{ d.termo }}</b></td><td>{{ d.significado }}</td></tr>{% endfor %}
-  </tbody></table>
+  </tbody></table></div>
 </section>
 {% endif %}
 
@@ -52,7 +52,7 @@
 
 <section class="it-sec">{{ titulo('Passo a passo') }}
   {% if c.passos %}
-  <table class="it-tab it-passos">
+  <div class="tabela-wrap"><table class="it-tab it-passos">
     <thead><tr><th class="it-n">Nº</th><th class="it-quem">Quem</th><th>Atividade</th><th class="it-aten">Atenção</th></tr></thead>
     <tbody>
     {% for p in c.passos %}
@@ -66,7 +66,7 @@
       </tr>
     {% endfor %}
     </tbody>
-  </table>
+  </table></div>
   {% else %}
   <p class="it-p it-vazio">Nenhum passo escrito ainda.</p>
   {% endif %}
@@ -88,11 +88,11 @@
 {% if aprovadas %}
 <section class="it-sec it-historico">
   <h2 class="it-h">Histórico de revisões</h2>
-  <table class="it-tab"><thead><tr><th>Rev.</th><th>Vigente desde</th><th>Motivo</th><th>Elaborado</th><th>Aprovado</th></tr></thead><tbody>
+  <div class="tabela-wrap"><table class="it-tab"><thead><tr><th>Rev.</th><th>Vigente desde</th><th>Motivo</th><th>Elaborado</th><th>Aprovado</th></tr></thead><tbody>
   {% for r in aprovadas %}
   <tr><td>{{ '%02d' % r.numero }}</td><td>{{ r.vigente_desde|dia_br }}</td>
       <td>{{ r.motivo_revisao or '—' }}</td><td>{{ nomes.get(r.elaborado_por) or '—' }}</td><td>{{ nomes.get(r.aprovado_por) or '—' }}</td></tr>
   {% endfor %}
-  </tbody></table>
+  </tbody></table></div>
 </section>
 {% endif %}

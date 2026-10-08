@@ -1090,7 +1090,12 @@
                `<span>→ ${esc((dest && (dest.texto || F.forma(dest.tipo).nome)) || "?").slice(0, 28)}</span></div>`;
       }).join("") : `<p class="fx-sub">Puxe uma seta para cada resposta.</p>`) + `</div>`;
     }
-    return `<h4>${esc(f.nome)}</h4><p class="fx-sub">${esc(f.dica || "")}</p>` +
+    // De qual passo de qual instrução esta forma virou: mexer aqui muda o
+    // papel na próxima geração.
+    const naIT = (D.passos || {})[x.id] || [];
+    const itHTML = naIT.length ? `<div class="fx-campo"><label>Na instrução de trabalho</label>` + naIT.map((r) =>
+      `<a class="fx-link" href="${esc(D.urls.instrucao.replace("IT-XXX-000", r.it))}?rev=${r.rev}">${esc(r.it)} · passo ${r.passo} ↗</a>`).join("") + `</div>` : "";
+    return `<h4>${esc(f.nome)}</h4><p class="fx-sub">${esc(f.dica || "")}</p>` + itHTML +
       (f.semTexto ? "" : `<div class="fx-campo"><label for="fx-texto">Texto</label><textarea id="fx-texto" data-prop="texto" rows="3" maxlength="1000">${esc(x.texto || "")}</textarea></div>`) +
       (f.grupo === "fluxograma" || f.grupo === "" ? `<div class="fx-campo"><label for="fx-raia">Raia <span class="rotulo-leve">responsável na instrução</span></label>` +
         `<select id="fx-raia" data-prop="raia">${opcoes(raias, x.raia || "")}</select></div>` : "") +
@@ -1522,7 +1527,9 @@
   montarProps();
   let vistaSalva = null;
   try { vistaSalva = JSON.parse(localStorage.getItem(LS_VISTA) || "null"); } catch (e) { vistaSalva = null; }
-  if (vistaSalva && vistaSalva.zoom) { vista = vistaSalva; aplicarVista(); } else enquadrar();
+  // A vista guardada é da tela em que foi deixada: no celular (leitura) a de
+  // um computador cortaria o desenho. Lá a folha abre sempre enquadrada.
+  if (vistaSalva && vistaSalva.zoom && !leitura) { vista = vistaSalva; aplicarVista(); } else enquadrar();
   conferirBackup();
   relogio();
   if (leitura && D.editavel) estado("Somente leitura nesta tela — edite no computador.", "");

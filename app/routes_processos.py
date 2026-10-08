@@ -100,7 +100,7 @@ def processos_view():
         "processos.html", ativo="processos", sem_sync=True, aba=aba,
         processos=lista, instrucoes=[it for it in its if it["processo"]],
         contagens=cont, areas=areas, usuarios=usuarios, nomes=_nomes(usuarios),
-        publicos=pr.PUBLICOS, executa=pr.EXECUTA,
+        publicos=pr.PUBLICOS, executa=pr.EXECUTA, modelos=pr.MODELOS,
         status_revisao=pr.STATUS_REVISAO, resumo=resumo)
 
 
@@ -151,7 +151,7 @@ def processo_detalhe(codigo):
         processo=p, area=area, fluxos=fluxos, fluxo=fluxo, editor=editor, instrucoes=its,
         urls_fluxo_pdf=_url_fluxo_pdf(fluxo),
         usuarios=usuarios, nomes=_nomes(usuarios),
-        publicos=pr.PUBLICOS, executa=pr.EXECUTA,
+        publicos=pr.PUBLICOS, executa=pr.EXECUTA, modelos=pr.MODELOS,
         status_revisao=pr.STATUS_REVISAO,
         pode_aprovar=pr.pode_aprovar(u, p), eu=u["id"])
 
@@ -212,6 +212,7 @@ def _pacote_editor(p, fluxo):
         "processo": {"codigo": p["codigo"], "publico": p["publico"]},
         "editavel": editavel,
         "motivoLeitura": None if editavel else "Processo arquivado: só leitura.",
+        "passos": pr.passos_por_forma(fluxo["id"]),
         "urls": {
             "salvar": url_for("dash.fluxo_salvar", fluxo_id=fluxo["id"]),
             "presenca": url_for("dash.fluxo_presenca", fluxo_id=fluxo["id"]),
@@ -219,6 +220,7 @@ def _pacote_editor(p, fluxo):
             "versoes": url_for("dash.fluxo_versoes", fluxo_id=fluxo["id"]),
             "versaoDoc": url_for("dash.fluxo_versao_doc", fluxo_id=fluxo["id"], versao_id="__ID__"),
             "novo": url_for("dash.fluxo_novo", codigo=p["codigo"]),
+            "instrucao": url_for("dash.instrucao_detalhe", codigo="IT-XXX-000"),
         },
     }
 
@@ -351,7 +353,8 @@ def fluxo_novo(codigo):
     dados = corpo if corpo is not None else request.form
     try:
         novo = pr.criar_fluxo(p, dados.get("titulo"), u["id"],
-                              documento=(corpo or {}).get("documento"))
+                              documento=(corpo or {}).get("documento"),
+                              modelo=None if corpo is not None else request.form.get("modelo"))
     except ValueError as e:
         if corpo is not None:
             return _json_erro(str(e))

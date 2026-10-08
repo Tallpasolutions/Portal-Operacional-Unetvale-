@@ -18,6 +18,7 @@ Papéis (decisão de 08/10/2026):
 """
 import json
 import math
+from pathlib import Path
 import re
 import sys
 import zlib
@@ -146,6 +147,26 @@ def documento_inicial(publico):
     nos = [{"id": "n1", "tipo": "terminal", "x": 70, "y": 110, "w": 120, "h": 48,
             "texto": "Início", "raia": "r1"}]
     return {"v": 1, "raias": raias, "nos": nos, "ligacoes": [], "livres": []}
+
+
+# Modelos prontos: fluxos de partida desenhados a partir do processo REAL do
+# portal (a Troca de Poste do §4 do CLAUDE.md). Arquivo em `app/modelos/`, e
+# não em `static/`: só o servidor lê, e `app/` é a pasta que vai junto com a
+# função na Vercel (como os templates).
+MODELOS = {
+    "abertura_os_troca_poste": {"titulo": "Abertura de OS de troca de poste", "publico": "interno"},
+    "transferencia_cabo": {"titulo": "Transferência de cabo em troca de poste", "publico": "campo"},
+}
+_PASTA_MODELOS = Path(__file__).resolve().parent / "modelos"
+
+
+def documento_modelo(chave):
+    """O documento do modelo, já conferido. None para chave desconhecida —
+    nunca monta caminho de arquivo com o que veio do formulário."""
+    if chave not in MODELOS:
+        return None
+    with open(_PASTA_MODELOS / f"{chave}.json", encoding="utf-8") as f:
+        return validar_documento(json.load(f))
 
 
 def _numero(v):
@@ -280,11 +301,12 @@ def criar_processo(dados, autor_id):
     dono = dados.get("dono_id") or None
     if dono and not eh_uuid(dono):
         raise ValueError("Dono inválido.")
+    doc = documento_modelo(dados.get("modelo")) or documento_inicial(publico)
     try:
         return supa.rpc("processo_criar", {
             "p_titulo": titulo[:160], "p_area": area_id, "p_publico": publico,
             "p_dono": dono, "p_objetivo": _limpo(dados.get("objetivo"), 2000),
-            "p_documento": documento_inicial(publico), "p_autor": autor_id})
+            "p_documento": doc, "p_autor": autor_id})
     except RuntimeError as e:
         raise _erro_rpc(e)
 
@@ -362,9 +384,12 @@ def obter_fluxo(fluxo_id):
         "select": _COLS_FLUXO_META + ",documento", "id": f"eq.{fluxo_id}"}) or None
 
 
-def criar_fluxo(processo, titulo, autor_id, documento=None):
+def criar_fluxo(processo, titulo, autor_id, documento=None, modelo=None):
     titulo = (titulo or "").strip()[:120] or "Novo fluxo"
-    doc = validar_documento(documento) if documento else documento_inicial(processo["publico"])
+    if documento:
+        doc = validar_documento(documento)
+    else:
+        doc = documento_modelo(modelo) or documento_inicial(processo["publico"])
     linha = supa.insert("processo_fluxos", {
         "processo_id": processo["id"], "titulo": titulo, "documento": doc,
         "criado_por": autor_id, "atualizado_por": autor_id})
@@ -671,3 +696,30 @@ def revisao_atual(revs, numero=None):
         return aberta
     vig = next((r for r in revs if r["status"] == "aprovada"), None)
     return vig or (revs[-1] if revs else None)
+
+
+def passos_por_forma(fluxo_id):
+    """{no_id: [{"it": "IT-INF-002", "passo": 6, "rev": 1}]} — de qual passo de
+    qual instrução cada forma virou. É o que o painel da folha mostra ("Na
+    instrução: IT-INF-002 · passo 6"): quem mexe na forma vê o que vai mudar
+    no papel. Vale a revisão aberta; sem ela, a vigente."""
+    its = supa.select("instrucoes", {"select": "id,codigo", "fluxo_id": f"eq.{fluxo_id}",
+                                     "status": "eq.ativa"})
+    if not its:
+        return {}
+    revs = supa.select("instrucao_revisoes", {
+        "select": "instrucao_id,numero,status,conteudo",
+        "instrucao_id": f"in.({','.join(i['id'] for i in its)})",
+        "status": "in.(rascunho,em_aprovacao,devolvida,aprovada)"})
+    out = {}
+    for it in its:
+        da_it = [r for r in revs if r["instrucao_id"] == it["id"]]
+        rev = next((r for r in da_it if r["status"] in ABERTAS), None) or \
+            next((r for r in da_it if r["status"] == "aprovada"), None)
+        if not rev:
+            continue
+        for i, p in enumerate((rev.get("conteudo") or {}).get("passos") or []):
+            if isinstance(p, dict) and p.get("no_id"):
+                out.setdefault(p["no_id"], []).append(
+                    {"it": it["codigo"], "passo": i + 1, "rev": rev["numero"]})
+    return out

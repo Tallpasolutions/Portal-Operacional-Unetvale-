@@ -621,8 +621,22 @@ histórico e as assinaturas caíam sozinhos numa página depois dele.
 na folha deitada ficava com a largura de uma folha em pé (medido em
 08/10/2026 no Chrome headless).
 
+**Modelos prontos** (`app/modelos/*.json`, listados em `processos.MODELOS`):
+"Abertura de OS de troca de poste" (interno) e "Transferência de cabo em troca
+de poste" (campo), desenhados a partir do processo REAL da Troca de Poste
+(§4). Oferecidos em "Começar de" ao criar processo ou fluxo. Moram em `app/` e
+não em `static/` porque só o servidor os lê, e é `app/` que vai com a função
+na Vercel. A chave do formulário é conferida contra o dicionário — nunca vira
+caminho de arquivo (`../../.env` cai na folha padrão; testado).
+
+**A forma sabe em qual passo virou** (`processos.passos_por_forma`): o painel
+da folha mostra "Na instrução: IT-INF-002 · passo 6 ↗" — quem mexe na forma vê
+o que muda no papel na próxima geração.
+
 Decisão nasce com "Sim" na primeira saída e "Não" na segunda; seta para ou de
-anotação nasce tracejada e sem ponta. A conferência do fluxo (painel, quando
+anotação nasce tracejada e sem ponta. Seta curta (< 64 px) leva o rótulo para
+o lado, senão ele cobre a ponta; portas frente a frente quase alinhadas (< 6
+px) dão seta reta, sem o cotovelo de 4 px. A conferência do fluxo (painel, quando
 nada está selecionado) avisa e não bloqueia: falta Início/Fim, decisão sem
 saída rotulada, forma solta, conector sem par, fim inalcançável.
 
@@ -1881,6 +1895,29 @@ a.run(port=5001, use_reloader=False)"
 
   **Ainda não exercitado:** o PDF no Safari (sem cabeçalho repetido e sem
   "Página X de Y", por limitação dele) e a impressão de um fluxo que caia em A3.
+
+- **Processos — fase 6 (acabamento)** em 08/10/2026: os dois modelos prontos,
+  o vínculo forma → passo no painel da folha, e a passada no preset mobile.
+  Ela achou três defeitos, corrigidos: a faixa de aviso escondida deixava um
+  vão (o `hidden` perdendo para `display:flex`, §6); texto sem espaço e a
+  tabela do histórico empurravam a instrução para 1.457 px de largura num
+  telefone de 375; e a folha em leitura abria com o zoom guardado numa sessão
+  de computador. Hoje todas as telas do módulo ficam em 375 px.
+
+  Suítes finais, todas sobre o banco de ensaio: rotas 49 + 54 + 75 casos,
+  nenhum `5xx`; renderizador 23 e gerador 21 por `node`.
+
+  **Para entrar em produção, nesta ordem:**
+  1. confirmar o backup do Supabase (o dado deste módulo nasce aqui);
+  2. aplicar a `0018` no SQL Editor (ela foi provada só no PGlite);
+  3. mergear — o módulo fica visível só para o admin;
+  4. conferir em produção como admin (criar, desenhar, gerar, aprovar com
+     outra pessoa, PDF);
+  5. decidir quem vê em *Configurações → Acesso aos módulos* e então pôr
+     `PROCESSOS_LIBERADO=true` na Vercel.
+
+  **Ainda não medido:** o `Server-Timing` das rotas novas contra o Supabase
+  de verdade — o banco de ensaio não passa pela contagem de idas.
 
 - **Ações** entrou vazio: zero ação, zero gestor, 10 áreas. Em 29/09/2026
   eram 11 ações e 3 gestores (Matheus Dias, Patricia Schveitzer, Renato Barreto).

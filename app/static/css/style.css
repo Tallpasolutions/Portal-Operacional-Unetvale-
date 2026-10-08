@@ -1051,6 +1051,9 @@ textarea.acao-p-titulo{ resize:none; overflow:hidden; font-size:19px; font-weigh
 .fluxo-menu-lista hr{ border:none; border-top:1px solid var(--borda); margin:4px 0; }
 
 .fluxo-faixa{ padding:9px 14px; font-size:13px; display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; }
+/* `hidden` perde para o `display:flex` acima (CLAUDE.md §6): sem isto a faixa
+   escondida deixava um vão vazio acima da folha e da instrução. */
+.fluxo-faixa[hidden]{ display:none; }
 .fluxo-faixa.erro{ background:#fdecee; color:#b21f37; }
 .fluxo-faixa.aviso{ background:#fdeede; color:#7a3d14; }
 .fluxo-faixa-acoes{ margin-left:auto; display:flex; gap:8px; }
@@ -1132,7 +1135,8 @@ textarea.acao-p-titulo{ resize:none; overflow:hidden; font-size:19px; font-weigh
 .fluxo-versoes{ max-height:50vh; overflow-y:auto; margin-top:12px; }
 
 /* Leitura (celular, processo arquivado): só a folha. */
-.somente-leitura .fluxo-paleta, .somente-leitura .fluxo-props, .somente-leitura [data-so-edicao]{ display:none; }
+.somente-leitura .fluxo-paleta, .somente-leitura .fluxo-props, .somente-leitura [data-so-edicao],
+.somente-leitura [data-ferramenta=selecao]{ display:none; }
 .somente-leitura .fluxo-corpo{ grid-template-columns:minmax(0, 1fr); }
 @media (max-width:899px){
   .fluxo-editor{ height:72vh; min-height:420px; }
@@ -1179,7 +1183,11 @@ body.fluxo-foco .fluxo-editor{ height:100vh; border-radius:0; border:none; }
 .it-alerta b{ text-transform:uppercase; font-size:11px; letter-spacing:.05em; margin-right:6px; }
 .it-listas{ display:grid; grid-template-columns:repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap:4px 24px; }
 .it-marcas{ list-style:none; margin:0; padding:0; display:flex; flex-wrap:wrap; gap:6px; }
-.it-marcas li{ background:var(--brand-l); color:var(--brand-d); border-radius:12px; padding:3px 10px; font-size:12.5px; font-weight:600; }
+.it-marcas li{ background:var(--brand-l); color:var(--brand-d); border-radius:12px; padding:3px 10px; font-size:12.5px; font-weight:600;
+  overflow-wrap:anywhere; max-width:100%; }
+/* Referência é link, EPI pode vir colado: texto sem espaço quebra em
+   qualquer ponto em vez de empurrar a página para o lado no celular. */
+.it-doc{ overflow-wrap:anywhere; }
 .it-fluxo{ border:1px solid var(--borda-2); border-radius:8px; padding:8px; background:#fff; overflow:hidden; }
 .it-fluxo svg{ display:block; }
 .it-historico .it-tab{ font-size:12px; }
@@ -1231,4 +1239,5 @@ body.fluxo-foco .fluxo-editor{ height:100vh; border-radius:0; border:none; }
   .it-doc-pdf .it-alerta{ font-size:9.5pt; }
   .it-doc-pdf .it-tab th{ font-size:7.5pt; }
   .it-doc-pdf .it-sec{ break-inside:auto; }
+  .it-doc-pdf .tabela-wrap{ overflow:visible; }
 }
