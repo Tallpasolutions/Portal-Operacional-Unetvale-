@@ -1,0 +1,330 @@
+{% extends "base.html" %}
+{% block title %}{{ processo.codigo }} · Processos · Unetvale{% endblock %}
+{% block page_title %}Processos{% endblock %}
+{% block content %}
+{% set url_aba = url_for('dash.processo_detalhe', codigo=processo.codigo) %}
+{% set arquivado = processo.status != 'ativo' %}
+
+<div class="view-bar">
+  <div class="view-switch" id="pr-abas">
+    <button data-aba="visao" data-href="{{ url_aba }}?aba=visao" class="{{ 'active' if aba == 'visao' }}">Visão geral</button>
+    <button data-aba="fluxograma" data-href="{{ url_aba }}?aba=fluxograma" class="{{ 'active' if aba == 'fluxograma' }}">Fluxograma</button>
+    <button data-aba="instrucoes" data-href="{{ url_aba }}?aba=instrucoes" class="{{ 'active' if aba == 'instrucoes' }}">Instruções de trabalho</button>
+  </div>
+</div>
+
+<div class="pr-cab">
+  <a class="pr-voltar" href="{{ url_for('dash.processos_view') }}" title="Voltar ao catálogo">Processos</a>
+  <span class="pr-sep">/</span>
+  <span class="pr-cod">{{ processo.codigo }}</span>
+  <b class="pr-titulo">{{ processo.titulo }}</b>
+  <span class="badge pub-{{ processo.publico }}">{{ publicos[processo.publico] }}</span>
+  {% if arquivado %}<span class="badge badge-cinza">Arquivado</span>{% endif %}
+</div>
+
+{% if aba == 'visao' %}
+{# ===================== Visão geral ===================== #}
+<div class="pr-visao">
+  <div class="pr-visao-principal">
+    <div class="card">
+      <div class="card-h"><span>Para que o processo existe</span>
+        {% if not arquivado %}<button class="btn-ghost" type="button" data-abrir="dlg-ficha">Editar ficha</button>{% endif %}
+      </div>
+      <div class="card-b">
+        <div class="acao-p-sec">
+          <h4>Objetivo</h4>
+          {% if processo.objetivo %}<p>{{ processo.objetivo }}</p>{% else %}<p class="acao-p-vazio">Ainda não descrito.</p>{% endif %}
+        </div>
+        <div class="acao-p-sec" style="margin-bottom:0">
+          <h4>Escopo <span class="rotulo-leve" style="text-transform:none;letter-spacing:0">onde começa e onde termina</span></h4>
+          {% if processo.escopo %}<p>{{ processo.escopo }}</p>{% else %}<p class="acao-p-vazio">Ainda não descrito.</p>{% endif %}
+        </div>
+      </div>
+    </div>
+
+    {# Entradas → processo → saídas: o "SIPOC" reduzido ao que se lê numa
+       olhada. Fornecedor e cliente ficam no texto de cada lado. #}
+    <div class="card" style="margin-top:16px;">
+      <div class="card-h">Entradas e saídas</div>
+      <div class="card-b pr-es">
+        <div class="pr-es-lado">
+          <h4>Entra</h4>
+          {% if processo.entradas %}<p>{{ processo.entradas }}</p>{% else %}<p class="acao-p-vazio">O gatilho e o que chega para o processo começar.</p>{% endif %}
+        </div>
+        <div class="pr-es-meio" aria-hidden="true"><span>{{ processo.codigo }}</span></div>
+        <div class="pr-es-lado">
+          <h4>Sai</h4>
+          {% if processo.saidas %}<p>{{ processo.saidas }}</p>{% else %}<p class="acao-p-vazio">O resultado e quem o recebe.</p>{% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <aside class="pr-visao-lado">
+    <div class="card">
+      <div class="card-b">
+        <dl class="acao-p-campos">
+          <dt>Código</dt><dd><b>{{ processo.codigo }}</b></dd>
+          <dt>Área</dt><dd>{{ area.nome if area else '—' }}</dd>
+          <dt>Quem executa</dt><dd>{{ publicos[processo.publico] }}</dd>
+          <dt>Dono do processo</dt><dd>{{ nomes.get(processo.dono_id) or '—' }}</dd>
+          <dt>Criado</dt><dd>{{ processo.criado_em|data_br }}{% if nomes.get(processo.criado_por) %} · {{ nomes.get(processo.criado_por) }}{% endif %}</dd>
+          <dt>Atualizado</dt><dd>{{ processo.atualizado_em|data_hora_br }}</dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="card-h"><span>Fluxos</span><span class="acao-p-conta">{{ fluxos|length }}</span></div>
+      <div class="card-b">
+        {% for f in fluxos %}
+        <a class="pr-item" href="{{ url_aba }}?aba=fluxograma&fluxo={{ f.id }}">
+          <b>{{ f.titulo }}</b>
+          <span>v{{ f.versao }} · {{ f.atualizado_em|data_hora_br }}{% if nomes.get(f.atualizado_por) %} · {{ nomes.get(f.atualizado_por) }}{% endif %}</span>
+        </a>
+        {% else %}
+        <p class="acao-p-vazio">Nenhum fluxo.</p>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="card-h"><span>Instruções de trabalho</span><span class="acao-p-conta">{{ instrucoes|length }}</span></div>
+      <div class="card-b">
+        {% for it in instrucoes %}
+        <a class="pr-item" href="{{ url_for('dash.instrucao_detalhe', codigo=it.codigo) }}">
+          <b>{{ it.codigo }} · {{ it.titulo }}</b>
+          <span>{% if it.status == 'obsoleta' %}Obsoleta{% elif it.revisao_vigente is not none %}Rev. {{ '%02d' % it.revisao_vigente }} vigente{% else %}Nunca aprovada{% endif %}{% if it.aberta %} · Rev. {{ '%02d' % it.aberta.numero }} {{ status_revisao[it.aberta.status]|lower }}{% endif %}</span>
+        </a>
+        {% else %}
+        <p class="acao-p-vazio">Nenhuma ainda. Ela nasce do fluxo.</p>
+        {% endfor %}
+      </div>
+    </div>
+
+    {% if pode_aprovar %}
+    <div class="pr-arquivar">
+      {% if arquivado %}
+      <form method="post" action="{{ url_for('dash.processo_status', codigo=processo.codigo) }}">
+        <input type="hidden" name="status" value="ativo">
+        <button class="btn sec" type="submit">Reativar processo</button>
+      </form>
+      {% else %}
+      <button class="btn-ghost" type="button" data-abrir="dlg-arquivar">Arquivar processo</button>
+      {% endif %}
+    </div>
+    {% endif %}
+  </aside>
+</div>
+
+<dialog class="modal modal-largo" id="dlg-ficha" aria-labelledby="dlg-ficha-t">
+  <form method="post" action="{{ url_for('dash.processo_editar', codigo=processo.codigo) }}">
+    <h3 id="dlg-ficha-t">Ficha do processo</h3>
+    <div class="field"><label for="f-titulo">Processo</label>
+      <input type="text" id="f-titulo" name="titulo" required minlength="3" maxlength="160" value="{{ processo.titulo }}"></div>
+    <div class="grid nova-grade">
+      <div class="field"><label for="f-publico">Quem executa</label>
+        <select id="f-publico" name="publico">
+          {% for chave, rotulo in publicos.items() %}<option value="{{ chave }}" {{ 'selected' if chave == processo.publico }}>{{ rotulo }}</option>{% endfor %}
+        </select></div>
+      <div class="field"><label for="f-dono">Dono do processo</label>
+        <select id="f-dono" name="dono_id">
+          <option value="">Ninguém ainda</option>
+          {% for x in usuarios %}<option value="{{ x.id }}" {{ 'selected' if x.id == processo.dono_id }}>{{ x.nome or x.email }}</option>{% endfor %}
+        </select></div>
+    </div>
+    <div class="field"><label for="f-objetivo">Objetivo</label>
+      <textarea id="f-objetivo" name="objetivo" rows="3" maxlength="2000">{{ processo.objetivo or '' }}</textarea></div>
+    <div class="field"><label for="f-escopo">Escopo <span class="rotulo-leve">onde começa e onde termina</span></label>
+      <textarea id="f-escopo" name="escopo" rows="2" maxlength="2000">{{ processo.escopo or '' }}</textarea></div>
+    <div class="grid nova-grade">
+      <div class="field"><label for="f-entradas">Entra</label>
+        <textarea id="f-entradas" name="entradas" rows="3" maxlength="2000" placeholder="Aviso de desligamento da Celesc">{{ processo.entradas or '' }}</textarea></div>
+      <div class="field"><label for="f-saidas">Sai</label>
+        <textarea id="f-saidas" name="saidas" rows="3" maxlength="2000" placeholder="OS aberta no WVSA com equipe e período">{{ processo.saidas or '' }}</textarea></div>
+    </div>
+    <p class="subnote" style="margin:0;">A área não muda depois de criado: o código {{ processo.codigo }} leva a sigla dela.</p>
+    <div class="modal-acoes">
+      <button type="button" class="btn sec" data-fechar>Cancelar</button>
+      <button type="submit" class="btn">Salvar ficha</button>
+    </div>
+  </form>
+</dialog>
+
+{% if pode_aprovar and not arquivado %}
+<dialog class="modal" id="dlg-arquivar" aria-labelledby="dlg-arquivar-t">
+  <form method="post" action="{{ url_for('dash.processo_status', codigo=processo.codigo) }}">
+    <input type="hidden" name="status" value="arquivado">
+    <h3 id="dlg-arquivar-t">Arquivar {{ processo.codigo }}?</h3>
+    <p>Ele sai do catálogo de todos. Nada é apagado: fluxos, instruções e PDFs continuam
+      disponíveis por aqui, e o processo pode ser reativado.</p>
+    <div class="modal-acoes">
+      <button type="button" class="btn sec" data-fechar>Cancelar</button>
+      <button type="submit" class="btn">Arquivar</button>
+    </div>
+  </form>
+</dialog>
+{% endif %}
+
+{% elif aba == 'fluxograma' %}
+{# ===================== Fluxograma ===================== #}
+{% if fluxo %}
+<div class="fluxo-topo">
+  {% if fluxos|length > 1 %}
+  <label class="ind-label">Fluxo
+    <select data-navegar aria-label="Escolher o fluxo">
+      {% for f in fluxos %}<option value="{{ url_aba }}?aba=fluxograma&fluxo={{ f.id }}" {{ 'selected' if f.id == fluxo.id }}>{{ f.titulo }}</option>{% endfor %}
+    </select>
+  </label>
+  {% else %}
+  <b class="fluxo-titulo">{{ fluxo.titulo }}</b>
+  {% endif %}
+  <span class="subnote" style="margin:0">versão {{ fluxo.versao }} · {{ fluxo.atualizado_em|data_hora_br }}{% if nomes.get(fluxo.atualizado_por) %} · {{ nomes.get(fluxo.atualizado_por) }}{% endif %}</span>
+  {% if not arquivado %}
+  <span class="fluxo-topo-acoes">
+    <button type="button" class="btn-ghost" data-abrir="dlg-versao">Salvar versão</button>
+    <button type="button" class="btn-ghost" data-abrir="dlg-versoes">Versões</button>
+    <button type="button" class="btn-ghost" data-abrir="dlg-renomear-fluxo">Renomear</button>
+    <button type="button" class="btn-ghost" data-abrir="dlg-novo-fluxo">+ Novo fluxo</button>
+  </span>
+  {% endif %}
+</div>
+{% include "_fluxo_editor.html" %}
+
+{% if not arquivado %}
+<dialog class="modal" id="dlg-versao" aria-labelledby="dlg-versao-t">
+  <form id="form-versao">
+    <h3 id="dlg-versao-t">Salvar uma versão</h3>
+    <p>Uma foto do fluxo como está agora, para voltar a ela depois. O salvamento automático continua; isto é um marco com nome.</p>
+    <div class="field" style="margin-top:12px;"><label for="versao-nome">Nome</label>
+      <input type="text" id="versao-nome" name="nome" maxlength="120" placeholder="Antes da reunião com o campo"></div>
+    <div class="modal-acoes">
+      <button type="button" class="btn sec" data-fechar>Cancelar</button>
+      <button type="submit" class="btn">Salvar versão</button>
+    </div>
+  </form>
+</dialog>
+{% endif %}
+
+<dialog class="modal modal-largo" id="dlg-versoes" aria-labelledby="dlg-versoes-t">
+  <h3 id="dlg-versoes-t">Versões de {{ fluxo.titulo }}</h3>
+  <p>Restaurar põe a versão escolhida na folha como uma alteração nova — a atual fica guardada antes, e o Ctrl+Z desfaz.</p>
+  <div class="fluxo-versoes" id="lista-versoes"><p class="acao-p-vazio">Carregando…</p></div>
+  <div class="modal-acoes"><button type="button" class="btn sec" data-fechar>Fechar</button></div>
+</dialog>
+
+{% if not arquivado %}
+<dialog class="modal" id="dlg-renomear-fluxo" aria-labelledby="dlg-renomear-t">
+  <form method="post" action="{{ url_for('dash.fluxo_renomear', fluxo_id=fluxo.id) }}">
+    <h3 id="dlg-renomear-t">Renomear o fluxo</h3>
+    <div class="field" style="margin-top:12px;"><label for="renomear-titulo">Nome</label>
+      <input type="text" id="renomear-titulo" name="titulo" required maxlength="120" value="{{ fluxo.titulo }}"></div>
+    <div class="modal-acoes">
+      <button type="button" class="btn sec" data-fechar>Cancelar</button>
+      <button type="submit" class="btn">Renomear</button>
+    </div>
+  </form>
+</dialog>
+{% endif %}
+{% else %}
+<div class="vazio">
+  <b>Nenhum fluxo neste processo.</b><br>
+  {% if not arquivado %}<br><button class="btn" type="button" data-abrir="dlg-novo-fluxo">+ Novo fluxo</button>{% endif %}
+</div>
+{% endif %}
+
+{% if not arquivado %}
+<dialog class="modal" id="dlg-novo-fluxo" aria-labelledby="dlg-novo-fluxo-t">
+  <form method="post" action="{{ url_for('dash.fluxo_novo', codigo=processo.codigo) }}">
+    <h3 id="dlg-novo-fluxo-t">Novo fluxo</h3>
+    <p>Um processo pode ter mais de um fluxo — o principal e os de exceção, por exemplo. A folha nasce com as raias de {{ publicos[processo.publico]|lower }}.</p>
+    <div class="field" style="margin-top:12px;"><label for="novo-fluxo-titulo">Nome</label>
+      <input type="text" id="novo-fluxo-titulo" name="titulo" required maxlength="120" placeholder="Exceção: poste de terceiro"></div>
+    <div class="field"><label for="novo-fluxo-modelo">Começar de</label>
+      <select id="novo-fluxo-modelo" name="modelo">
+        <option value="">Folha em branco, com as raias de quem executa</option>
+        {% for chave, m in modelos.items() %}<option value="{{ chave }}">Modelo: {{ m.titulo }}</option>{% endfor %}
+      </select></div>
+
+    <div class="modal-acoes">
+      <button type="button" class="btn sec" data-fechar>Cancelar</button>
+      <button type="submit" class="btn">Criar fluxo</button>
+    </div>
+  </form>
+</dialog>
+{% endif %}
+
+{% else %}
+{# ===================== Instruções ===================== #}
+<div class="fluxo-topo">
+  <span class="subnote" style="margin:0">A instrução de trabalho nasce do fluxo: cada forma de ação vira um passo, e a raia vira o responsável.</span>
+  {% if not arquivado %}<span class="fluxo-topo-acoes"><button type="button" class="btn" data-abrir="dlg-nova-it">+ Nova instrução</button></span>{% endif %}
+</div>
+{% if instrucoes %}
+<div class="card">
+  <div class="tabela-wrap">
+    <table class="tbl pr-tabela">
+      <thead><tr><th>Código</th><th>Instrução</th><th>Executa</th><th>Vigente</th><th>Em andamento</th><th></th></tr></thead>
+      <tbody>
+      {% for it in instrucoes %}
+      <tr class="clicavel" data-href="{{ url_for('dash.instrucao_detalhe', codigo=it.codigo) }}">
+        <td class="cod"><b>{{ it.codigo }}</b></td>
+        <td><a href="{{ url_for('dash.instrucao_detalhe', codigo=it.codigo) }}">{{ it.titulo }}</a>{% if it.status == 'obsoleta' %} <span class="badge badge-cinza">Obsoleta</span>{% endif %}</td>
+        <td>{{ executa[it.executa] }}</td>
+        <td>{% if it.revisao_vigente is not none %}<span class="badge badge-verde">Rev. {{ '%02d' % it.revisao_vigente }}</span>{% else %}<span class="badge badge-cinza">Nunca aprovada</span>{% endif %}</td>
+        <td>{% if it.aberta %}<span class="badge {{ 'badge-ambar' if it.aberta.status == 'em_aprovacao' else ('badge-vermelho' if it.aberta.status == 'devolvida' else 'badge-azul') }}">Rev. {{ '%02d' % it.aberta.numero }} · {{ status_revisao[it.aberta.status] }}</span>{% else %}—{% endif %}</td>
+        <td>{% if it.revisao_vigente is not none %}<a class="btn-pdf" href="{{ url_for('dash.instrucao_pdf', codigo=it.codigo, rev=it.revisao_vigente) }}" target="_blank" rel="noopener">PDF</a>{% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="vazio">
+  <b>Nenhuma instrução ainda.</b><br>
+  Desenhe o fluxo e gere a instrução a partir dele — o passo a passo sai pronto para você detalhar.
+  {% if not arquivado %}<br><br><button class="btn" type="button" data-abrir="dlg-nova-it">+ Nova instrução</button>{% endif %}
+</div>
+{% endif %}
+
+{% if not arquivado %}
+<dialog class="modal modal-largo" id="dlg-nova-it" aria-labelledby="dlg-nova-it-t">
+  <form method="post" action="{{ url_for('dash.instrucao_nova', codigo=processo.codigo) }}">
+    <h3 id="dlg-nova-it-t">Nova instrução de trabalho</h3>
+    <div class="field"><label for="ni-titulo">Instrução <span class="rotulo-leve">a tarefa, como o técnico a chama</span></label>
+      <input type="text" id="ni-titulo" name="titulo" required minlength="3" maxlength="160" placeholder="Transferência de cabo em troca de poste"></div>
+    <div class="grid nova-grade">
+      <div class="field"><label for="ni-executa">Quem executa</label>
+        <select id="ni-executa" name="executa">
+          {% for chave, rotulo in executa.items() %}<option value="{{ chave }}" {{ 'selected' if (processo.publico == chave) or (processo.publico == 'ambos' and chave == 'campo') }}>{{ rotulo }}</option>{% endfor %}
+        </select></div>
+      <div class="field"><label for="ni-fluxo">Fluxo de origem</label>
+        <select id="ni-fluxo" name="fluxo_id">
+          {% for f in fluxos %}<option value="{{ f.id }}">{{ f.titulo }}</option>{% endfor %}
+          <option value="">Nenhum — escrever à mão</option>
+        </select></div>
+    </div>
+    <label class="fx-check" style="margin-top:4px;"><input type="checkbox" name="gerar" value="1" checked> Gerar os passos a partir do fluxo ao abrir</label>
+    <p class="subnote" style="margin:10px 0 0;">O código (ex.: IT-INF-001) sai da área do processo. A Rev. 00 nasce como rascunho; o gestor da área aprova.</p>
+    <div class="modal-acoes">
+      <button type="button" class="btn sec" data-fechar>Cancelar</button>
+      <button type="submit" class="btn">Criar instrução</button>
+    </div>
+  </form>
+</dialog>
+{% endif %}
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/processos.js') }}"></script>
+{% if aba == 'fluxograma' and editor %}
+<script>window.__FLUXO__ = {{ editor|tojson }};</script>
+<script src="{{ url_for('static', filename='js/fluxo_formas.js') }}"></script>
+<script src="{{ url_for('static', filename='js/fluxo_render.js') }}"></script>
+<script src="{{ url_for('static', filename='js/fluxo_gerar_it.js') }}"></script>
+<script src="{{ url_for('static', filename='js/fluxo_editor.js') }}"></script>
+{% endif %}
+{% endblock %}

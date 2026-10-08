@@ -1,0 +1,260 @@
+{
+ "v": 1,
+ "livres": [],
+ "raias": [
+  {
+   "id": "r1",
+   "titulo": "Técnico de campo",
+   "x": 0,
+   "y": 0,
+   "w": 1440,
+   "h": 400,
+   "cor": "warning"
+  },
+  {
+   "id": "r2",
+   "titulo": "Time interno",
+   "x": 0,
+   "y": 400,
+   "w": 1440,
+   "h": 200,
+   "cor": "brand"
+  }
+ ],
+ "nos": [
+  {
+   "id": "ini",
+   "tipo": "terminal",
+   "x": 64,
+   "y": 72,
+   "w": 128,
+   "h": 48,
+   "texto": "Início",
+   "raia": "r1"
+  },
+  {
+   "id": "os",
+   "tipo": "exibicao",
+   "x": 240,
+   "y": 64,
+   "w": 176,
+   "h": 64,
+   "texto": "Conferir a OS e o script no app",
+   "raia": "r1"
+  },
+  {
+   "id": "desl",
+   "tipo": "processo",
+   "x": 464,
+   "y": 64,
+   "w": 160,
+   "h": 64,
+   "texto": "Deslocar até o local",
+   "raia": "r1"
+  },
+  {
+   "id": "sinal",
+   "tipo": "preparacao",
+   "x": 680,
+   "y": 64,
+   "w": 176,
+   "h": 64,
+   "texto": "Sinalizar a via e montar a escada",
+   "raia": "r1"
+  },
+  {
+   "id": "transf",
+   "tipo": "op_manual",
+   "x": 672,
+   "y": 200,
+   "w": 192,
+   "h": 72,
+   "texto": "Transferir o cabo para o poste novo",
+   "raia": "r1"
+  },
+  {
+   "id": "nr",
+   "tipo": "anotacao",
+   "x": 936,
+   "y": 208,
+   "w": 200,
+   "h": 56,
+   "texto": "NR-35: APR, cinto e ancoragem conferida",
+   "raia": "r1"
+  },
+  {
+   "id": "ok",
+   "tipo": "decisao",
+   "x": 440,
+   "y": 192,
+   "w": 176,
+   "h": 88,
+   "texto": "Sinal ok no cliente?",
+   "raia": "r1"
+  },
+  {
+   "id": "fotos",
+   "tipo": "dados",
+   "x": 216,
+   "y": 200,
+   "w": 176,
+   "h": 80,
+   "texto": "Registrar fotos antes e depois na OS",
+   "raia": "r1"
+  },
+  {
+   "id": "fim",
+   "tipo": "terminal",
+   "x": 64,
+   "y": 328,
+   "w": 128,
+   "h": 48,
+   "texto": "Fim",
+   "raia": "r1"
+  },
+  {
+   "id": "noc",
+   "tipo": "processo",
+   "x": 440,
+   "y": 464,
+   "w": 176,
+   "h": 64,
+   "texto": "Acionar o NOC e aguardar orientação",
+   "raia": "r2"
+  }
+ ],
+ "ligacoes": [
+  {
+   "id": "1",
+   "de": {
+    "no": "ini",
+    "porta": "e"
+   },
+   "para": {
+    "no": "os",
+    "porta": "w"
+   },
+   "texto": "",
+   "rota": "ortogonal"
+  },
+  {
+   "id": "2",
+   "de": {
+    "no": "os",
+    "porta": "e"
+   },
+   "para": {
+    "no": "desl",
+    "porta": "w"
+   },
+   "texto": "",
+   "rota": "ortogonal"
+  },
+  {
+   "id": "3",
+   "de": {
+    "no": "desl",
+    "porta": "e"
+   },
+   "para": {
+    "no": "sinal",
+    "porta": "w"
+   },
+   "texto": "",
+   "rota": "ortogonal"
+  },
+  {
+   "id": "4",
+   "de": {
+    "no": "sinal",
+    "porta": "s"
+   },
+   "para": {
+    "no": "transf",
+    "porta": "n"
+   },
+   "texto": "",
+   "rota": "ortogonal"
+  },
+  {
+   "id": "5",
+   "de": {
+    "no": "transf",
+    "porta": "w"
+   },
+   "para": {
+    "no": "ok",
+    "porta": "e"
+   },
+   "texto": "",
+   "rota": "ortogonal"
+  },
+  {
+   "id": "6",
+   "de": {
+    "no": "nr",
+    "porta": "w"
+   },
+   "para": {
+    "no": "transf",
+    "porta": "e"
+   },
+   "texto": "",
+   "rota": "ortogonal",
+   "traco": "tracejado",
+   "seta": "nenhuma"
+  },
+  {
+   "id": "7",
+   "de": {
+    "no": "ok",
+    "porta": "w"
+   },
+   "para": {
+    "no": "fotos",
+    "porta": "e"
+   },
+   "texto": "Sim",
+   "rota": "ortogonal"
+  },
+  {
+   "id": "8",
+   "de": {
+    "no": "ok",
+    "porta": "s"
+   },
+   "para": {
+    "no": "noc",
+    "porta": "n"
+   },
+   "texto": "Não",
+   "rota": "ortogonal"
+  },
+  {
+   "id": "9",
+   "de": {
+    "no": "noc",
+    "porta": "e"
+   },
+   "para": {
+    "no": "transf",
+    "porta": "s"
+   },
+   "texto": "",
+   "rota": "ortogonal"
+  },
+  {
+   "id": "10",
+   "de": {
+    "no": "fotos",
+    "porta": "s"
+   },
+   "para": {
+    "no": "fim",
+    "porta": "e"
+   },
+   "texto": "",
+   "rota": "ortogonal"
+  }
+ ]
+}

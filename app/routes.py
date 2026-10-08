@@ -76,6 +76,7 @@ _ENDPOINT_MODULO = {
     "dashboard": "dash.dashboard", "produtividade": "dash.produtividade",
     "iqi": "dash.iqi", "massivas": "dash.massivas",
     "troca-poste": "dash.troca_poste", "acoes": "dash.acoes_view",
+    "processos": "dash.processos_view",
 }
 
 
@@ -523,7 +524,12 @@ def configuracoes():
         mapa = {}
         for b in bloqueios:
             mapa.setdefault(b["usuario_id"], []).append(b["modulo"])
-        contexto["modulos"] = [{"chave": m, "rotulo": auth.ROTULO_MODULO[m]}
+        # O módulo em construção continua na grade (a marcação vale quando
+        # ele for liberado), mas diz que, por ora, só o admin o vê — senão a
+        # caixa marcada prometeria um acesso que a pessoa ainda não tem.
+        construcao = auth.em_construcao()
+        contexto["modulos"] = [{"chave": m, "rotulo": auth.ROTULO_MODULO[m]
+                                + (" (só admin, em construção)" if m in construcao else "")}
                                for m in auth.MODULOS]
         contexto["modulos_bloqueados"] = mapa
     return render_template("configuracoes.html", **contexto)

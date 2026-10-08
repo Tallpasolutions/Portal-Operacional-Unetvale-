@@ -1,0 +1,11 @@
+{# Anexo A da instrução — o fluxograma. Parcial à parte do corpo porque no
+   PDF ele vem DEPOIS das assinaturas, numa folha deitada; dentro do corpo,
+   o histórico e as assinaturas caíam sozinhos numa página depois dele. #}
+{% if fluxo_doc %}
+<section class="it-sec it-anexo">
+  <h2 class="it-h">Anexo A — Fluxograma{% if fluxo_titulo %}: {{ fluxo_titulo }}{% endif %}</h2>
+  {% if not fluxo_congelado %}<p class="it-nota">Fluxo como está hoje. Na aprovação, ele é congelado nesta revisão.</p>{% endif %}
+  <div class="it-fluxo" data-fluxo></div>
+</section>
+{% endif %}
+

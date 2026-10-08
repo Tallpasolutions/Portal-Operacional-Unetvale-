@@ -74,7 +74,7 @@ data mais próxima primeiro (§6). A varredura do passado segue manual:
 | Tipo | Módulos | Se o dado sumir |
 |---|---|---|
 | **Espelho** do WVSA | Produtividade, IQI/IQM, Massivas | recoleta-se |
-| **Dado nasce aqui** | **Ações**, Troca de Poste (OS/revisão) | **não há de onde recoletar** |
+| **Dado nasce aqui** | **Ações**, **Processos**, Troca de Poste (OS/revisão) | **não há de onde recoletar** |
 
 Nos módulos do segundo tipo: histórico append-only, recorte de permissão no
 servidor, e cuidado redobrado com migration destrutiva.
@@ -108,7 +108,7 @@ servidor, e cuidado redobrado com migration destrutiva.
 
 ---
 
-## 4. Os seis módulos
+## 4. Os sete módulos
 
 | Rota | Módulo | Origem do dado | Quem vê |
 |---|---|---|---|
@@ -118,6 +118,7 @@ servidor, e cuidado redobrado com migration destrutiva.
 | `/massivas` | Massivas | `dados_modulo` (coletor) | todos |
 | `/troca-poste` | Troca de Poste | schema `troca_poste` | todos menos supervisor |
 | `/acoes` | **Ações** | `public.acoes` e cia. | cada um as suas; gestor a área dele |
+| `/processos` | **Processos** | `public.processos` e cia. (migration `0018`) | todos editam; gestor da área aprova. **Só admin** até `PROCESSOS_LIBERADO=true` |
 
 Mais `/usuarios`, `/monitoramento` (admin) e `/configuracoes` (todos).
 
@@ -471,6 +472,174 @@ gera o arquivo é o navegador — sem biblioteca de PDF na função serverless.
 tabela é de quem tem login — é dela que sai a pauta, e pauta exige ação, que
 exige usuário. Convidado só aparece na lista de quem estava, na ata e no PDF.
 
+### Processos: mapa de processos, fluxograma e instrução de trabalho
+
+Nasceu em 08/10/2026 para a **Infraestrutura**, que tem dois times com
+trabalho muito diferente: o **interno** (projeto, abertura de OS, atendimento
+ao técnico) e o de **campo** (o técnico que executa). Nenhum dos dois processos
+estava escrito. O módulo mapeia o processo, desenha o fluxo numa folha com as
+formas oficiais (ISO 5807) e gera a instrução de trabalho (IT), que vai para o
+técnico **em PDF** — técnico de campo não tem login, e não precisa ter.
+
+```
+Processo  PR-INF-003   (público: interno | campo | ambos)
+ ├─ Fluxos             documento jsonb desenhado na folha (1..n)
+ └─ Instruções  IT-INF-007   (executa: interno | campo)
+       └─ Revisões 00, 01…  rascunho → em aprovação → aprovada (vigente) → substituída
+```
+
+**Os códigos são por área e não mudam** (`processo_proximo_codigo`, com a
+sigla de `acao_areas.sigla`; área sem sigla cai em `GER`). Trocar a área de
+um processo depois de criado não é permitido: um `PR-INF` que passasse a ser
+de Projetos mentiria no papel.
+
+**Todos editam, gestor aprova** (decisão de 08/10/2026). Qualquer pessoa com o
+módulo cria processo, desenha e redige rascunho; aprovar, devolver, obsoletar
+e arquivar é do gestor da área (`acao_gestores`) ou do admin. **Quem elaborou
+ou enviou a revisão não a aprova** — trava no banco (`instrucao_aprovar`), não
+na rota, porque é a regra que não pode depender de alguém lembrar.
+
+**Nada se apaga** (dado que nasce aqui, §2): processo se **arquiva**, IT se
+**obsoleta**, tudo com `on delete restrict`. Revisão aprovada é imutável por
+trigger (`instrucao_revisao_protegida`); a única transição depois de aprovar é
+`aprovada → substituida`, feita pela próxima aprovação. `instrucao_eventos` e
+`processo_fluxo_versoes` são append-only.
+
+**O que é atômico mora em função** (`supa.rpc`): criar processo (código +
+processo + primeiro fluxo), criar IT (código + IT + Rev. 00 + evento),
+salvar fluxo e rascunho (**concorrência otimista** por `versao` — conflito
+volta como dado, `{erro: "conflito", por, em}`, nunca sobrescreve em
+silêncio), enviar, aprovar (congela o fluxo na revisão e no histórico),
+devolver e abrir nova revisão.
+
+**A folha nasce com as raias do público** (`processos.documento_inicial`):
+são elas que viram o "Quem" de cada passo da IT, e fluxo sem raia gera passo
+sem responsável.
+
+**O servidor confere a ESTRUTURA do documento, não o catálogo de formas**
+(`processos.validar_documento`): id único, ligação para forma que existe,
+número que é número, tamanho < 1 MB. O tipo da forma só precisa ser slug —
+a lista de formas mora no JS, e uma segunda cópia em Python divergiria dela
+(a armadilha dos dois normalizadores, §6).
+
+**Código na URL é conferido antes do banco** (`_CODIGO`): `/processos/%00`
+chegava ao PostgREST como byte nulo e voltava 500. Medido em 08/10/2026 no
+servidor de ensaio.
+
+**Entra em fases, uma por PR**, com o módulo visível só para o admin até
+`PROCESSOS_LIBERADO=true` (§4, "Quais módulos cada um enxerga").
+
+#### A folha de desenho
+
+Editor próprio em SVG, JS puro (decisão de 08/10/2026, contra draw.io
+embutido e Excalidraw): visual do portal, formas ISO 5807 e raias, e o MESMO
+desenho alimenta a IT e o PDF. Quatro arquivos, e a separação importa:
+
+| Arquivo | Papel |
+|---|---|
+| `fluxo_formas.js` | catálogo das formas — **único** lugar da geometria (20 formas ISO, fase, livres, ícones da Infra) e da paleta de cores em hex |
+| `fluxo_render.js` | documento → **string** de SVG, função pura. Editor, PNG/SVG exportado e anexo do PDF desenham por aqui |
+| `fluxo_gerar_it.js` | conferência do fluxo (e, na fase 4, o gerador da IT). Puro: roda em `node` |
+| `fluxo_editor.js` | interação: ferramentas, arrasto, portas, raias, desfazer, autosave |
+
+Os três primeiros exportam por `module.exports` também — é como o teste por
+script os carrega.
+
+**Documento** (`processo_fluxos.documento`, `v: 1`): `raias` (empilhadas,
+sem vão), `nos` (`tipo`, caixa, `texto`, `raia`), `ligacoes` (`de`/`para` com
+`porta` n/s/e/w ou `auto`, `rota`, `meio` arrastado, `texto`) e `livres`
+(caneta, seta, linha). A vista (zoom/pan) **não** vai no documento: é de quem
+olha, e salvá-la geraria uma gravação a cada rolagem — mora no `localStorage`.
+
+**Redesenha tudo a cada mudança**, sem `requestAnimationFrame`: com algumas
+centenas de formas custa milissegundos, e com o painel oculto o rAF nem roda
+(§6). Todo texto do usuário passa por `esc` antes de virar SVG.
+
+**Raia é quem executa.** A forma ganha a `raia` pela posição do centro; mudar
+altura ou ordem de uma raia reempilha todas e leva as formas de cada uma
+junto. Raia **não se arrasta** — a ordem muda pelos botões ↑/↓ do painel:
+arrastar a primeira deslocava o diagrama inteiro.
+
+**Salvar é automático** (1,5 s depois da última mudança) com a `versao` lida.
+Conflito volta 409 com quem e quando, e a faixa oferece "ver a versão dele"
+ou "salvar a minha como cópia" (fluxo novo no mesmo processo). O documento não
+salvo fica no `localStorage` e a tela oferece recuperar ao reabrir. Presença
+(`editando_por`, pulso de 60 s) avisa antes do conflito.
+
+**Abaixo de 900 px a folha é só leitura**, com pan e pinça. Processo
+arquivado também abre só para leitura.
+
+#### A instrução de trabalho
+
+**Os passos vêm do fluxo, e o gerador é UM só** (`FluxoIT.gerar`, no JS).
+O servidor cria a IT vazia (com o objetivo do processo e as raias como
+responsabilidades) e abre a tela com `?gerar=1`, que mostra a PRÉVIA. Gerar no
+Python seria a segunda cópia do percurso. Cada forma de ação alcançável do
+Início vira um passo, na ordem do caminho (Sim antes de Não); a raia vira o
+"Quem"; a anotação ligada vira a "Atenção"; conector, junção e Fim são
+atravessados.
+
+**Desvio é estruturado, o texto é derivado.** O passo guarda `desvios:
+[{rotulo, no|fim|fora}]` e `desvio_texto` ("Sim → passo 5 · Não → encerrar")
+é recalculado a cada mudança por `FluxoIT.textoDesvios` — a única função que o
+escreve. Reordenar os passos renumera sozinho. O PDF e a leitura usam o texto
+salvo.
+
+**Regerar não apaga o que alguém escreveu** (`FluxoIT.mesclar`, casamento
+por `no_id`): detalhe e atenção à mão ficam; a atividade só acompanha o fluxo
+se ninguém a editou (o passo guarda o `gerado` da última vez); passo cuja
+forma sumiu vai para a prévia como "saiu do fluxo", e a pessoa marca o que
+fica; passo escrito à mão continua depois do mesmo passo que o precedia.
+
+**O conteúdo é normalizado no servidor** (`processos.normalizar_conteudo`):
+chave desconhecida descartada, texto e lista cortados no teto. Vai para o PDF
+de um documento controlado.
+
+**Ciclo**: rascunho → em aprovação (texto travado: `instrucao_salvar` recusa)
+→ aprovada (vigente) ou devolvida (com motivo) → nova revisão a partir da
+vigente. Na aprovação o fluxo de origem é **congelado** em `fluxo_snapshot` —
+o anexo da Rev. 02 mostra o fluxo como era na Rev. 02. A tela já avisa quem
+elaborou ou enviou que outra pessoa aprova; a trava é do banco.
+
+#### O PDF
+
+`instrucao_pdf.html` e `fluxo_pdf.html`, páginas soltas como o
+`reuniao_pdf.html`. O corpo é o MESMO parcial da leitura na tela
+(`_instrucao_doc.html`) e carrega o `style.css` — uma definição só das classes
+`.it-*`, com `@media print` em pt. O anexo é parcial à parte
+(`_instrucao_anexo.html`) e vem DEPOIS das assinaturas: dentro do corpo, o
+histórico e as assinaturas caíam sozinhos numa página depois dele.
+
+| No papel | Como |
+|---|---|
+| cabeçalho em toda página | `<thead>` da tabela-moldura (Chrome e Firefox repetem; Safari não) |
+| "Página X de Y" e "cópia não controlada" | margin boxes do `@page` (Chrome; os outros ignoram) |
+| anexo deitado | página nomeada `@page paisagem`; A3 quando a escala ficaria < 55% |
+| rascunho e substituída | marca d'água fixa; só a vigente sai limpa |
+
+⚠️ No `@media print`, `.pdf` perde o `max-width` de 190 mm: com ele, o anexo
+na folha deitada ficava com a largura de uma folha em pé (medido em
+08/10/2026 no Chrome headless).
+
+**Modelos prontos** (`app/modelos/*.json`, listados em `processos.MODELOS`):
+"Abertura de OS de troca de poste" (interno) e "Transferência de cabo em troca
+de poste" (campo), desenhados a partir do processo REAL da Troca de Poste
+(§4). Oferecidos em "Começar de" ao criar processo ou fluxo. Moram em `app/` e
+não em `static/` porque só o servidor os lê, e é `app/` que vai com a função
+na Vercel. A chave do formulário é conferida contra o dicionário — nunca vira
+caminho de arquivo (`../../.env` cai na folha padrão; testado).
+
+**A forma sabe em qual passo virou** (`processos.passos_por_forma`): o painel
+da folha mostra "Na instrução: IT-INF-002 · passo 6 ↗" — quem mexe na forma vê
+o que muda no papel na próxima geração.
+
+Decisão nasce com "Sim" na primeira saída e "Não" na segunda; seta para ou de
+anotação nasce tracejada e sem ponta. Seta curta (< 64 px) leva o rótulo para
+o lado, senão ele cobre a ponta; portas frente a frente quase alinhadas (< 6
+px) dão seta reta, sem o cotovelo de 4 px. A conferência do fluxo (painel, quando
+nada está selecionado) avisa e não bloqueia: falta Início/Fim, decisão sem
+saída rotulada, forma solta, conector sem par, fim inalcançável.
+
 ### IQI/IQM: duas visualizações, um filtro cada
 
 O `.view-switch` do `/iqi` tem **duas** entradas, e cada uma empilha os blocos
@@ -736,13 +905,19 @@ Três, independentes — a pessoa pode ser um, vários ou nenhum:
 - **admin** — `email == ADMIN_EMAIL` (variável de ambiente, **não** coluna).
 - **supervisor** — linha em `supervisores`; vê só o time dele em Produtividade
   e IQI.
-- **gestor de ações** — linha em `acao_gestores`; manda nas ações das áreas dele.
+- **gestor de ações** — linha em `acao_gestores`; manda nas ações das áreas dele
+  e, em Processos, aprova instrução de trabalho e arquiva processo dessas áreas.
 
 ### Quais módulos cada um enxerga
 
 Configuração, não código, desde 04/09/2026 (migration `0014`). O admin marca em
 *Configurações → Acesso aos módulos* o que cada pessoa vê; `auth.MODULOS` lista
-os seis configuráveis.
+os sete configuráveis.
+
+Por cima disso, `auth.em_construcao()` esconde de quem não é admin o módulo que
+ainda está sendo entregue em fases (hoje: Processos, até `PROCESSOS_LIBERADO=
+true`). A grade de Configurações continua mostrando a coluna, rotulada "só
+admin, em construção": a marcação já vale para quando ele for liberado.
 
 ⚠️ A tabela `usuario_modulos_bloqueados` guarda o que foi **TIRADO**, não o que
 foi liberado. Sem linha = vê — que é como o portal sempre funcionou, e por isso
@@ -785,6 +960,11 @@ app/static/js/<modulo>.js    IIFE, sem framework, sem build
 
 `app/acoes.py` é a referência mais recente e mais completa. `app/supervisores.py`
 é a referência para "tabela de vínculo".
+
+Exceção de tamanho: as rotas de Processos moram em `app/routes_processos.py`,
+no **mesmo** blueprint `dash` (endpoints `dash.*`). `routes.py` já passava de
+1.600 linhas; o arquivo é importado em `create_app` antes do registro do
+blueprint.
 
 ### Abas dentro de um módulo
 
@@ -867,6 +1047,16 @@ Os que nasceram no Dashboard:
 | `.rank` / `.rank-linha` | ranking horizontal: rótulo · barra · valor. **Não** confundir com `.barra`, que é progresso de 70px dentro de célula |
 | `.par-mes` | par "mês fechado × mês corrente" numa moldura só |
 | `.regua` | contraste de duas partes numa barra (resolvido × não resolvido) |
+
+Os que nasceram em Processos:
+
+| Classe | O que é |
+|---|---|
+| `.pr-cab` | migalha + código + nome do processo, numa linha |
+| `.badge.pub-interno/campo/ambos` | quem executa — azul, laranja, neutro; as mesmas cores das raias |
+| `.fluxo-*` / `.fx-*` | a folha do fluxograma (barra, paleta, folha, painel de propriedades) |
+| `.fluxo-menu` | `<details>` que abre uma LISTA DE AÇÕES (o `.dropdown` abre caixas de marcar) |
+| `body.fluxo-foco` | "tela cheia" dentro do app, sem a Fullscreen API |
 
 Os que nasceram no quadro de Ações:
 
@@ -1615,6 +1805,17 @@ Não existe suíte de testes. O padrão é:
    contra a `main` (worktree + `test_client`, escritas trocadas por falsos):
    foi o que pegou a ordem do `apoio_ids` mudando ao embutir a leitura.
 
+**Banco de ensaio sem produção nenhuma (08/10/2026).** Para módulo cuja
+migration ainda não subiu, o servidor de ensaio pode falar com um Postgres
+DESCARTÁVEL: PGlite (Postgres em WASM, `npm i @electric-sql/pglite
+@electric-sql/pglite-socket`) servindo em `127.0.0.1:54329`, com stubs de
+`usuarios`/`acao_areas`/`acao_gestores` e a migration aplicada; e um `supa`
+falso que traduz select/insert/update/rpc em SQL via `psycopg`. Funções e
+triggers são os de verdade. Duas armadilhas do socket do PGlite: use
+`prepare_threshold=None` e `ClientCursor` (protocolo simples), e **reconecte
+depois de todo erro** — senão a resposta de uma consulta chega para a
+seguinte.
+
 Módulo cujo dado **nasce aqui** (Ações) não se testa gravando em produção.
 O padrão que funcionou em 29/09/2026: um servidor de ensaio que COPIA as tabelas
 do módulo para a memória na partida e troca `supa.select/insert/update/delete/
@@ -1634,6 +1835,89 @@ a.run(port=5001, use_reloader=False)"
 ---
 
 ## 9. Estado atual e pendências
+
+- **Processos — fase 1 (fundação)** em 08/10/2026, migration `0018`
+  (todas as tabelas e funções do módulo: processos, fluxos, fotos do fluxo,
+  instruções, revisões, eventos e contadores de código). Catálogo, página do
+  processo (Visão geral) e criar/editar/arquivar. Só o admin vê até
+  `PROCESSOS_LIBERADO=true`.
+
+  A `0018` **não foi aplicada em produção**. Provada num Postgres descartável
+  (PGlite, sem tocar o Supabase): aplicada e REAPLICADA sem erro, e 49 travas
+  conferidas — códigos sequenciais por área e sem colisão, conflito de versão
+  no fluxo e no rascunho, documento > 1 MB recusado, elaborador e quem enviou
+  sem poder aprovar, aprovada imutável (UPDATE, DELETE e volta de status
+  recusados), uma revisão aberta por IT, eventos e fotos append-only, e as
+  funções sem EXECUTE para `anon`.
+
+  Rotas pelo `test_client` sobre esse mesmo banco: 49 casos — chave desligada
+  (só admin), módulo bloqueado (404), gestor de outra área (403 ao arquivar),
+  entrada ruim toda `4xx` ou aviso, nenhum `5xx`.
+
+- **Processos — fases 2 e 3 (folha de desenho)** em 08/10/2026, sem
+  migration. Renderizador por script (`node`): as 31 formas desenham sem
+  `NaN`, texto e tipo maliciosos saem escapados, rotas em ângulo só com
+  trechos retos, conferência do fluxo nos sete casos. Rotas pelo
+  `test_client`: 54 casos — 16 documentos ruins recusados com `4xx` sem
+  gravar nada, conflito 409 com nome e hora, presença vista dos dois lados,
+  versão de outro fluxo 404, processo arquivado só leitura, módulo bloqueado
+  404 nas seis rotas.
+
+  No navegador (eventos de ponteiro disparados pelo JS — a janela do preview
+  não pintava): criar, ligar com Sim/Não automático, raia atribuída pela
+  posição, desfazer/refazer, apagar, colar deslocado, duplicar, setas, painel,
+  subir raia levando as formas, autosave gravando no banco, conflito com a
+  faixa e "salvar como cópia" preservando as duas versões, versão com nome e
+  restauração (com a foto "antes de restaurar" e Ctrl+Z desfazendo),
+  exportação SVG e PNG.
+
+  **Ainda não exercitado:** o gesto real de mouse e trackpad (os eventos foram
+  sintéticos), a pinça num celular de verdade e o Safari.
+
+- **Processos — fases 4 e 5 (instrução de trabalho e PDF)** em 08/10/2026,
+  sem migration nova (tudo já estava na `0018`). Gerador e mescla por script
+  (`node`), com o fluxo do protótipo da troca de poste: 21 casos — ordem do
+  caminho, Sim antes de Não, laço pelo conector A, anotação NR-35 virando
+  atenção, forma solta avisada, edição à mão preservada na regeração, passo
+  removido listado e não apagado, desvio renumerado.
+
+  Ciclo pelo `test_client` sobre o banco de ensaio: 71 casos — criar, salvar
+  (conteúdo normalizado, conflito 409), enviar, travar o texto em aprovação,
+  devolver com motivo, aprovar congelando o fluxo, nova revisão, segunda
+  revisão aberta recusada com frase legível, quem enviou sem poder aprovar,
+  obsoletar (403 para quem não é gestor), PDFs da vigente, do rascunho (marca
+  d'água) e da substituída, e módulo bloqueado com 404 em todas as rotas.
+
+  No navegador: criar pela tela, prévia abrindo sozinha com os 9 passos,
+  aplicar, EPI por Enter, alerta pronto, "como fazer" e reordenação
+  renumerando o desvio, tudo salvo no banco. PDF impresso no Chrome headless
+  e conferido página a página.
+
+  **Ainda não exercitado:** o PDF no Safari (sem cabeçalho repetido e sem
+  "Página X de Y", por limitação dele) e a impressão de um fluxo que caia em A3.
+
+- **Processos — fase 6 (acabamento)** em 08/10/2026: os dois modelos prontos,
+  o vínculo forma → passo no painel da folha, e a passada no preset mobile.
+  Ela achou três defeitos, corrigidos: a faixa de aviso escondida deixava um
+  vão (o `hidden` perdendo para `display:flex`, §6); texto sem espaço e a
+  tabela do histórico empurravam a instrução para 1.457 px de largura num
+  telefone de 375; e a folha em leitura abria com o zoom guardado numa sessão
+  de computador. Hoje todas as telas do módulo ficam em 375 px.
+
+  Suítes finais, todas sobre o banco de ensaio: rotas 49 + 54 + 75 casos,
+  nenhum `5xx`; renderizador 23 e gerador 21 por `node`.
+
+  **Para entrar em produção, nesta ordem:**
+  1. confirmar o backup do Supabase (o dado deste módulo nasce aqui);
+  2. aplicar a `0018` no SQL Editor (ela foi provada só no PGlite);
+  3. mergear — o módulo fica visível só para o admin;
+  4. conferir em produção como admin (criar, desenhar, gerar, aprovar com
+     outra pessoa, PDF);
+  5. decidir quem vê em *Configurações → Acesso aos módulos* e então pôr
+     `PROCESSOS_LIBERADO=true` na Vercel.
+
+  **Ainda não medido:** o `Server-Timing` das rotas novas contra o Supabase
+  de verdade — o banco de ensaio não passa pela contagem de idas.
 
 - **Ações** entrou vazio: zero ação, zero gestor, 10 áreas. Em 29/09/2026
   eram 11 ações e 3 gestores (Matheus Dias, Patricia Schveitzer, Renato Barreto).

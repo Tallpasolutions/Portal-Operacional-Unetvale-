@@ -1,0 +1,98 @@
+{# O corpo da instrução de trabalho — UM parcial para a leitura na tela e para
+   o PDF, como `_acao_painel.html` em Ações: duas molduras do mesmo
+   documento. A numeração das seções conta só as preenchidas: seção vazia no
+   papel é ruído, e "4. Definições — (nada)" parece esquecimento.
+
+   O anexo do fluxo é desenhado pelo fluxo_render.js no `.it-fluxo` — o
+   mesmo renderizador do editor. #}
+{% set c = conteudo or {} %}
+{% set ns = namespace(n=0) %}
+{% macro titulo(texto) %}{% set ns.n = ns.n + 1 %}<h2 class="it-h">{{ ns.n }}. {{ texto }}</h2>{% endmacro %}
+
+{% if c.objetivo %}
+<section class="it-sec">{{ titulo('Objetivo') }}<p class="it-p">{{ c.objetivo }}</p></section>
+{% endif %}
+
+{% if c.aplicacao %}
+<section class="it-sec">{{ titulo('Aplicação') }}<p class="it-p">{{ c.aplicacao }}</p></section>
+{% endif %}
+
+{% if c.responsabilidades %}
+<section class="it-sec">{{ titulo('Responsabilidades') }}
+  <div class="tabela-wrap"><table class="it-tab"><thead><tr><th style="width:30%">Quem</th><th>Responde por</th></tr></thead><tbody>
+  {% for r in c.responsabilidades %}<tr><td><b>{{ r.papel or '—' }}</b></td><td>{{ r.descricao or '—' }}</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endif %}
+
+{% if c.definicoes %}
+<section class="it-sec">{{ titulo('Definições e siglas') }}
+  <div class="tabela-wrap"><table class="it-tab"><tbody>
+  {% for d in c.definicoes %}<tr><td style="width:30%"><b>{{ d.termo }}</b></td><td>{{ d.significado }}</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endif %}
+
+{% if c.epis or c.materiais %}
+<section class="it-sec">{{ titulo('EPIs, materiais e ferramentas') }}
+  <div class="it-listas">
+    {% if c.epis %}<div><h3 class="it-sub">EPIs</h3><ul class="it-marcas">{% for x in c.epis %}<li>{{ x }}</li>{% endfor %}</ul></div>{% endif %}
+    {% if c.materiais %}<div><h3 class="it-sub">Materiais e ferramentas</h3><ul class="it-marcas">{% for x in c.materiais %}<li>{{ x }}</li>{% endfor %}</ul></div>{% endif %}
+  </div>
+</section>
+{% endif %}
+
+{% if c.seguranca %}
+<section class="it-sec">{{ titulo('Segurança') }}
+  {% for a in c.seguranca %}
+  <div class="it-alerta it-{{ a.nivel }}"><b>{{ 'Perigo' if a.nivel == 'perigo' else 'Atenção' }}</b> {{ a.texto }}</div>
+  {% endfor %}
+</section>
+{% endif %}
+
+<section class="it-sec">{{ titulo('Passo a passo') }}
+  {% if c.passos %}
+  <div class="tabela-wrap"><table class="it-tab it-passos">
+    <thead><tr><th class="it-n">Nº</th><th class="it-quem">Quem</th><th>Atividade</th><th class="it-aten">Atenção</th></tr></thead>
+    <tbody>
+    {% for p in c.passos %}
+      <tr class="{{ 'it-decisao' if p.tipo == 'decisao' }}">
+        <td class="it-n"><b>{{ loop.index }}</b></td>
+        <td class="it-quem">{{ p.quem or '—' }}</td>
+        <td><div class="it-ativ">{{ p.atividade }}</div>
+            {% if p.detalhe %}<div class="it-det">{{ p.detalhe }}</div>{% endif %}
+            {% if p.desvio_texto %}<div class="it-desvio">{{ p.desvio_texto }}</div>{% endif %}</td>
+        <td class="it-aten">{{ p.atencao or '' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <p class="it-p it-vazio">Nenhum passo escrito ainda.</p>
+  {% endif %}
+</section>
+
+{% if c.criterios %}
+<section class="it-sec">{{ titulo('Critérios de aceitação') }}<p class="it-p">{{ c.criterios }}</p></section>
+{% endif %}
+
+{% if c.registros %}
+<section class="it-sec">{{ titulo('Registros') }}<p class="it-p">{{ c.registros }}</p></section>
+{% endif %}
+
+{% if c.referencias %}
+<section class="it-sec">{{ titulo('Referências') }}<ul class="it-ul">{% for r in c.referencias %}<li>{{ r }}</li>{% endfor %}</ul></section>
+{% endif %}
+
+{% set aprovadas = (revisoes or [])|selectattr('aprovado_em')|list %}
+{% if aprovadas %}
+<section class="it-sec it-historico">
+  <h2 class="it-h">Histórico de revisões</h2>
+  <div class="tabela-wrap"><table class="it-tab"><thead><tr><th>Rev.</th><th>Vigente desde</th><th>Motivo</th><th>Elaborado</th><th>Aprovado</th></tr></thead><tbody>
+  {% for r in aprovadas %}
+  <tr><td>{{ '%02d' % r.numero }}</td><td>{{ r.vigente_desde|dia_br }}</td>
+      <td>{{ r.motivo_revisao or '—' }}</td><td>{{ nomes.get(r.elaborado_por) or '—' }}</td><td>{{ nomes.get(r.aprovado_por) or '—' }}</td></tr>
+  {% endfor %}
+  </tbody></table></div>
+</section>
+{% endif %}
