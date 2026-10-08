@@ -1146,3 +1146,89 @@ body.fluxo-foco .topbar, body.fluxo-foco .view-bar, body.fluxo-foco .pr-cab, bod
 body.fluxo-foco .alert{ display:none; }
 body.fluxo-foco .content{ padding:0; }
 body.fluxo-foco .fluxo-editor{ height:100vh; border-radius:0; border:none; }
+
+/* ---------- Instrução de trabalho -------------------------------------------
+   `.it-doc` é o documento (leitura na tela e PDF, o mesmo parcial);
+   `.it-editor` é o rascunho editado no lugar. */
+.it-barra{ display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:-4px 0 14px; }
+.it-barra-acoes{ margin-left:auto; display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.it-alerta-info{ background:var(--brand-l); color:var(--brand-d); border:1px solid #cfe0f8; }
+.it-doc .card-b{ padding:20px 24px; }
+.it-sec{ margin-bottom:20px; }
+.it-h{ font-size:15px; color:var(--ink-d); margin:0 0 8px; padding-bottom:6px; border-bottom:2px solid var(--brand-l); }
+.it-sub{ font-size:11.5px; font-weight:800; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin:10px 0 6px; }
+.it-p{ margin:0; font-size:13.5px; line-height:1.55; white-space:pre-wrap; }
+.it-vazio, .it-nota{ color:var(--muted); font-size:12.5px; margin:0 0 8px; }
+.it-ul{ margin:0; padding-left:18px; font-size:13.5px; line-height:1.55; }
+.it-tab{ width:100%; border-collapse:collapse; font-size:13px; }
+.it-tab th{ text-align:left; background:var(--fundo); color:var(--muted); font-size:11px; font-weight:800; text-transform:uppercase;
+  letter-spacing:.04em; padding:7px 10px; }
+.it-tab td{ padding:9px 10px; border-bottom:1px solid var(--borda); vertical-align:top; line-height:1.45; }
+.it-tab tr{ break-inside:avoid; }
+.it-passos .it-n{ width:36px; text-align:center; }
+.it-passos .it-quem{ width:18%; color:var(--muted); font-weight:600; }
+.it-passos .it-aten{ width:26%; color:#b65a16; white-space:pre-wrap; }
+.it-passos tr.it-decisao td{ background:#fffaf5; }
+.it-ativ{ font-weight:600; color:var(--ink-d); }
+.it-det{ color:var(--ink); margin-top:4px; white-space:pre-wrap; }
+.it-desvio{ margin-top:5px; font-size:12px; font-weight:700; color:var(--brand-d); }
+.it-desvio::before{ content:"↳ "; }
+.it-alerta{ border:1px solid #f9d6bd; border-left:4px solid var(--warning); background:#fdeede; color:#7a3d14;
+  padding:8px 12px; margin-bottom:8px; font-size:13px; border-radius:0; break-inside:avoid; }
+.it-alerta.it-perigo{ border-color:#f5c2cc; border-left-color:var(--danger); background:#fdecee; color:#8f1b2e; }
+.it-alerta b{ text-transform:uppercase; font-size:11px; letter-spacing:.05em; margin-right:6px; }
+.it-listas{ display:grid; grid-template-columns:repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap:4px 24px; }
+.it-marcas{ list-style:none; margin:0; padding:0; display:flex; flex-wrap:wrap; gap:6px; }
+.it-marcas li{ background:var(--brand-l); color:var(--brand-d); border-radius:12px; padding:3px 10px; font-size:12.5px; font-weight:600; }
+.it-fluxo{ border:1px solid var(--borda-2); border-radius:8px; padding:8px; background:#fff; overflow:hidden; }
+.it-fluxo svg{ display:block; }
+.it-historico .it-tab{ font-size:12px; }
+
+/* Editor do rascunho */
+.it-editor{ display:flex; flex-direction:column; gap:14px; }
+.it-faixa{ margin-bottom:12px; border-radius:8px; }
+.it-card .card-b{ padding:12px 18px 14px; }
+.it-pares{ display:flex; flex-direction:column; gap:6px; margin-bottom:6px; }
+.it-par{ display:grid; grid-template-columns:minmax(120px, 200px) minmax(0, 1fr) 30px; gap:8px; align-items:start; }
+.it-par input{ font-size:13px; padding:6px 8px; }
+.it-par .editavel{ margin-left:0; }
+.it-marcas-ed{ display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:6px; }
+.it-marcas-ed .etiqueta{ font-size:12.5px; padding:3px 9px; }
+.it-marca-nova{ flex:1 1 180px; min-width:0; font-size:13px !important; padding:5px 8px !important; border-style:dashed !important; }
+.it-alertas-ed{ display:flex; flex-direction:column; gap:6px; margin-bottom:8px; }
+.it-alerta-ed{ display:grid; grid-template-columns:110px minmax(0, 1fr) 30px; gap:8px; align-items:start;
+  border-left:4px solid var(--warning); padding-left:8px; }
+.it-alerta-ed.it-perigo{ border-left-color:var(--danger); }
+.it-alerta-ed select{ font-size:12.5px; padding:5px 6px; }
+.it-alerta-ed .editavel{ margin-left:0; }
+.it-prontos{ display:flex; flex-wrap:wrap; gap:6px; }
+.it-passos-ed{ display:flex; flex-direction:column; gap:10px; }
+.it-passo{ display:grid; grid-template-columns:30px minmax(0, 1fr); gap:10px; border:1px solid var(--borda-2); border-radius:10px;
+  padding:10px 12px 8px; border-left:4px solid var(--brand); }
+.it-passo.it-decisao{ border-left-color:var(--warning); background:#fffdfb; }
+.it-passo-n{ width:28px; height:28px; border-radius:50%; background:var(--brand-l); color:var(--brand-d); font-weight:800;
+  display:grid; place-items:center; font-size:13px; }
+.it-decisao .it-passo-n{ background:#fdeede; color:#b65a16; }
+.it-passo-topo{ display:flex; align-items:center; gap:8px; margin-bottom:4px; }
+.it-passo-topo .it-quem{ width:min(240px, 50%); font-size:12.5px; padding:5px 8px; font-weight:600; color:var(--muted); }
+.it-passo-ferr{ margin-left:auto; display:flex; gap:2px; }
+.it-passo-ferr .icone-btn:disabled{ opacity:.3; cursor:default; }
+.it-passo .editavel{ margin-left:-8px; }
+.it-ativ-ed{ font-weight:600; color:var(--ink-d) !important; font-size:14px !important; }
+.it-rot{ display:block; font-size:10.5px; font-weight:800; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin:4px 0 0; }
+.it-aten-ed{ color:#b65a16 !important; }
+.it-textarea{ width:100%; font-family:inherit; font-size:13.5px; padding:8px 10px; border:1px solid var(--borda-2); border-radius:8px; }
+.it-form-fluxo select{ width:100%; font-size:13px; padding:6px 8px; }
+@media (max-width:600px){
+  .it-par{ grid-template-columns:minmax(0, 1fr) 30px; }
+  .it-par input{ grid-column:1 / -1; }
+}
+
+/* No papel (instrucao_pdf.html): a mesma classe, medida em pt. */
+@media print{
+  .it-doc-pdf .it-h{ font-size:11.5pt; border-bottom-color:#d8e2ef; }
+  .it-doc-pdf .it-p, .it-doc-pdf .it-ul, .it-doc-pdf .it-tab{ font-size:9.5pt; }
+  .it-doc-pdf .it-alerta{ font-size:9.5pt; }
+  .it-doc-pdf .it-tab th{ font-size:7.5pt; }
+  .it-doc-pdf .it-sec{ break-inside:auto; }
+}

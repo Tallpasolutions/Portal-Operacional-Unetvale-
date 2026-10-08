@@ -20,6 +20,7 @@ import json
 import math
 import re
 import sys
+import zlib
 from datetime import datetime, timedelta, timezone
 
 from . import acoes, supa
@@ -504,10 +505,19 @@ def salvar_rascunho(rev_id, conteudo, versao, autor_id):
                                          "p_versao": versao, "p_autor": autor_id})
 
 
+# Erros de constraint que chegam crus do Postgres e viram frase da tela.
+_TRADUCOES = {
+    "instrucao_revisoes_aberta_uk": "já existe uma revisão em andamento — termine ou aprove aquela antes",
+}
+
+
 def _rpc_simples(funcao, args):
     try:
         return supa.rpc(funcao, args)
     except RuntimeError as e:
+        for chave, frase in _TRADUCOES.items():
+            if chave in str(e):
+                raise ValueError(frase)
         raise _erro_rpc(e)
 
 
@@ -534,3 +544,130 @@ def definir_status_instrucao(instrucao_id, status, autor_id, motivo=None):
     _rpc_simples("instrucao_definir_status", {
         "p_instrucao": instrucao_id, "p_status": status, "p_autor": autor_id,
         "p_motivo": (motivo or "").strip() or None})
+
+
+# --------------------------------------------------------------------------
+# Conteúdo da instrução
+# --------------------------------------------------------------------------
+# Sugestões dos campos de lista. São SUGESTÕES (datalist): a pessoa escreve o
+# que quiser; a lista só poupa digitação no que se repete em toda IT de campo.
+SUGESTOES = {
+    "epis": ["Capacete com jugular", "Cinto paraquedista", "Talabarte duplo", "Trava-quedas",
+             "Luva isolante", "Luva de vaqueta", "Óculos de proteção", "Botina de segurança",
+             "Colete refletivo", "Cones e fita de sinalização"],
+    "materiais": ["Escada extensível", "Máquina de fusão", "Clivador", "Power meter", "OTDR",
+                  "Alicate decapador", "Abraçadeiras", "Fita isolante", "Celular com o app de OS"],
+}
+
+# Alertas prontos de segurança — texto genérico e editável, não citação de
+# norma: quem conhece o procedimento da casa ajusta na própria IT.
+ALERTAS_PRONTOS = [
+    {"nivel": "perigo", "texto": "NR-35 — trabalho em altura: acima de 2 m, só com APR, "
+                                 "cinto paraquedista e ancoragem conferida."},
+    {"nivel": "perigo", "texto": "NR-10 — proximidade da rede elétrica: mantenha a distância "
+                                 "segura; rede energizada só com o procedimento da concessionária."},
+    {"nivel": "atencao", "texto": "Sinalize a via antes de subir na escada."},
+]
+
+SECOES_TEXTO = {"objetivo": 5000, "aplicacao": 5000, "criterios": 5000, "registros": 5000}
+
+
+def _txt(v, teto):
+    return v.strip()[:teto] if isinstance(v, str) else ""
+
+
+def _id_curto(v):
+    return v if isinstance(v, str) and _ID.match(v) else None
+
+
+def normalizar_conteudo(c):
+    """Só o que a instrução conhece, nos tamanhos que ela aceita.
+
+    O conteúdo vem do navegador e vai para o PDF de um documento controlado:
+    chave desconhecida é descartada, texto é cortado no teto e lista no
+    tamanho máximo. Levanta ValueError só quando nem é um dicionário — o resto
+    se conserta, para o autosave não travar por um detalhe.
+    """
+    if not isinstance(c, dict):
+        raise ValueError("Conteúdo inválido.")
+    out = {k: _txt(c.get(k), t) for k, t in SECOES_TEXTO.items()}
+
+    def lista(chave, teto, fn):
+        v = c.get(chave)
+        return [x for x in (fn(i) for i in (v if isinstance(v, list) else [])[:teto]) if x]
+
+    out["responsabilidades"] = lista("responsabilidades", 30, lambda r: isinstance(r, dict) and (
+        _txt(r.get("papel"), 120) or _txt(r.get("descricao"), 1000)) and {
+        "papel": _txt(r.get("papel"), 120), "descricao": _txt(r.get("descricao"), 1000)})
+    out["definicoes"] = lista("definicoes", 50, lambda r: isinstance(r, dict) and (
+        _txt(r.get("termo"), 80) or _txt(r.get("significado"), 500)) and {
+        "termo": _txt(r.get("termo"), 80), "significado": _txt(r.get("significado"), 500)})
+    for k in ("epis", "materiais", "referencias"):
+        out[k] = lista(k, 60, lambda s: _txt(s, 200) or None)
+    out["seguranca"] = lista("seguranca", 30, lambda r: isinstance(r, dict) and _txt(r.get("texto"), 1000) and {
+        "nivel": "perigo" if r.get("nivel") == "perigo" else "atencao",
+        "texto": _txt(r.get("texto"), 1000)})
+
+    def passo(p):
+        if not isinstance(p, dict):
+            return None
+        atividade = _txt(p.get("atividade"), 1000)
+        detalhe = _txt(p.get("detalhe"), 4000)
+        if not (atividade or detalhe):
+            return None
+        desvios = []
+        for d in (p.get("desvios") if isinstance(p.get("desvios"), list) else [])[:10]:
+            if not isinstance(d, dict):
+                continue
+            item = {"rotulo": _txt(d.get("rotulo"), 80)}
+            if _id_curto(d.get("no")):
+                item["no"] = d["no"]
+            elif d.get("fim") is True:
+                item["fim"] = True
+            elif _txt(d.get("fora"), 120):
+                item["fora"] = _txt(d.get("fora"), 120)
+            else:
+                continue
+            desvios.append(item)
+        g = p.get("gerado") if isinstance(p.get("gerado"), dict) else None
+        return {
+            "id": _id_curto(p.get("id")) or "p_" + str(zlib.crc32((atividade + detalhe).encode("utf-8"))),
+            "no_id": _id_curto(p.get("no_id")),
+            "tipo": "decisao" if p.get("tipo") == "decisao" else "acao",
+            "quem": _txt(p.get("quem"), 120), "atividade": atividade, "detalhe": detalhe,
+            "atencao": _txt(p.get("atencao"), 2000), "desvios": desvios,
+            "desvio_texto": _txt(p.get("desvio_texto"), 500),
+            "gerado": {"atividade": _txt(g.get("atividade"), 1000), "quem": _txt(g.get("quem"), 120)} if g else None,
+        }
+    out["passos"] = lista("passos", 200, passo)
+    # id repetido (passo duplicado à mão) quebraria o casamento da próxima
+    # geração: o segundo ganha id novo.
+    vistos = set()
+    for i, p in enumerate(out["passos"]):
+        if p["id"] in vistos:
+            p["id"] = f"{p['id'][:30]}_{i}"
+        vistos.add(p["id"])
+    return out
+
+
+def conteudo_inicial(processo, documento=None):
+    """A IT nasce com o que o processo já sabe: objetivo e as raias do fluxo
+    como responsabilidades. Os passos vêm do gerador, no navegador."""
+    raias = [r.get("titulo") for r in (documento or {}).get("raias", []) if r.get("titulo")]
+    return normalizar_conteudo({
+        "objetivo": processo.get("objetivo") or "",
+        "aplicacao": processo.get("escopo") or "",
+        "responsabilidades": [{"papel": t, "descricao": ""} for t in raias],
+    })
+
+
+def revisao_atual(revs, numero=None):
+    """Qual revisão a tela abre: a pedida; senão a aberta; senão a vigente;
+    senão a última."""
+    if numero is not None:
+        return next((r for r in revs if r["numero"] == numero), None)
+    aberta = next((r for r in revs if r["status"] in ABERTAS), None)
+    if aberta:
+        return aberta
+    vig = next((r for r in revs if r["status"] == "aprovada"), None)
+    return vig or (revs[-1] if revs else None)

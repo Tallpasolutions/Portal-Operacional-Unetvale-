@@ -1,0 +1,127 @@
+{# PDF da instrução de trabalho — documento controlado. Página solta, como
+   `reuniao_pdf.html`: não estende `base.html` (o PDF não leva sidebar), e
+   imprime sozinha ao abrir. O corpo é o MESMO parcial da leitura na tela
+   (`_instrucao_doc.html`), estilizado pelo style.css — uma definição só das
+   classes `.it-*`; aqui ficam só as regras do papel.
+
+   O cabeçalho se repete em toda página pelo `<thead>` da tabela-moldura
+   (Chrome e Firefox repetem; o Safari não, e degrada sem quebrar). "Página X
+   de Y" usa as margin boxes do @page, que o Chrome desenha e os outros
+   ignoram. #}
+{% set st = rev.status %}
+{% set vigente = st == 'aprovada' %}
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ it.codigo }} Rev. {{ '%02d' % rev.numero }} — {{ it.titulo }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<style>
+  @page{ size:A4 portrait; margin:12mm 14mm 16mm;
+    @bottom-left{ content:"{{ it.codigo }} Rev. {{ '%02d' % rev.numero }} · Cópia impressa não controlada"; font-size:7.5pt; color:#5e6e82; }
+    @bottom-right{ content:"Página " counter(page) " de " counter(pages); font-size:7.5pt; color:#5e6e82; } }
+  @page paisagem{ size:A4 landscape; margin:10mm 12mm 14mm; }
+  @page paisagemA3{ size:A3 landscape; margin:10mm 12mm 14mm; }
+  html,body{ background:#fff; height:auto; }
+  body{ font-size:10.5pt; color:#232e3c; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .pdf{ max-width:190mm; margin:0 auto; padding:10px 0; }
+  table.moldura{ width:100%; border-collapse:collapse; }
+  table.moldura > thead > tr > td, table.moldura > tbody > tr > td{ padding:0; }
+  .cab{ display:grid; grid-template-columns:30mm 1fr 46mm; border:1px solid #344050; margin-bottom:6mm; }
+  .cab > div{ padding:6px 10px; }
+  .cab > div + div{ border-left:1px solid #344050; }
+  .cab-logo{ display:flex; align-items:center; gap:6px; }
+  .cab-logo img{ height:28px; }
+  .cab-logo span{ font-weight:800; color:#1f5fc0; font-size:10pt; }
+  .cab-meio{ text-align:center; }
+  .cab-meio small{ display:block; color:#5e6e82; font-size:8.5pt; text-transform:uppercase; letter-spacing:.06em; }
+  .cab-meio b{ font-size:12.5pt; line-height:1.25; }
+  .cab-dir{ font-size:8.5pt; line-height:1.45; }
+  .cab-dir b{ font-size:10pt; }
+  .ficha-pdf{ display:grid; grid-template-columns:repeat(4, 1fr); gap:6px 14px; border:1px solid #d8e2ef; border-radius:6px;
+    padding:8px 12px; margin-bottom:5mm; font-size:9.5pt; }
+  .ficha-pdf .l{ display:block; font-size:7.5pt; font-weight:700; color:#5e6e82; text-transform:uppercase; letter-spacing:.04em; }
+  .assinaturas{ display:grid; grid-template-columns:repeat(3, 1fr); gap:14px; margin-top:8mm; padding-top:4mm;
+    border-top:1px solid #d8e2ef; font-size:9.5pt; break-inside:avoid; }
+  .assinaturas .l{ display:block; font-size:7.5pt; font-weight:700; color:#5e6e82; text-transform:uppercase; letter-spacing:.04em; }
+  .rodape-pdf{ margin-top:6mm; font-size:8pt; color:#5e6e82; text-align:center; }
+  .marca-dagua{ position:fixed; top:42%; left:0; right:0; text-align:center; transform:rotate(-24deg);
+    font-size:54pt; font-weight:900; color:rgba(230,55,87,.10); letter-spacing:.06em; pointer-events:none; z-index:0; }
+  .it-anexo{ break-before:page; page:paisagem; max-width:none; }
+  .it-anexo.a3{ page:paisagemA3; }
+  .it-anexo .it-fluxo svg{ max-height:165mm; width:100%; height:auto; }
+  .it-anexo.a3 .it-fluxo svg{ max-height:250mm; }
+  .barra-tela{ position:sticky; top:0; background:var(--navy); color:#fff; padding:8px 14px; font-size:13px; display:flex;
+    gap:12px; align-items:center; z-index:5; }
+  .barra-tela button{ margin-left:auto; }
+  /* Na impressão a largura é a da folha (que no anexo é deitada); o limite
+     de 190 mm é só para a prévia na tela. */
+  @media print{ .barra-tela{ display:none; } .pdf{ padding:0; max-width:none; } }
+</style>
+</head>
+<body>
+<div class="barra-tela">Prévia do PDF — use “Salvar como PDF” no diálogo de impressão.
+  <button type="button" class="btn" onclick="window.print()">Imprimir / salvar PDF</button></div>
+{% if not vigente %}
+<div class="marca-dagua">{{ 'REVISÃO SUBSTITUÍDA' if st == 'substituida' else 'RASCUNHO — NÃO VIGENTE' }}</div>
+{% endif %}
+<div class="pdf">
+<table class="moldura">
+  <thead><tr><td>
+    <div class="cab">
+      <div class="cab-logo"><img src="{{ url_for('static', filename='img/unetvale-mark.png') }}" alt=""><span>Unetvale</span></div>
+      <div class="cab-meio"><small>Instrução de trabalho</small><b>{{ it.titulo }}</b></div>
+      <div class="cab-dir">
+        <b>{{ it.codigo }}</b><br>
+        Revisão {{ '%02d' % rev.numero }}{% if not vigente %} · {{ status_revisao[st] }}{% endif %}<br>
+        {% if rev.vigente_desde %}Vigente desde {{ rev.vigente_desde|dia_br }}{% else %}Não aprovada{% endif %}<br>
+        Processo {{ processo.codigo }}
+      </div>
+    </div>
+  </td></tr></thead>
+  <tbody><tr><td>
+    <div class="ficha-pdf">
+      <div><span class="l">Processo</span>{{ processo.titulo }}</div>
+      <div><span class="l">Quem executa</span>{{ executa[it.executa] }}</div>
+      <div><span class="l">Fluxo</span>{{ fluxo_titulo or '—' }}</div>
+      <div><span class="l">Motivo da revisão</span>{{ rev.motivo_revisao or '—' }}</div>
+    </div>
+
+    <div class="it-doc it-doc-pdf">{% include "_instrucao_doc.html" %}</div>
+
+    <div class="assinaturas">
+      <div><span class="l">Elaborado</span>{{ nomes.get(rev.elaborado_por) or '—' }}<br>{{ rev.elaborado_em|data_br }}</div>
+      <div><span class="l">Enviado para aprovação</span>{{ nomes.get(rev.enviado_por) or '—' }}<br>{{ rev.enviado_em|data_br if rev.enviado_em else '—' }}</div>
+      <div><span class="l">Aprovado</span>{{ nomes.get(rev.aprovado_por) or '—' }}<br>{{ rev.aprovado_em|data_br if rev.aprovado_em else 'Pendente' }}</div>
+    </div>
+    <p class="rodape-pdf">Documento controlado. Cópia impressa não é controlada: confira a revisão vigente no portal.
+      Impresso em {{ impresso_em }} por {{ impresso_por }}.</p>
+
+    {% include "_instrucao_anexo.html" %}
+  </td></tr></tbody>
+</table>
+</div>
+
+<script>window.__IT__ = {{ ({'fluxo': {'documento': fluxo_doc}} if fluxo_doc else {})|tojson }};</script>
+<script src="{{ url_for('static', filename='js/fluxo_formas.js') }}"></script>
+<script src="{{ url_for('static', filename='js/fluxo_render.js') }}"></script>
+<script>
+  // O anexo é desenhado pelo MESMO renderizador do editor. Fluxo largo
+  // demais para ficar legível num A4 deitado (escala < 55%) sai em A3.
+  (function () {
+    var d = window.__IT__ && window.__IT__.fluxo && window.__IT__.fluxo.documento;
+    var el = document.querySelector("[data-fluxo]");
+    if (d && el) {
+      el.innerHTML = FluxoRender.paraSVG(d, { margem: 16 });
+      var s = el.querySelector("svg");
+      s.removeAttribute("width"); s.removeAttribute("height");
+      var b = FluxoRender.limites(d);
+      var escala = Math.min(1047 / (b.w + 32), 620 / (b.h + 32));
+      if (escala < 0.55) el.closest(".it-anexo").classList.add("a3");
+    }
+    {% if imprimir %}window.addEventListener("load", function () { setTimeout(function () { window.print(); }, 350); });{% endif %}
+  })();
+</script>
+</body>
+</html>

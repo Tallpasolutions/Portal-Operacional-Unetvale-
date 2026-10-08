@@ -569,6 +569,58 @@ salvo fica no `localStorage` e a tela oferece recuperar ao reabrir. Presença
 **Abaixo de 900 px a folha é só leitura**, com pan e pinça. Processo
 arquivado também abre só para leitura.
 
+#### A instrução de trabalho
+
+**Os passos vêm do fluxo, e o gerador é UM só** (`FluxoIT.gerar`, no JS).
+O servidor cria a IT vazia (com o objetivo do processo e as raias como
+responsabilidades) e abre a tela com `?gerar=1`, que mostra a PRÉVIA. Gerar no
+Python seria a segunda cópia do percurso. Cada forma de ação alcançável do
+Início vira um passo, na ordem do caminho (Sim antes de Não); a raia vira o
+"Quem"; a anotação ligada vira a "Atenção"; conector, junção e Fim são
+atravessados.
+
+**Desvio é estruturado, o texto é derivado.** O passo guarda `desvios:
+[{rotulo, no|fim|fora}]` e `desvio_texto` ("Sim → passo 5 · Não → encerrar")
+é recalculado a cada mudança por `FluxoIT.textoDesvios` — a única função que o
+escreve. Reordenar os passos renumera sozinho. O PDF e a leitura usam o texto
+salvo.
+
+**Regerar não apaga o que alguém escreveu** (`FluxoIT.mesclar`, casamento
+por `no_id`): detalhe e atenção à mão ficam; a atividade só acompanha o fluxo
+se ninguém a editou (o passo guarda o `gerado` da última vez); passo cuja
+forma sumiu vai para a prévia como "saiu do fluxo", e a pessoa marca o que
+fica; passo escrito à mão continua depois do mesmo passo que o precedia.
+
+**O conteúdo é normalizado no servidor** (`processos.normalizar_conteudo`):
+chave desconhecida descartada, texto e lista cortados no teto. Vai para o PDF
+de um documento controlado.
+
+**Ciclo**: rascunho → em aprovação (texto travado: `instrucao_salvar` recusa)
+→ aprovada (vigente) ou devolvida (com motivo) → nova revisão a partir da
+vigente. Na aprovação o fluxo de origem é **congelado** em `fluxo_snapshot` —
+o anexo da Rev. 02 mostra o fluxo como era na Rev. 02. A tela já avisa quem
+elaborou ou enviou que outra pessoa aprova; a trava é do banco.
+
+#### O PDF
+
+`instrucao_pdf.html` e `fluxo_pdf.html`, páginas soltas como o
+`reuniao_pdf.html`. O corpo é o MESMO parcial da leitura na tela
+(`_instrucao_doc.html`) e carrega o `style.css` — uma definição só das classes
+`.it-*`, com `@media print` em pt. O anexo é parcial à parte
+(`_instrucao_anexo.html`) e vem DEPOIS das assinaturas: dentro do corpo, o
+histórico e as assinaturas caíam sozinhos numa página depois dele.
+
+| No papel | Como |
+|---|---|
+| cabeçalho em toda página | `<thead>` da tabela-moldura (Chrome e Firefox repetem; Safari não) |
+| "Página X de Y" e "cópia não controlada" | margin boxes do `@page` (Chrome; os outros ignoram) |
+| anexo deitado | página nomeada `@page paisagem`; A3 quando a escala ficaria < 55% |
+| rascunho e substituída | marca d'água fixa; só a vigente sai limpa |
+
+⚠️ No `@media print`, `.pdf` perde o `max-width` de 190 mm: com ele, o anexo
+na folha deitada ficava com a largura de uma folha em pé (medido em
+08/10/2026 no Chrome headless).
+
 Decisão nasce com "Sim" na primeira saída e "Não" na segunda; seta para ou de
 anotação nasce tracejada e sem ponta. A conferência do fluxo (painel, quando
 nada está selecionado) avisa e não bloqueia: falta Início/Fim, decisão sem
@@ -1807,6 +1859,28 @@ a.run(port=5001, use_reloader=False)"
 
   **Ainda não exercitado:** o gesto real de mouse e trackpad (os eventos foram
   sintéticos), a pinça num celular de verdade e o Safari.
+
+- **Processos — fases 4 e 5 (instrução de trabalho e PDF)** em 08/10/2026,
+  sem migration nova (tudo já estava na `0018`). Gerador e mescla por script
+  (`node`), com o fluxo do protótipo da troca de poste: 21 casos — ordem do
+  caminho, Sim antes de Não, laço pelo conector A, anotação NR-35 virando
+  atenção, forma solta avisada, edição à mão preservada na regeração, passo
+  removido listado e não apagado, desvio renumerado.
+
+  Ciclo pelo `test_client` sobre o banco de ensaio: 71 casos — criar, salvar
+  (conteúdo normalizado, conflito 409), enviar, travar o texto em aprovação,
+  devolver com motivo, aprovar congelando o fluxo, nova revisão, segunda
+  revisão aberta recusada com frase legível, quem enviou sem poder aprovar,
+  obsoletar (403 para quem não é gestor), PDFs da vigente, do rascunho (marca
+  d'água) e da substituída, e módulo bloqueado com 404 em todas as rotas.
+
+  No navegador: criar pela tela, prévia abrindo sozinha com os 9 passos,
+  aplicar, EPI por Enter, alerta pronto, "como fazer" e reordenação
+  renumerando o desvio, tudo salvo no banco. PDF impresso no Chrome headless
+  e conferido página a página.
+
+  **Ainda não exercitado:** o PDF no Safari (sem cabeçalho repetido e sem
+  "Página X de Y", por limitação dele) e a impressão de um fluxo que caia em A3.
 
 - **Ações** entrou vazio: zero ação, zero gestor, 10 áreas. Em 29/09/2026
   eram 11 ações e 3 gestores (Matheus Dias, Patricia Schveitzer, Renato Barreto).

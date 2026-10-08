@@ -172,6 +172,20 @@
     const pa = F.porta(a, l.de.porta && l.de.porta !== "auto" ? l.de.porta : portaAuto(a, b));
     const pb = F.porta(b, l.para.porta && l.para.porta !== "auto" ? l.para.porta : portaAuto(b, a));
     if (l.rota === "reta" || l.rota === "curva") return { pontos: [pa, pb], pa, pb };
+    // Portas frente a frente quase alinhadas (diferença menor que 6 px):
+    // seta reta, terminando na borda do destino na altura da origem. O
+    // cotovelo de 4 px que a rota em ângulo faria aí parece erro de desenho.
+    const frente = pa.dx * pb.dx === -1 || pa.dy * pb.dy === -1;
+    if (frente && typeof l.meio !== "number") {
+      if (pa.dx && Math.abs(pa.y - pb.y) < 6 && (pb.x - pa.x) * pa.dx > 0) {
+        const fim = { x: pb.x, y: pa.y, dx: pb.dx, dy: 0 };
+        return { pontos: [pa, fim], pa, pb: fim, eixo: null };
+      }
+      if (pa.dy && Math.abs(pa.x - pb.x) < 6 && (pb.y - pa.y) * pa.dy > 0) {
+        const fim = { x: pa.x, y: pb.y, dx: 0, dy: pb.dy };
+        return { pontos: [pa, fim], pa, pb: fim, eixo: null };
+      }
+    }
     const A = { x: pa.x + pa.dx * STUB, y: pa.y + pa.dy * STUB };
     const B = { x: pb.x + pb.dx * STUB, y: pb.y + pb.dy * STUB };
     const hA = pa.dx !== 0, hB = pb.dx !== 0;

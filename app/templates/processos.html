@@ -88,11 +88,11 @@
       <table class="tbl pr-tabela">
         <thead><tr>
           <th>Código</th><th>Instrução</th><th>Processo</th><th>Executa</th>
-          <th>Vigente</th><th>Em andamento</th>
+          <th>Vigente</th><th>Em andamento</th><th></th>
         </tr></thead>
         <tbody>
         {% for it in instrucoes %}
-          <tr class="clicavel" data-href="{{ url_for('dash.processo_detalhe', codigo=it.processo.codigo, aba='instrucoes') }}"
+          <tr class="clicavel" data-href="{{ url_for('dash.instrucao_detalhe', codigo=it.codigo) }}"
               data-publico="{{ it.processo.publico }}"
               data-busca="{{ (it.codigo ~ ' ' ~ it.titulo ~ ' ' ~ it.processo.codigo ~ ' ' ~ it.processo.titulo)|lower }}">
             <td class="cod"><b>{{ it.codigo }}</b></td>
@@ -101,6 +101,7 @@
             <td>{{ executa[it.executa] }}</td>
             <td>{% if it.revisao_vigente is not none %}<span class="badge badge-verde">Rev. {{ '%02d' % it.revisao_vigente }}</span>{% else %}<span class="badge badge-cinza">Nunca aprovada</span>{% endif %}</td>
             <td>{% if it.aberta %}<span class="badge {{ 'badge-ambar' if it.aberta.status == 'em_aprovacao' else ('badge-vermelho' if it.aberta.status == 'devolvida' else 'badge-azul') }}">Rev. {{ '%02d' % it.aberta.numero }} · {{ status_revisao[it.aberta.status] }}</span>{% else %}—{% endif %}</td>
+            <td>{% if it.revisao_vigente is not none %}<a class="btn-pdf" href="{{ url_for('dash.instrucao_pdf', codigo=it.codigo, rev=it.revisao_vigente) }}" target="_blank" rel="noopener">PDF</a>{% endif %}</td>
           </tr>
         {% endfor %}
         </tbody>

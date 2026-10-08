@@ -92,7 +92,7 @@
       <div class="card-h"><span>Instruções de trabalho</span><span class="acao-p-conta">{{ instrucoes|length }}</span></div>
       <div class="card-b">
         {% for it in instrucoes %}
-        <a class="pr-item" href="{{ url_aba }}?aba=instrucoes">
+        <a class="pr-item" href="{{ url_for('dash.instrucao_detalhe', codigo=it.codigo) }}">
           <b>{{ it.codigo }} · {{ it.titulo }}</b>
           <span>{% if it.status == 'obsoleta' %}Obsoleta{% elif it.revisao_vigente is not none %}Rev. {{ '%02d' % it.revisao_vigente }} vigente{% else %}Nunca aprovada{% endif %}{% if it.aberta %} · Rev. {{ '%02d' % it.aberta.numero }} {{ status_revisao[it.aberta.status]|lower }}{% endif %}</span>
         </a>
@@ -250,7 +250,64 @@
 
 {% else %}
 {# ===================== Instruções ===================== #}
-<div class="vazio">As instruções de trabalho chegam numa próxima entrega.</div>
+<div class="fluxo-topo">
+  <span class="subnote" style="margin:0">A instrução de trabalho nasce do fluxo: cada forma de ação vira um passo, e a raia vira o responsável.</span>
+  {% if not arquivado %}<span class="fluxo-topo-acoes"><button type="button" class="btn" data-abrir="dlg-nova-it">+ Nova instrução</button></span>{% endif %}
+</div>
+{% if instrucoes %}
+<div class="card">
+  <div class="tabela-wrap">
+    <table class="tbl pr-tabela">
+      <thead><tr><th>Código</th><th>Instrução</th><th>Executa</th><th>Vigente</th><th>Em andamento</th><th></th></tr></thead>
+      <tbody>
+      {% for it in instrucoes %}
+      <tr class="clicavel" data-href="{{ url_for('dash.instrucao_detalhe', codigo=it.codigo) }}">
+        <td class="cod"><b>{{ it.codigo }}</b></td>
+        <td><a href="{{ url_for('dash.instrucao_detalhe', codigo=it.codigo) }}">{{ it.titulo }}</a>{% if it.status == 'obsoleta' %} <span class="badge badge-cinza">Obsoleta</span>{% endif %}</td>
+        <td>{{ executa[it.executa] }}</td>
+        <td>{% if it.revisao_vigente is not none %}<span class="badge badge-verde">Rev. {{ '%02d' % it.revisao_vigente }}</span>{% else %}<span class="badge badge-cinza">Nunca aprovada</span>{% endif %}</td>
+        <td>{% if it.aberta %}<span class="badge {{ 'badge-ambar' if it.aberta.status == 'em_aprovacao' else ('badge-vermelho' if it.aberta.status == 'devolvida' else 'badge-azul') }}">Rev. {{ '%02d' % it.aberta.numero }} · {{ status_revisao[it.aberta.status] }}</span>{% else %}—{% endif %}</td>
+        <td>{% if it.revisao_vigente is not none %}<a class="btn-pdf" href="{{ url_for('dash.instrucao_pdf', codigo=it.codigo, rev=it.revisao_vigente) }}" target="_blank" rel="noopener">PDF</a>{% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="vazio">
+  <b>Nenhuma instrução ainda.</b><br>
+  Desenhe o fluxo e gere a instrução a partir dele — o passo a passo sai pronto para você detalhar.
+  {% if not arquivado %}<br><br><button class="btn" type="button" data-abrir="dlg-nova-it">+ Nova instrução</button>{% endif %}
+</div>
+{% endif %}
+
+{% if not arquivado %}
+<dialog class="modal modal-largo" id="dlg-nova-it" aria-labelledby="dlg-nova-it-t">
+  <form method="post" action="{{ url_for('dash.instrucao_nova', codigo=processo.codigo) }}">
+    <h3 id="dlg-nova-it-t">Nova instrução de trabalho</h3>
+    <div class="field"><label for="ni-titulo">Instrução <span class="rotulo-leve">a tarefa, como o técnico a chama</span></label>
+      <input type="text" id="ni-titulo" name="titulo" required minlength="3" maxlength="160" placeholder="Transferência de cabo em troca de poste"></div>
+    <div class="grid nova-grade">
+      <div class="field"><label for="ni-executa">Quem executa</label>
+        <select id="ni-executa" name="executa">
+          {% for chave, rotulo in executa.items() %}<option value="{{ chave }}" {{ 'selected' if (processo.publico == chave) or (processo.publico == 'ambos' and chave == 'campo') }}>{{ rotulo }}</option>{% endfor %}
+        </select></div>
+      <div class="field"><label for="ni-fluxo">Fluxo de origem</label>
+        <select id="ni-fluxo" name="fluxo_id">
+          {% for f in fluxos %}<option value="{{ f.id }}">{{ f.titulo }}</option>{% endfor %}
+          <option value="">Nenhum — escrever à mão</option>
+        </select></div>
+    </div>
+    <label class="fx-check" style="margin-top:4px;"><input type="checkbox" name="gerar" value="1" checked> Gerar os passos a partir do fluxo ao abrir</label>
+    <p class="subnote" style="margin:10px 0 0;">O código (ex.: IT-INF-001) sai da área do processo. A Rev. 00 nasce como rascunho; o gestor da área aprova.</p>
+    <div class="modal-acoes">
+      <button type="button" class="btn sec" data-fechar>Cancelar</button>
+      <button type="submit" class="btn">Criar instrução</button>
+    </div>
+  </form>
+</dialog>
+{% endif %}
 {% endif %}
 
 {% endblock %}

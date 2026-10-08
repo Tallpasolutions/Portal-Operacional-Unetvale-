@@ -1,0 +1,54 @@
+{# Só o fluxograma, numa folha deitada — para pendurar na parede ou mandar
+   pelo WhatsApp. Mesmo renderizador do editor; A3 quando o fluxo não fica
+   legível num A4 (escala < 55%). #}
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ processo.codigo }} — {{ fluxo.titulo }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<style>
+  @page{ size:A4 landscape; margin:10mm 12mm 12mm; }
+  @page a3{ size:A3 landscape; margin:10mm 12mm 12mm; }
+  html,body{ background:#fff; height:auto; }
+  body{ color:#232e3c; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .folha{ padding:10px 0; }
+  .folha.a3{ page:a3; }
+  .cab{ display:flex; align-items:baseline; gap:12px; border-bottom:1px solid #d8e2ef; padding-bottom:6px; margin-bottom:8px; font-size:10pt; }
+  .cab b{ font-size:12.5pt; }
+  .cab span{ color:#5e6e82; }
+  .cab .dir{ margin-left:auto; font-size:8.5pt; }
+  .desenho svg{ width:100%; height:auto; max-height:170mm; }
+  .folha.a3 .desenho svg{ max-height:255mm; }
+  .barra-tela{ position:sticky; top:0; background:var(--navy); color:#fff; padding:8px 14px; font-size:13px; display:flex; gap:12px; align-items:center; }
+  .barra-tela button{ margin-left:auto; }
+  @media print{ .barra-tela{ display:none; } .folha{ padding:0; } }
+</style>
+</head>
+<body>
+<div class="barra-tela">Prévia — use “Salvar como PDF” no diálogo de impressão.
+  <button type="button" class="btn" onclick="window.print()">Imprimir / salvar PDF</button></div>
+<div class="folha">
+  <div class="cab">
+    <b>{{ processo.codigo }} · {{ processo.titulo }}</b>
+    <span>{{ fluxo.titulo }} · versão {{ fluxo.versao }} · {{ fluxo.atualizado_em|data_hora_br }}{% if nomes.get(fluxo.atualizado_por) %} · {{ nomes.get(fluxo.atualizado_por) }}{% endif %}</span>
+    <span class="dir">Impresso em {{ impresso_em }} por {{ impresso_por }}</span>
+  </div>
+  <div class="desenho" data-desenho></div>
+</div>
+<script>window.__FLUXO_PDF__ = {{ fluxo.documento|tojson }};</script>
+<script src="{{ url_for('static', filename='js/fluxo_formas.js') }}"></script>
+<script src="{{ url_for('static', filename='js/fluxo_render.js') }}"></script>
+<script>
+  (function () {
+    var d = window.__FLUXO_PDF__, el = document.querySelector("[data-desenho]");
+    el.innerHTML = FluxoRender.paraSVG(d, { margem: 16 });
+    var s = el.querySelector("svg"); s.removeAttribute("width"); s.removeAttribute("height");
+    var b = FluxoRender.limites(d);
+    if (Math.min(1047 / (b.w + 32), 640 / (b.h + 32)) < 0.55) document.querySelector(".folha").classList.add("a3");
+    {% if imprimir %}window.addEventListener("load", function () { setTimeout(function () { window.print(); }, 350); });{% endif %}
+  })();
+</script>
+</body>
+</html>

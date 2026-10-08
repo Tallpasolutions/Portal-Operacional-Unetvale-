@@ -1,0 +1,213 @@
+{% extends "base.html" %}
+{% block title %}{{ it.codigo }} · Instrução de trabalho · Unetvale{% endblock %}
+{% block page_title %}Processos{% endblock %}
+{% block content %}
+{% set url_proc = url_for('dash.processo_detalhe', codigo=processo.codigo) %}
+{% set st = rev.status if rev else None %}
+{% set badge = {'rascunho': 'badge-azul', 'em_aprovacao': 'badge-ambar', 'devolvida': 'badge-vermelho', 'aprovada': 'badge-verde', 'substituida': 'badge-cinza'} %}
+
+<div class="pr-cab">
+  <a class="pr-voltar" href="{{ url_for('dash.processos_view', aba='instrucoes') }}">Processos</a>
+  <span class="pr-sep">/</span>
+  <a class="pr-voltar" href="{{ url_proc }}?aba=instrucoes">{{ processo.codigo }}</a>
+  <span class="pr-sep">/</span>
+  <span class="pr-cod">{{ it.codigo }}</span>
+  <b class="pr-titulo">{{ it.titulo }}</b>
+  <span class="badge pub-{{ it.executa }}">{{ executa[it.executa] }}</span>
+  {% if it.status == 'obsoleta' %}<span class="badge badge-cinza">Obsoleta</span>{% endif %}
+</div>
+
+{% if rev %}
+<div class="it-barra">
+  <label class="ind-label">Revisão
+    <select data-navegar aria-label="Escolher a revisão">
+      {% for r in revisoes %}
+      <option value="{{ url_for('dash.instrucao_detalhe', codigo=it.codigo, rev=r.numero) }}" {{ 'selected' if r.numero == rev.numero }}>Rev. {{ '%02d' % r.numero }} · {{ status_revisao[r.status] }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <span class="badge {{ badge[st] }}">{{ status_revisao[st] }}</span>
+  {% if editavel %}<span class="fluxo-estado" id="it-estado">—</span>{% endif %}
+  <span class="it-barra-acoes">
+    {% if editavel %}
+      {% if pacote.fluxo %}<button type="button" class="btn sec" id="it-gerar">Gerar passos do fluxo</button>{% endif %}
+      <button type="button" class="btn" data-abrir="dlg-enviar">Enviar para aprovação</button>
+    {% elif st == 'em_aprovacao' and pode_aprovar and processo.status == 'ativo' %}
+      {% if eu_elaborei %}
+      <span class="subnote" style="margin:0">Você elaborou ou enviou esta revisão: outra pessoa aprova.</span>
+      {% else %}
+      <button type="button" class="btn sec" data-abrir="dlg-devolver">Devolver</button>
+      <button type="button" class="btn" data-abrir="dlg-aprovar">Aprovar</button>
+      {% endif %}
+    {% elif st == 'aprovada' and not tem_aberta and it.status == 'ativa' and processo.status == 'ativo' %}
+      <button type="button" class="btn sec" data-abrir="dlg-nova-revisao">Abrir nova revisão</button>
+    {% endif %}
+    <a class="btn sec" href="{{ url_for('dash.instrucao_pdf', codigo=it.codigo, rev=rev.numero) }}" target="_blank" rel="noopener">PDF</a>
+  </span>
+</div>
+
+{% if st == 'devolvida' %}
+<div class="alert alert-erro"><b>Devolvida.</b> {{ rev.devolvido_motivo }}</div>
+{% elif st == 'em_aprovacao' %}
+<div class="alert it-alerta-info">Aguardando aprovação{% if nomes.get(rev.enviado_por) %} — enviada por {{ nomes.get(rev.enviado_por) }} em {{ rev.enviado_em|data_hora_br }}{% endif %}. O texto fica travado até a aprovação ou a devolução.</div>
+{% elif st == 'substituida' %}
+<div class="alert it-alerta-info">Revisão antiga, substituída. A vigente é a Rev. {{ '%02d' % it.revisao_vigente }}.</div>
+{% endif %}
+{% endif %}
+
+<div class="pr-visao">
+  <div>
+    {% if editavel %}
+    <div class="fluxo-faixa it-faixa" hidden></div>
+    <div id="it-editor" class="it-editor"></div>
+    {% elif rev %}
+    <article class="card it-doc"><div class="card-b">{% include "_instrucao_doc.html" %}{% include "_instrucao_anexo.html" %}</div></article>
+    {% else %}
+    <div class="vazio">Instrução sem revisão.</div>
+    {% endif %}
+  </div>
+
+  <aside class="pr-visao-lado">
+    <div class="card"><div class="card-b">
+      <dl class="acao-p-campos">
+        <dt>Código</dt><dd><b>{{ it.codigo }}</b>{% if rev %} · Rev. {{ '%02d' % rev.numero }}{% endif %}</dd>
+        <dt>Processo</dt><dd><a href="{{ url_proc }}">{{ processo.codigo }}</a> · {{ processo.titulo }}</dd>
+        <dt>Quem executa</dt><dd>{{ executa[it.executa] }}</dd>
+        <dt>Fluxo de origem</dt>
+        <dd>
+          {% if editavel and fluxos %}
+          <form method="post" action="{{ url_for('dash.instrucao_fluxo', codigo=it.codigo) }}" class="it-form-fluxo">
+            <select name="fluxo_id" data-enviar aria-label="Fluxo de origem">
+              <option value="">Nenhum</option>
+              {% for f in fluxos %}<option value="{{ f.id }}" {{ 'selected' if f.id == it.fluxo_id }}>{{ f.titulo }}</option>{% endfor %}
+            </select>
+          </form>
+          {% else %}
+          {% set fo = (fluxos|selectattr('id', 'equalto', it.fluxo_id)|list or [None])[0] %}
+          {% if fo %}<a href="{{ url_proc }}?aba=fluxograma&fluxo={{ fo.id }}">{{ fo.titulo }}</a>{% else %}—{% endif %}
+          {% endif %}
+        </dd>
+        {% if rev %}
+        <dt>Elaborada</dt><dd>{{ nomes.get(rev.elaborado_por) or '—' }} · {{ rev.elaborado_em|data_br }}</dd>
+        {% if rev.enviado_em %}<dt>Enviada</dt><dd>{{ nomes.get(rev.enviado_por) or '—' }} · {{ rev.enviado_em|data_br }}</dd>{% endif %}
+        {% if rev.aprovado_em %}<dt>Aprovada</dt><dd>{{ nomes.get(rev.aprovado_por) or '—' }} · {{ rev.aprovado_em|data_br }}</dd>{% endif %}
+        {% if rev.motivo_revisao %}<dt>Motivo da revisão</dt><dd>{{ rev.motivo_revisao }}</dd>{% endif %}
+        {% endif %}
+      </dl>
+    </div></div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="card-h">Histórico</div>
+      <div class="card-b">
+        {% set rotulo_ev = {'criada': 'Criou', 'enviada': 'Enviou para aprovação', 'devolvida': 'Devolveu', 'aprovada': 'Aprovou', 'nova_revisao': 'Abriu revisão', 'obsoleta': 'Tornou obsoleta', 'reativada': 'Reativou'} %}
+        <div class="linha-tempo">
+          {% for e in eventos|reverse %}
+          <div class="evento {{ 'evento-comentario' if e.tipo == 'devolvida' else 'evento-atualizacao' }}">
+            <div class="evento-meta"><b>{{ nomes.get(e.autor_id) or '—' }}</b><span>{{ e.criado_em|data_hora_br }}</span>
+              {% if e.revisao_numero is not none %}<span class="badge badge-cinza">Rev. {{ '%02d' % e.revisao_numero }}</span>{% endif %}</div>
+            <div class="evento-texto">{{ rotulo_ev.get(e.tipo, e.tipo) }}{% if e.texto %}: {{ e.texto }}{% endif %}</div>
+          </div>
+          {% else %}<p class="acao-p-vazio">Nada ainda.</p>{% endfor %}
+        </div>
+      </div>
+    </div>
+
+    {% if pode_aprovar and processo.status == 'ativo' %}
+    <div class="pr-arquivar">
+      <button class="btn-ghost" type="button" data-abrir="dlg-status">{{ 'Reativar instrução' if it.status == 'obsoleta' else 'Tornar obsoleta' }}</button>
+    </div>
+    {% endif %}
+  </aside>
+</div>
+
+{# ---- diálogos ---------------------------------------------------------- #}
+{% if editavel %}
+<dialog class="modal" id="dlg-enviar" aria-labelledby="dlg-enviar-t">
+  <form method="post" action="{{ url_for('dash.instrucao_enviar', codigo=it.codigo) }}" data-salvar-antes>
+    <h3 id="dlg-enviar-t">Enviar a Rev. {{ '%02d' % rev.numero }} para aprovação?</h3>
+    <p>O texto fica travado até o gestor da área aprovar ou devolver. Quem elaborou ou envia não aprova a própria revisão.</p>
+    <div class="modal-acoes">
+      <button type="button" class="btn sec" data-fechar>Cancelar</button>
+      <button type="submit" class="btn">Enviar</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="modal modal-largo" id="dlg-gerar" aria-labelledby="dlg-gerar-t">
+  <h3 id="dlg-gerar-t">Gerar passos do fluxo</h3>
+  <div id="it-previa"></div>
+  <div class="modal-acoes">
+    <button type="button" class="btn sec" data-fechar>Cancelar</button>
+    <button type="button" class="btn" id="it-aplicar">Aplicar</button>
+  </div>
+</dialog>
+{% endif %}
+
+{% if st == 'em_aprovacao' and pode_aprovar and not eu_elaborei %}
+<dialog class="modal" id="dlg-aprovar" aria-labelledby="dlg-aprovar-t">
+  <form method="post" action="{{ url_for('dash.instrucao_aprovar', codigo=it.codigo) }}">
+    <h3 id="dlg-aprovar-t">Aprovar a Rev. {{ '%02d' % rev.numero }}?</h3>
+    <p>Ela passa a ser a vigente{% if it.revisao_vigente is not none %} e a Rev. {{ '%02d' % it.revisao_vigente }} vira substituída{% endif %}.
+      {% if it.fluxo_id %}O fluxo de origem é congelado nesta revisão como está agora.{% endif %} Depois de aprovada, ela não muda mais: correção vira nova revisão.</p>
+    <div class="modal-acoes">
+      <button type="button" class="btn sec" data-fechar>Cancelar</button>
+      <button type="submit" class="btn">Aprovar</button>
+    </div>
+  </form>
+</dialog>
+<dialog class="modal" id="dlg-devolver" aria-labelledby="dlg-devolver-t">
+  <form method="post" action="{{ url_for('dash.instrucao_devolver', codigo=it.codigo) }}">
+    <h3 id="dlg-devolver-t">Devolver para ajuste</h3>
+    <div class="field" style="margin-top:10px;"><label for="dev-motivo">O que precisa mudar</label>
+      <textarea id="dev-motivo" name="motivo" rows="4" required maxlength="1000" class="it-textarea"
+                placeholder="Faltou o passo de registrar a foto do poste antigo."></textarea></div>
+    <div class="modal-acoes">
+      <button type="button" class="btn sec" data-fechar>Cancelar</button>
+      <button type="submit" class="btn">Devolver</button>
+    </div>
+  </form>
+</dialog>
+{% endif %}
+
+{% if st == 'aprovada' and not tem_aberta and it.status == 'ativa' %}
+<dialog class="modal" id="dlg-nova-revisao" aria-labelledby="dlg-nova-revisao-t">
+  <form method="post" action="{{ url_for('dash.instrucao_nova_revisao', codigo=it.codigo) }}">
+    <h3 id="dlg-nova-revisao-t">Abrir a Rev. {{ '%02d' % (revisoes|map(attribute='numero')|max + 1) }}</h3>
+    <p>Ela começa com o texto da vigente. A Rev. {{ '%02d' % rev.numero }} continua valendo até a nova ser aprovada.</p>
+    <div class="field" style="margin-top:10px;"><label for="nr-motivo">Motivo da revisão</label>
+      <input type="text" id="nr-motivo" name="motivo" required maxlength="500" placeholder="Incluir o passo de sinalização da via"></div>
+    <div class="modal-acoes">
+      <button type="button" class="btn sec" data-fechar>Cancelar</button>
+      <button type="submit" class="btn">Abrir revisão</button>
+    </div>
+  </form>
+</dialog>
+{% endif %}
+
+{% if pode_aprovar and processo.status == 'ativo' %}
+<dialog class="modal" id="dlg-status" aria-labelledby="dlg-status-t">
+  <form method="post" action="{{ url_for('dash.instrucao_status', codigo=it.codigo) }}">
+    <input type="hidden" name="status" value="{{ 'ativa' if it.status == 'obsoleta' else 'obsoleta' }}">
+    <h3 id="dlg-status-t">{{ 'Reativar' if it.status == 'obsoleta' else 'Tornar obsoleta' }} a {{ it.codigo }}?</h3>
+    <p>{% if it.status == 'obsoleta' %}Ela volta às listas.{% else %}Ela sai das listas e não recebe revisão nova. Nada é apagado: os PDFs de todas as revisões continuam aqui.{% endif %}</p>
+    <div class="field" style="margin-top:10px;"><label for="st-motivo">Motivo</label>
+      <input type="text" id="st-motivo" name="motivo" maxlength="500"></div>
+    <div class="modal-acoes">
+      <button type="button" class="btn sec" data-fechar>Cancelar</button>
+      <button type="submit" class="btn">Confirmar</button>
+    </div>
+  </form>
+</dialog>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/processos.js') }}"></script>
+{% if pacote %}
+<script>window.__IT__ = {{ pacote|tojson }};</script>
+<script src="{{ url_for('static', filename='js/fluxo_formas.js') }}"></script>
+<script src="{{ url_for('static', filename='js/fluxo_render.js') }}"></script>
+<script src="{{ url_for('static', filename='js/fluxo_gerar_it.js') }}"></script>
+<script src="{{ url_for('static', filename='js/instrucao.js') }}"></script>
+{% endif %}
+{% endblock %}

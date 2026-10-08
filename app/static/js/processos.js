@@ -22,9 +22,13 @@
     });
   }
 
-  // Seletor que troca de página (o fluxo aberto, na aba Fluxograma).
+  // Seletor que troca de página (o fluxo aberto, a revisão da instrução).
   document.querySelectorAll("select[data-navegar]").forEach((s) => {
     s.addEventListener("change", () => { location.href = s.value; });
+  });
+  // Seletor que grava ao escolher (o fluxo de origem da instrução).
+  document.querySelectorAll("select[data-enviar]").forEach((s) => {
+    s.addEventListener("change", () => s.form.submit());
   });
 
   // ---- diálogos -------------------------------------------------------------
