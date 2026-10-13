@@ -857,6 +857,24 @@ filtrar por ele perderia linha sem erro na tela. O select lista só os tipos
 PRESENTES no recorte, com a contagem: oferecer um tipo que não existe ali leva
 a pessoa a filtrar e ver tabela vazia sem entender por quê.
 
+**Um filtro só, para três abas, e de seleção múltipla** (13/10/2026). A barra
+mora ACIMA das abas e aparece em Desligamentos, Ordens de Serviço e Mapa —
+as três sempre recortaram pelo mesmo `estado`, mas a barra ficava dentro de
+Desligamentos e a lista de Ordens aparecia filtrada sem dizer por quê. Some só
+na Revisão, cuja fila não passa por ele. Cidade, risco e tipo de serviço são
+`.dropdown` de marcar (conjuntos no estado; vazio = todos), com um "só" em
+cada linha para voltar a um valor num clique. O bairro segue select único, com
+chave `cidade|bairro`: com duas cidades, "CENTRO" sozinho seria dois lugares.
+
+⚠️ A lista do `.dropdown` só é RECRIADA quando as opções mudam; senão
+contagem e marcação são atualizadas no lugar (`desenharMulti`). Ela fica
+aberta enquanto se marca, e recriar o HTML a cada clique é a armadilha dos
+chips que roubam o clique (§6).
+
+Os KPIs "Candidatos a OS" e "Deles, críticos" da aba Ordens passaram a contar
+os MESMOS grupos da lista (filtrados, sem OS, de hoje em diante). Antes
+contavam o pacote inteiro: 89 em cima de uma lista de 48, já sem filtro.
+
 **A revisão é o que faz a fila encolher.** Confirmar um endereço grava três
 coisas na mesma transação: a posição como `manual`, o **alias** em
 `enderecos_alias` e o recálculo do match. O alias tem prioridade máxima sobre
@@ -2421,6 +2439,14 @@ a.run(port=5001, use_reloader=False)"
   em `erro` com data futura) e o PATCH condicional contra o PostgREST de
   verdade — o filtro `status=eq.` tem a forma do `id=eq.` que o `update` já
   usa.
+
+- **Filtro de seleção múltipla nas três abas da Troca de Poste** em
+  13/10/2026, sem migration (§4). No navegador, contra produção num servidor
+  de ensaio que recusava escrita, com o mouse: duas cidades marcadas com a
+  lista aberta, "só" isolando Penha, abrir Risco fechando Cidade, clique fora
+  fechando, KPIs = lista = linhas em quatro combinações, Limpar, Revisão sem a
+  barra, Mapa recortando os pontos (250 → 28 → 250); 375 px sem rolar de
+  lado, "só" sempre visível no toque; console limpo.
 
 - **"Atualizar do WVSA" no modal da OS** em 13/10/2026, migration `0019`
   (`troca_poste.agenda_sincronizacao`), aplicada em produção pelo Jhoni no
