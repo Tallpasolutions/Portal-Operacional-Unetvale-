@@ -30,6 +30,7 @@ import argparse
 import json
 import os
 import re
+import struct
 import time
 from datetime import datetime, timezone
 
@@ -190,6 +191,41 @@ class Wvsa:
                                  "X-CSRF-TOKEN": self.csrf or ""})
         m = re.search(r"\b(?:OS|os)[^\d]{0,4}(\d{3,})", r.text)
         return r.status_code, r.text, (m.group(1) if m else None)
+
+    def contar_anexos(self, numero):
+        """Quantas imagens a OS tem em "Visualizar as Fotos/Anexos".
+
+        É a prova de que o anexo entrou: o WVSA responde 200 com página de
+        erro em vários endpoints (§6), e status sozinho não diz nada. As
+        imagens moram no S3 do WVSA (`unetvale-wvsa.s3...`), medido em
+        13/10/2026 com um anexo feito à mão na OS #594466.
+        """
+        r = self.s.get(f"{self.base}/helpers/fotos/os/{numero}", timeout=TIMEOUT)
+        r.raise_for_status()
+        return len(re.findall(r'<img[^>]+src="https://[^"]*amazonaws\.com/', r.text))
+
+    def anexar(self, numero, nome, conteudo, tipo="image/png"):
+        """POST do arquivo na OS. Devolve (status_http, texto).
+
+        Contrato lido do formulário do WVSA em 13/10/2026 ("Incluir
+        Fotos/Anexos" da OS #594466): um Dropzone com `action=
+        /operacional/oshelpers/anexos/{os}`, POST multipart, campo `file`,
+        um arquivo por requisição, sem outros parâmetros. A rota segue o
+        padrão `/operacional/oshelpers/{ação}/{os}` — a sondagem de 10/09
+        procurava em `/os/{ação}` e não achou.
+
+        O `_token` e o `X-CSRF-TOKEN` vão por garantia: o Dropzone da página
+        não manda nenhum dos dois, mas sobra não recusa.
+        """
+        if not self.csrf:
+            self.renovar_csrf()
+        r = self.s.post(f"{self.base}/operacional/oshelpers/anexos/{numero}", timeout=TIMEOUT,
+                        files={"file": (nome, conteudo, tipo)},
+                        data={"_token": self.csrf or ""},
+                        headers={"Accept": "application/json",
+                                 "X-Requested-With": "XMLHttpRequest",
+                                 "X-CSRF-TOKEN": self.csrf or ""})
+        return r.status_code, r.text
 
 
 def alcancavel():
@@ -459,6 +495,111 @@ def copiar_agenda(completo, estado):
     return True
 
 
+# ------------------------------------------------------- mapa anexado à OS
+def _ponto(ewkb_hex):
+    """(lat, lon) de um POINT em EWKB hex — como o PostgREST devolve geography.
+
+    Cópia do `app/troca_poste._ponto`: o coletor não importa o app (é outro
+    deploy, outra máquina). É decodificação de formato, não regra de negócio —
+    não há o que divergir entre as duas.
+    """
+    if not ewkb_hex:
+        return None
+    try:
+        b = bytes.fromhex(ewkb_hex)
+        ordem = "<" if b[0] == 1 else ">"
+        tipo, = struct.unpack_from(ordem + "I", b, 1)
+        if (tipo & 0xFF) != 1:
+            return None
+        x, y = struct.unpack_from(ordem + "dd", b, 5 + (4 if tipo & 0x20000000 else 0))
+        return round(y, 6), round(x, 6)
+    except Exception:
+        return None
+
+
+def trechos_da_ordem(ordem):
+    """Os trechos do grupo da ordem, na ordem em que o script da OS os lista.
+
+    A ordem do texto vem do portal (o agrupamento da tela), que o coletor não
+    refaz: a numeração do mapa segue a POSIÇÃO de cada rua no texto
+    `SOLICITACAO` já gravado. Assim o "1" do mapa é a primeira rua que o
+    técnico lê na OS.
+    """
+    url, _ = _cfg()
+    r = requests.get(f"{url}/rest/v1/agrupamento_itens", headers=_headers(), timeout=TIMEOUT,
+                     params={"select": "desligamento_id",
+                             "agrupamento_id": f"eq.{ordem['agrupamento_id']}"})
+    r.raise_for_status()
+    ids = [i["desligamento_id"] for i in r.json()]
+    if not ids:
+        return []
+    r = requests.get(f"{url}/rest/v1/desligamentos", headers=_headers(), timeout=TIMEOUT,
+                     params={"select": "id,tipo_via_extenso,logradouro,numero_inicio,numero_fim,"
+                                       "endereco_raw,desligamento_geo(geom,validacao)",
+                             "id": f"in.({','.join(ids)})"})
+    r.raise_for_status()
+    trechos = []
+    for d in r.json():
+        geo = d.get("desligamento_geo") or {}
+        ponto = _ponto(geo.get("geom"))
+        trechos.append({"lat": ponto[0] if ponto else None, "lon": ponto[1] if ponto else None,
+                        "tipo_via": d.get("tipo_via_extenso"), "logradouro": d.get("logradouro"),
+                        "numero_inicio": d.get("numero_inicio"), "numero_fim": d.get("numero_fim"),
+                        "endereco": d.get("endereco_raw"), "validacao": geo.get("validacao")})
+    texto = (ordem.get("payload_enviado") or {}).get("SOLICITACAO") or ordem.get("solicitacao") or ""
+    texto = texto.upper()
+
+    def posicao(t):
+        from mapa_os import sem_acento
+        chave = sem_acento(t.get("logradouro") or t.get("endereco") or "").upper().strip()
+        p = texto.find(chave) if chave else -1
+        return (p if p >= 0 else len(texto) + 1, chave, t.get("numero_inicio") or 0)
+    return sorted(trechos, key=posicao)
+
+
+def _cabecalho(ordem, numero):
+    p = ordem.get("payload_enviado") or {}
+    texto = p.get("SOLICITACAO") or ""
+    m = re.search(r"DATA/HORA DO DESLIGAMENTO:\s*(.+)", texto)
+    local = re.search(r"LOCAL:\s*(.+)", texto)
+    bairro = re.search(r"BAIRRO:\s*(.+)", texto)
+    return {"os": numero,
+            "cidade": local.group(1).strip() if local else "",
+            "bairro": (bairro.group(1).strip() if bairro else ordem.get("bairro_nome")) or "",
+            "janela": m.group(1).strip() if m else ""}
+
+
+def anexar_mapa(ordem, numero, wvsa):
+    """Gera o mapa do grupo e anexa à OS. Devolve o registro do desfecho.
+
+    NUNCA levanta e nunca mexe no status da ordem: a OS já existe no WVSA, e
+    falhar o mapa não desfaz isso. O desfecho vai para `resposta_bruta.mapa`
+    (sem migration — é o registro do que o WVSA respondeu, e o anexo é mais
+    uma resposta dele).
+    """
+    feito = {"em": _agora()}
+    try:
+        import mapa_os
+        trechos = trechos_da_ordem(ordem)
+        png = mapa_os.gerar_png(_cabecalho(ordem, numero), trechos)
+        antes = wvsa.contar_anexos(numero)
+        status, texto = wvsa.anexar(numero, f"mapa-troca-poste-os-{numero}.png", png)
+        depois = wvsa.contar_anexos(numero)
+        feito.update({"http": status, "resposta": (texto or "")[:300], "bytes": len(png),
+                      "trechos": len(trechos), "anexos_antes": antes, "anexos_depois": depois})
+        # 200 não basta (o WVSA responde 200 com página de erro): o anexo tem
+        # de APARECER na lista de fotos da OS.
+        feito["ok"] = status < 400 and depois > antes
+        if not feito["ok"]:
+            feito["erro"] = (f"WVSA respondeu HTTP {status}" if status >= 400
+                             else "o WVSA respondeu, mas o anexo não apareceu na OS")
+    except Exception as e:
+        feito.update({"ok": False, "erro": str(e)[:300]})
+    log("mapa_anexado" if feito["ok"] else "mapa_falhou", ordem=ordem.get("id"), numero=numero,
+        **{k: v for k, v in feito.items() if k not in ("resposta", "em")})
+    return feito
+
+
 # ----------------------------------------------------------------- payload
 def montar_payload(o):
     """Monta os campos do formulário a partir da ordem gravada.
@@ -557,10 +698,40 @@ def processar(ordem, wvsa):
         log("erro_http", ordem=oid, chave=chave, http=status)
         return
 
+    resposta = {"http": status, "corpo": texto[:4000]}
     atualizar(oid, {"status": "criada", "wvsa_os_numero": numero, "erro": None,
                     "enviado_em": datetime.now(timezone.utc).isoformat(),
-                    "resposta_bruta": {"http": status, "corpo": texto[:4000]}})
+                    "resposta_bruta": resposta})
     log("os_criada", ordem=oid, chave=chave, numero=numero, http=status)
+
+    # O mapa vem DEPOIS de gravar `criada`: se o processo morrer aqui, a OS
+    # está registrada e só o anexo falta — o contrário deixaria uma OS real
+    # em `enviando`, que a tela trata como travada.
+    if numero and MAPA_LIGADO:
+        resposta["mapa"] = anexar_mapa({**ordem, "payload_enviado": payload}, numero, wvsa)
+        atualizar(oid, {"resposta_bruta": resposta})
+
+
+# Desligável sem deploy: se o anexo começar a dar problema no WVSA, a OS
+# continua saindo sem ele.
+MAPA_LIGADO = os.environ.get("OS_MAPA_ANEXO", "true").strip().lower() != "false"
+
+
+def anexar_mapa_avulso(numero):
+    """`--mapa NUMERO`: anexa (de novo) o mapa a uma OS já criada pelo portal."""
+    url, _ = _cfg()
+    r = requests.get(f"{url}/rest/v1/ordens_servico", headers=_headers(), timeout=TIMEOUT,
+                     params={"select": "*", "wvsa_os_numero": f"eq.{numero}"})
+    r.raise_for_status()
+    ordens = r.json()
+    if not ordens:
+        raise SystemExit(f"nenhuma ordem do portal com a OS {numero}")
+    ordem = ordens[0]
+    feito = anexar_mapa(ordem, numero, Wvsa().login())
+    resposta = ordem.get("resposta_bruta") or {}
+    resposta["mapa"] = feito
+    atualizar(ordem["id"], {"resposta_bruta": resposta})
+    return feito
 
 
 def rodada(wvsa_cache=None):
@@ -613,7 +784,31 @@ def main():
                     help="sincroniza as opções do formulário e sai")
     ap.add_argument("--agenda", action="store_true",
                     help="sincroniza só os slots de agendamento e sai")
+    ap.add_argument("--mapa", metavar="NUMERO_OS",
+                    help="anexa o mapa do local a uma OS já criada pelo portal e sai")
+    ap.add_argument("--mapa-png", metavar="NUMERO_OS",
+                    help="só GERA o PNG do mapa da OS (em ./mapa-os-N.png), sem tocar no WVSA")
     args = ap.parse_args()
+
+    if args.mapa_png:
+        url, _ = _cfg()
+        r = requests.get(f"{url}/rest/v1/ordens_servico", headers=_headers(), timeout=TIMEOUT,
+                         params={"select": "*", "wvsa_os_numero": f"eq.{args.mapa_png}"})
+        r.raise_for_status()
+        if not r.json():
+            raise SystemExit(f"nenhuma ordem do portal com a OS {args.mapa_png}")
+        import mapa_os
+        ordem = r.json()[0]
+        png = mapa_os.gerar_png(_cabecalho(ordem, args.mapa_png), trechos_da_ordem(ordem))
+        destino = f"mapa-os-{args.mapa_png}.png"
+        with open(destino, "wb") as f:
+            f.write(png)
+        log("mapa_gerado", arquivo=destino, bytes=len(png))
+        return
+
+    if args.mapa:
+        log("fim", mapa=anexar_mapa_avulso(args.mapa))
+        return
 
     if args.catalogos or args.agenda:
         sessao = Wvsa().login()
