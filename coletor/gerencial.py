@@ -1190,22 +1190,41 @@ def coletar_atendimento(sessao, meses, anterior=None):
     csrf, _ = _csrf(sessao, "/relatorios/indicadores14")
     payload = dict(anterior or {})
     blocos = dict(payload.get("meses_dados") or {})
+
+    def janela(cur, ate, mes, salas):
+        """Uma janela do RRO; se o WVSA devolver 5xx, parte ao meio.
+
+        O servidor do WVSA desiste em ~30 s e responde HTTP 500. Medido em
+        09/10/2026: 01/10 a 07/10 dava 500 sempre (duas vezes seguidas), e
+        cada um dos sete dias, sozinho, respondia 200 em 1,5 a 11,5 s — o
+        02/10 teve 3.675 conversas, ~3x um dia comum. Uma semana pesada
+        derrubava o módulo inteiro e a rodada diária falharia todo dia.
+        Um DIA que ainda falha é falha de verdade e sobe.
+        """
+        log(f"  atendimento (RRO) {cur:%d/%m} a {ate:%d/%m}…")
+        r = sessao.post(
+            sessao.base + "/relatorios/indicadores14/dados",
+            data={"_token": csrf, "inicio": f"{cur:%d/%m/%Y}", "fim": f"{ate:%d/%m/%Y}",
+                  "nome": "", "atendido_por": "", "departament_id": "", "open": "",
+                  "resolvidoBot": "", "encaminhado_de": "", "encaminhado_para": ""},
+            headers=_cabecalhos(csrf, sessao.base + "/relatorios/indicadores14"),
+            timeout=600,
+        )
+        if r.status_code >= 500 and ate > cur:
+            meio = cur + timedelta(days=(ate - cur).days // 2)
+            log(f"    HTTP {r.status_code} — dividindo a janela")
+            janela(cur, meio, mes, salas)
+            janela(meio + timedelta(days=1), ate, mes, salas)
+            return
+        r.raise_for_status()
+        salas.update(parse_rro(_html_de_envelope(r.text), mes))
+
     for mes in meses:
         ini, fim = (date.fromisoformat(x) for x in _limites_do_mes(mes))
         salas, cur = {}, ini
         while cur <= fim:
             ate = min(cur + timedelta(days=6), fim)
-            log(f"  atendimento (RRO) {cur:%d/%m} a {ate:%d/%m}…")
-            r = sessao.post(
-                sessao.base + "/relatorios/indicadores14/dados",
-                data={"_token": csrf, "inicio": f"{cur:%d/%m/%Y}", "fim": f"{ate:%d/%m/%Y}",
-                      "nome": "", "atendido_por": "", "departament_id": "", "open": "",
-                      "resolvidoBot": "", "encaminhado_de": "", "encaminhado_para": ""},
-                headers=_cabecalhos(csrf, sessao.base + "/relatorios/indicadores14"),
-                timeout=600,
-            )
-            r.raise_for_status()
-            salas.update(parse_rro(_html_de_envelope(r.text), mes))
+            janela(cur, ate, mes, salas)
             cur = ate + timedelta(days=1)
         agg = {}
         for dep, at, tma, tmf in salas.values():

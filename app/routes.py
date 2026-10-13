@@ -312,6 +312,12 @@ def _envio_os_habilitado():
     return os.environ.get("OS_ENVIO_HABILITADO", "").strip().lower() == "true"
 
 
+# O id da ordem chega pela URL e vai direto ao filtro do PostgREST. Um valor
+# que não é uuid volta lá como 400 (`22P02`) e subia aqui como 500 — é entrada
+# ruim, não falha do servidor (§8).
+_UUID_ORDEM = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+
+
 @bp.route("/troca-poste/os/<ordem_id>/enviar", methods=["POST"])
 @login_obrigatorio
 @modulo_obrigatorio("troca-poste")
@@ -328,8 +334,17 @@ def troca_poste_enviar_os(ordem_id):
             "detalhe": "O fluxo ainda não foi validado ponta a ponta. "
                        "Para liberar, defina OS_ENVIO_HABILITADO=true no ambiente.",
         }), 503
+    if not _UUID_ORDEM.match(ordem_id):
+        return jsonify({"erro": "ordem não encontrada"}), 404
+    # Corpo opcional: o primeiro envio não manda nada (os campos foram gravados
+    # no rascunho); o "Tentar de novo" manda o que o modal escolheu agora.
+    corpo = request.get_json(silent=True)
+    campos = corpo.get("campos") if isinstance(corpo, dict) else None
     try:
-        tp.marcar_para_envio(ordem_id, session.get("uid"))
+        tp.marcar_para_envio(ordem_id, session.get("uid"),
+                             campos if isinstance(campos, dict) else None)
+    except tp.JaAconteceu as e:
+        return jsonify({"erro": str(e)}), 400
     except ValueError as e:
         return jsonify({"erro": str(e)}), 409
     except Exception as e:
@@ -342,10 +357,63 @@ def troca_poste_enviar_os(ordem_id):
 @modulo_obrigatorio("troca-poste")
 def troca_poste_status_os(ordem_id):
     """Estado da ordem — a tela faz poll aqui enquanto o envio acontece."""
+    if not _UUID_ORDEM.match(ordem_id):
+        return jsonify({"erro": "ordem não encontrada"}), 404
     o = tp.ordem(ordem_id)
     if not o:
         return jsonify({"erro": "ordem não encontrada"}), 404
     return jsonify(o)
+
+
+@bp.route("/troca-poste/agenda/atualizar", methods=["POST"])
+@login_obrigatorio
+@modulo_obrigatorio("troca-poste")
+def troca_poste_pedir_agenda():
+    """Pede ao coletor uma cópia da agenda do WVSA agora.
+
+    É o botão "Atualizar do WVSA" do modal da OS: o operador liberou a agenda
+    de um técnico no WVSA e o horário ainda não aparece, porque a cópia
+    automática é de 15 em 15 min. A Vercel não alcança o WVSA — quem copia é o
+    `enviar_os.py`, dentro da rede. Aqui só se deixa o pedido; a tela
+    acompanha pelo GET abaixo.
+
+    Não depende de `OS_ENVIO_HABILITADO`: copiar a agenda só LÊ o formulário
+    do WVSA, não cria nada lá.
+    """
+    try:
+        return jsonify({"pedido_em": tp.pedir_agenda(session.get("uid"))})
+    except tp.SemAgendaSobDemanda as e:
+        return jsonify({"erro": "A atualização sob demanda ainda não está instalada.",
+                        "detalhe": str(e)}), 503
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+
+@bp.route("/troca-poste/agenda/atualizar")
+@login_obrigatorio
+@modulo_obrigatorio("troca-poste")
+def troca_poste_agenda_atendida():
+    """O pedido de `?pedido=` já foi atendido? Atendido com sucesso, devolve
+    os catálogos inteiros — é o que a tela usa para redesenhar o modal sem
+    recarregar a página (e sem fechar o que a pessoa já tinha escolhido)."""
+    pedido = request.args.get("pedido") or ""
+    try:
+        # Sem fuso não dá para comparar com o carimbo do banco (TypeError, 500).
+        valido = tp._ts(pedido) is not None and tp._ts(pedido).tzinfo is not None
+    except ValueError:
+        valido = False
+    if not valido:
+        return jsonify({"erro": "pedido inválido"}), 400
+    try:
+        estado = tp.agenda_atendida(pedido)
+    except tp.SemAgendaSobDemanda as e:
+        return jsonify({"erro": "A atualização sob demanda ainda não está instalada.",
+                        "detalhe": str(e)}), 503
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+    if estado.get("atendido") and estado.get("ok"):
+        estado["catalogos"] = tp.catalogos()
+    return jsonify(estado)
 
 
 # Retângulo de sanidade: Santa Catarina, com folga. As 11 cidades monitoradas

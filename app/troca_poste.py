@@ -557,10 +557,9 @@ def aplicar_revisao(desligamento_id, usuario_id, lat=None, lon=None, reprovar=Fa
     }, schema=SCHEMA)
 
 
-# Os campos que o operador escolhe ao abrir a OS. `agendamento` fica de fora:
-# a lista do WVSA cobre poucos dias e muda ao longo do dia (23 slots em 3 dias,
-# medido em 04/09/2026), enquanto a OS é aberta para a data do desligamento,
-# semanas à frente — o slot ainda não existe. É campo opcional lá.
+# Os campos que o operador escolhe ao abrir a OS. O `agendamento` é a agenda
+# do WVSA, não catálogo: cobre poucos dias e muda ao longo do dia, por isso tem
+# cadência própria no coletor e o botão "Atualizar do WVSA" no modal.
 TIPOS_CATALOGO = ("executor", "tipo_tecnico", "periodo", "tecnico", "agendamento")
 
 
@@ -587,7 +586,7 @@ def catalogos():
     vazio["agendamento_por_data"] = {}
     try:
         linhas = supa.select("wvsa_catalogos", {
-            "select": "tipo,valor,rotulo,metadados",
+            "select": "tipo,valor,rotulo,metadados,sincronizado_em",
             "tipo": f"in.({','.join(TIPOS_CATALOGO)})",
             "ativo": "is.true",
             "order": "tipo.asc,rotulo.asc",
@@ -615,6 +614,13 @@ def catalogos():
         lista.sort(key=lambda x: ((x.get("metadados") or {}).get("turno", ""),
                                   (x.get("metadados") or {}).get("tecnico", "")))
     saida["agendamento_por_data"] = por_data
+    # Quando a agenda foi copiada pela última vez. O modal mostra isso ao lado
+    # do botão "Atualizar do WVSA": "copiada há 12 min" é o que faz a pessoa
+    # entender por que o horário que ela acabou de liberar não está ali.
+    # Sai das linhas já lidas — nenhuma ida a mais na abertura da página.
+    saida["agenda_copiada_em"] = max(
+        (l.get("sincronizado_em") or "" for l in linhas if l["tipo"] == "agendamento"),
+        default="") or None
 
     empresas = {}
     for t in saida.get("tecnico", []):
@@ -629,6 +635,64 @@ def catalogos():
         for e, ts in sorted(empresas.items(), key=lambda kv: (kv[0] == "Sem empresa", kv[0]))
     ]
     return saida
+
+
+class SemAgendaSobDemanda(RuntimeError):
+    """A migration 0019 ainda não subiu: não há onde deixar o pedido."""
+
+
+def _ts(valor):
+    return datetime.fromisoformat(valor.replace("Z", "+00:00")) if valor else None
+
+
+def pedir_agenda(usuario_id):
+    """Pede ao coletor uma cópia da agenda do WVSA AGORA. Devolve o `pedido_em`.
+
+    O portal não alcança o WVSA (§2): o pedido fica em
+    `agenda_sincronizacao` e o `enviar_os.py`, residente dentro da rede, o
+    atende no próximo ciclo (5 s). Dois cliques são um pedido só — a linha é
+    única, e o segundo só empurra o `pedido_em` para a frente.
+    """
+    try:
+        linhas = supa.update("agenda_sincronizacao", {"id": 1}, {
+            "pedido_em": datetime.now(timezone.utc).isoformat(),
+            "pedido_por": usuario_id,
+        }, schema=SCHEMA)
+    except Exception as e:
+        if supa.tabela_faltando(e):
+            raise SemAgendaSobDemanda("a migration 0019 ainda não foi aplicada") from e
+        raise
+    if not linhas:
+        # A migration semeia a linha 1; sem ela o PATCH casa com nada e o
+        # pedido evaporaria calado — a tela esperaria 90 s por ninguém.
+        raise SemAgendaSobDemanda("a linha de agenda_sincronizacao não existe")
+    return linhas[0]["pedido_em"]
+
+
+def agenda_atendida(pedido_em):
+    """O pedido feito em `pedido_em` já foi atendido? E com que desfecho?
+
+    Atendido é `atendido_pedido_em >= pedido_em`: os dois carimbos são do
+    PORTAL (o coletor só copia o que leu). Comparar com `sincronizado_em`, que
+    é o relógio do Mac, faria uma cópia de antes do clique parecer posterior a
+    ele por uns segundos de diferença entre as máquinas.
+    """
+    pedido = _ts(pedido_em)
+    try:
+        e = supa.select_one("agenda_sincronizacao", {
+            "select": "atendido_pedido_em,sincronizado_em,ultimo_ok_em,ok,erro,contagem",
+            "id": "eq.1",
+        }, schema=SCHEMA)
+    except Exception as exc:
+        if supa.tabela_faltando(exc):
+            raise SemAgendaSobDemanda("a migration 0019 ainda não foi aplicada") from exc
+        raise
+    e = e or {}
+    atendido = _ts(e.get("atendido_pedido_em"))
+    if not atendido or atendido < pedido:
+        return {"atendido": False}
+    return {"atendido": True, "ok": bool(e.get("ok")), "erro": e.get("erro"),
+            "copiada_em": e.get("ultimo_ok_em"), "contagem": e.get("contagem")}
 
 
 def ordens_por_desligamento():
@@ -647,7 +711,10 @@ def ordens_por_desligamento():
     """
     try:
         ordens_ = supa.select("ordens_servico", {
-            "select": "id,status,wvsa_os_numero,agrupamento_id,dry_run",
+            # Os campos da OS entram para o "Tentar de novo" abrir o modal com
+            # a escolha da tentativa anterior — refazer equipe e período a cada
+            # falha é o tipo de atrito que faz a pessoa desistir e ir ao WVSA.
+            "select": "id,status,wvsa_os_numero,agrupamento_id,dry_run," + _COLS_REENVIO,
         }, schema=SCHEMA)
     except Exception as e:
         _falhou("ordens_por_desligamento/ordens", e)
@@ -675,8 +742,54 @@ def ordens_por_desligamento():
                 "ordem_id": o["id"], "status": o["status"],
                 "wvsa_os_numero": o.get("wvsa_os_numero"),
                 "ensaio": bool(o.get("dry_run")),
+                **_estado_reenvio(o),
             }
     return mapa
+
+
+# O que a tela precisa para oferecer "Tentar de novo" numa ordem que falhou.
+# `corpo_resposta` é só o texto da resposta do WVSA (`->>`), não o JSON inteiro
+# de `resposta_bruta`: ele carrega até 4 KB por ordem e é lido para uma frase.
+_COLS_REENVIO = ("erro,executor,periodo,tipo_tecnico,agendamento,tecnico_ids,"
+                 "corpo_resposta:resposta_bruta->>corpo")
+
+# Prefixo que o `enviar_os.py` grava quando o POST levanta exceção. É o único
+# desfecho AMBÍGUO do envio: "Connection reset" depois de mandar o corpo não diz
+# se o WVSA gravou. HTTP 4xx/5xx é recusa limpa — o WVSA respondeu que não.
+_PREFIXO_FALHA_REDE = "falha na requisição"
+
+
+def motivo_erro(o):
+    """Frase que explica por que a ordem falhou, ou None se não falhou.
+
+    O `erro` gravado pelo coletor até 09/10/2026 dizia só "WVSA respondeu HTTP
+    500" — e a causa real estava no corpo: "O campo selecionado da agenda já
+    está sendo usado" (as DUAS falhas HTTP de produção até então). É a única
+    informação que diz o que fazer na tentativa seguinte (escolher outro
+    horário), então ela vem do corpo quando o corpo é texto do WVSA.
+    """
+    if o.get("status") != "erro":
+        return None
+    corpo = (o.get("corpo_resposta") or "").strip()
+    # O WVSA responde "<mensagem> | <id do erro> | <rota>" em texto puro. HTML
+    # (página de erro inteira) não vira frase legível — cai no `erro` gravado.
+    if corpo and not corpo.startswith("<"):
+        frase = corpo.split(" | ")[0].strip()
+        if frase:
+            return f"O WVSA recusou: {frase[:240]}"
+    return o.get("erro") or "falha sem detalhe"
+
+
+def _estado_reenvio(o):
+    """Campos que a tela usa para refazer o envio de uma ordem que falhou."""
+    return {
+        "erro": motivo_erro(o),
+        # A conexão caiu no meio do POST: a OS pode ter nascido no WVSA. A tela
+        # pede conferência ANTES de reenviar — senão sai duplicada.
+        "erro_ambiguo": (o.get("status") == "erro"
+                         and (o.get("erro") or "").startswith(_PREFIXO_FALHA_REDE)),
+        "campos": {k: o.get(k) for k in CAMPOS_REENVIO},
+    }
 
 
 def dry_run():
@@ -727,7 +840,39 @@ def criar_rascunho_grupo(desligamento_ids, usuario_id, solicitacao, executor,
     }, schema=SCHEMA)
 
 
-def marcar_para_envio(ordem_id, usuario_id):
+# Campos da OS que o operador pode trocar ao reenviar. O resto (texto da
+# solicitação, cidade, bairro, data) é o FATO do grupo e não muda numa
+# segunda tentativa — mudá-lo seria abrir outra OS com a chave desta.
+CAMPOS_REENVIO = ("executor", "periodo", "tipo_tecnico", "agendamento", "tecnico_ids")
+
+
+class JaAconteceu(ValueError):
+    """O desligamento da ordem já passou: OS de obra realizada não desloca ninguém."""
+
+
+def _campos_limpos(campos):
+    """Só as chaves conhecidas, com texto vazio virando NULL.
+
+    `tecnico_ids` vazio vira NULL pela mesma razão de `criar_os_bairro_dia`:
+    `{}` diria que houve escolha de equipe quando não houve.
+    """
+    saida = {}
+    for k in CAMPOS_REENVIO:
+        if k not in (campos or {}):
+            continue
+        v = campos[k]
+        if k == "tecnico_ids":
+            lista = v if isinstance(v, list) else []
+            saida[k] = [str(t).strip()[:40] for t in lista if str(t or "").strip()][:60] or None
+        else:
+            saida[k] = (str(v).strip()[:120] or None) if v is not None else None
+    # Executor é obrigatório no formulário do WVSA; vazio volta ao padrão.
+    if "executor" in saida and not saida["executor"]:
+        saida["executor"] = "infra"
+    return saida
+
+
+def marcar_para_envio(ordem_id, usuario_id, campos=None):
     """Passa a ordem para 'pronta' com o clique humano registrado.
 
     É este registro — `origem='clique_usuario'` mais `enviado_por` — que
@@ -738,31 +883,51 @@ def marcar_para_envio(ordem_id, usuario_id):
     ou 'enviando' duplicaria OS no WVSA. `ensaio` entra na lista porque é
     exatamente o caminho previsto — conferir o payload sem enviar e, depois de
     `OS_DRY_RUN=false`, clicar de novo para valer.
+
+    `campos` é o "Tentar de novo": a falha mais comum é o horário da agenda ter
+    sido ocupado entre a cópia da agenda e o envio, e repetir com o MESMO slot
+    falharia igual. Por isso o reenvio aceita trocar o que o modal escolhe.
+
+    A troca de status é CONDICIONAL ao status lido (`status=eq.<lido>` no
+    PATCH): dois cliques em "Tentar de novo" ao mesmo tempo, em telas
+    diferentes, só promovem a ordem uma vez. Sem isso os dois passariam pela
+    conferência, e o segundo PATCH chegaria com a ordem já em `enviando`.
     """
     atual = supa.select_one("ordens_servico", {
-        "select": "id,status", "id": f"eq.{ordem_id}",
+        "select": "id,status,data_inicio", "id": f"eq.{ordem_id}",
     }, schema=SCHEMA)
     if not atual:
         raise ValueError("ordem não encontrada")
     if atual["status"] not in ("rascunho", "ensaio", "erro"):
         raise ValueError(f"ordem está em '{atual['status']}' — não pode ser reenviada")
+    # A mesma regra da criação (`troca_poste_criar_os`): uma ordem que falhou
+    # na véspera não pode sair hoje para uma obra que já aconteceu.
+    if (atual.get("data_inicio") or "9999")[:10] < hoje().isoformat():
+        raise JaAconteceu("o desligamento desta ordem já aconteceu")
 
-    supa.update("ordens_servico", {"id": ordem_id}, {
+    mudou = supa.update("ordens_servico", {"id": ordem_id, "status": atual["status"]}, {
+        **_campos_limpos(campos),
         "status": "pronta", "origem": "clique_usuario",
         "enviado_por": usuario_id, "erro": None,
     }, schema=SCHEMA)
+    if not mudou:
+        raise ValueError("a ordem mudou de estado enquanto isso — recarregue a página")
 
 
 def ordem(ordem_id):
     """Estado de uma ordem — a tela faz poll aqui depois de mandar enviar."""
-    return supa.select_one("ordens_servico", {
+    o = supa.select_one("ordens_servico", {
         # `executor`, `periodo` e `agendamento` entram porque a tela monta a
         # linha da OS na hora, sem recarregar: sem eles a linha nasceria com
         # três traços e só ficaria correta no próximo carregamento.
-        "select": "id,status,wvsa_os_numero,erro,tentativas,enviado_em,solicitacao,"
-                  "dry_run,executor,periodo,agendamento",
+        "select": "id,status,wvsa_os_numero,tentativas,enviado_em,solicitacao,"
+                  "dry_run,data_inicio," + _COLS_REENVIO,
         "id": f"eq.{ordem_id}",
     }, schema=SCHEMA)
+    if o:
+        o.update(_estado_reenvio(o))
+        o.pop("corpo_resposta", None)
+    return o
 
 
 # Por quanto tempo uma linha `executando` ainda é plausível, em minutos.
@@ -836,19 +1001,24 @@ def ordens(limite=50):
     payload foi montado e conferido, e nenhuma OS chegou ao WVSA.
     """
     try:
-        return supa.select("ordens_servico", {
+        rows = supa.select("ordens_servico", {
             "select": "id,status,origem,dry_run,wvsa_os_numero,agendamento,executor,"
                       "periodo,data_inicio,data_fim,solicitacao,criado_em,erro,"
                       # O rótulo do agrupamento ("DOM JOAQUIM — 10/09/2026") é o
                       # que identifica a OS na tabela: sem ele só havia executor,
                       # período e número, e o bairro ficava escondido dentro do
                       # texto da solicitação.
-                      "agrupamentos(rotulo)",
+                      "agrupamentos(rotulo),tipo_tecnico,tecnico_ids,"
+                      "corpo_resposta:resposta_bruta->>corpo",
             "order": "criado_em.desc", "limit": str(limite),
         }, schema=SCHEMA)
     except Exception as e:
         _falhou("ordens", e)
         return []
+    for o in rows:
+        o.update(_estado_reenvio(o))
+        o.pop("corpo_resposta", None)
+    return rows
 
 
 # Limiar de frescor da coleta da Celesc, em minutos. É próprio, e não os 180

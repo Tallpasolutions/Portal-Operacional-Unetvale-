@@ -189,11 +189,7 @@
 
   {# O modal deixou de só confirmar: é aqui que se monta a OS. Os campos são os
      que o contrato do WVSA marca como escolha do painel (§3.1) — antes iam
-     todos vazios, com `executor` cravado em "infra" no JS.
-
-     `agendamento` não está aqui de propósito: a lista do WVSA cobre poucos
-     dias e muda ao longo do dia, e a OS é aberta para a data do desligamento,
-     semanas à frente. É opcional lá. #}
+     todos vazios, com `executor` cravado em "infra" no JS. #}
   <dialog id="tp-dlg-os" class="modal" style="max-width:560px;">
     <h3>Abrir OS no WVSA</h3>
     <p id="tp-dlg-os-texto"></p>
@@ -212,10 +208,23 @@
          e cobrem poucos dias à frente. Por isso só aparecem os do dia do
          desligamento — oferecer o de outro dia faria o operador marcar um
          horário que não existe para aquela obra. #}
-      <label class="field" style="grid-column:1/-1;">Agendar nova OS
-        <select id="tp-os-agendamento"></select>
-        <span class="subnote" id="tp-os-agenda-nota" style="margin:4px 0 0;display:block;"></span>
-      </label>
+      {# `min-width:0` e `max-width:100%`: o rótulo do slot traz o nome inteiro
+         do técnico, e sem eles o select empurrava o modal 4 px para fora de
+         uma tela de 375. #}
+      <div style="grid-column:1/-1;min-width:0;">
+        <label class="field" style="margin-bottom:0;">Agendar nova OS
+          <select id="tp-os-agendamento" style="max-width:100%;"></select>
+          <span class="subnote" id="tp-os-agenda-nota" style="margin:4px 0 0;display:block;"></span>
+        </label>
+        {# A cópia da agenda é de 15 em 15 min. Quem acabou de liberar um
+           horário no WVSA não pode esperar por ela com a OS aberta: o botão
+           pede uma cópia agora ao coletor, que é quem alcança o WVSA. Fica
+           FORA do <label> para o clique não ir parar no select. #}
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;">
+          <button type="button" class="btn-ghost" id="tp-os-agenda-atualizar">Atualizar do WVSA</button>
+          <span class="subnote" id="tp-os-agenda-copia" style="margin:0;flex:1 1 220px;"></span>
+        </div>
+      </div>
     </div>
 
     <label class="field" style="display:block;margin-top:12px;">

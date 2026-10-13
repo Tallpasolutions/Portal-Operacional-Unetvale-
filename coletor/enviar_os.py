@@ -321,7 +321,9 @@ def sincronizar_catalogos(wvsa, campos=None):
         # não "a empresa ficou sem técnico". Gravar isso apagaria o catálogo bom
         # e deixaria a tela sem opção nenhuma — o erro do `ger_idf` zerado.
         log("catalogo_vazio_recusado", campos=por_tipo)
-        return 0
+        # None, não 0: quem pediu pela tela precisa saber que NÃO copiou —
+        # `copiar_agenda` grava isso como erro em vez de "atualizado".
+        return None
 
     if linhas:
         resp = requests.post(f"{url}/rest/v1/wvsa_catalogos", headers={
@@ -345,12 +347,112 @@ def sincronizar_catalogos(wvsa, campos=None):
                        json={"ativo": False}, timeout=TIMEOUT)
 
     log("catalogo_sincronizado", campos=por_tipo, inativados=len(sumidos))
-    return len(linhas)
+    return por_tipo
 
 
 def sincronizar_agendamento(wvsa):
     """Só a agenda. Roda de `AGENDAMENTO_MINUTOS` em `AGENDAMENTO_MINUTOS`."""
     return sincronizar_catalogos(wvsa, _CAMPO_AGENDAMENTO)
+
+
+# ------------------------------------------------- agenda sob demanda (0019)
+# O botão "Atualizar do WVSA" do modal da OS deixa um pedido em
+# `troca_poste.agenda_sincronizacao` (uma linha só), e este laço — que já
+# confere a fila de OS a cada 5 s — atende. O caso: o operador libera a agenda
+# de um técnico no WVSA e volta ao portal; sem o pedido, o horário só
+# apareceria na próxima cópia de 15 min.
+#
+# Toda cópia grava o desfecho na mesma linha, sob demanda ou não: é dela que a
+# tela tira "agenda copiada às 14:32" e o erro, quando houve.
+
+# Pedido atendido copia TUDO numa leitura só do formulário: a equipe também
+# muda quando a operação mexe na agenda, e a página é a mesma.
+_CAMPOS_TUDO = {**_CAMPOS_CATALOGO, **_CAMPO_AGENDAMENTO}
+
+# Sem a migration 0019 a tabela não existe (404, `PGRST205`). O laço segue
+# enviando OS como antes; só o pedido sob demanda fica desligado até o
+# próximo reinício do agente.
+_sem_tabela_agenda = False
+
+
+def estado_agenda():
+    """A linha de `agenda_sincronizacao`, ou None se não deu para ler."""
+    global _sem_tabela_agenda
+    if _sem_tabela_agenda:
+        return None
+    url, _ = _cfg()
+    try:
+        r = requests.get(f"{url}/rest/v1/agenda_sincronizacao", headers=_headers(),
+                         params={"select": "pedido_em,atendido_pedido_em", "id": "eq.1"},
+                         timeout=TIMEOUT)
+        if r.status_code == 404 and "PGRST205" in r.text:
+            _sem_tabela_agenda = True
+            log("agenda_sob_demanda_desligada",
+                nota="tabela troca_poste.agenda_sincronizacao ausente (migration 0019)")
+            return None
+        r.raise_for_status()
+        linhas = r.json()
+        return linhas[0] if linhas else None
+    except requests.RequestException as e:
+        log("agenda_estado_erro", erro=str(e)[:160])
+        return None
+
+
+def pedido_pendente(estado):
+    """O `pedido_em` ainda não atendido, ou None.
+
+    Compara os dois carimbos que o PORTAL escreveu (o `atendido_pedido_em` é
+    cópia do `pedido_em`), nunca o relógio deste Mac com o da Vercel.
+    """
+    if not estado or not estado.get("pedido_em"):
+        return None
+    pedido = datetime.fromisoformat(estado["pedido_em"])
+    atendido = estado.get("atendido_pedido_em")
+    if atendido and datetime.fromisoformat(atendido) >= pedido:
+        return None
+    return estado["pedido_em"]
+
+
+def _gravar_agenda(mudancas):
+    if _sem_tabela_agenda:
+        return
+    url, _ = _cfg()
+    try:
+        requests.patch(f"{url}/rest/v1/agenda_sincronizacao", headers=_headers(),
+                       params={"id": "eq.1"}, json=mudancas,
+                       timeout=TIMEOUT).raise_for_status()
+    except requests.RequestException as e:
+        log("agenda_estado_erro", erro=str(e)[:160])
+
+
+def copiar_agenda(completo, estado):
+    """Uma cópia do formulário, com o desfecho gravado para a tela.
+
+    `estado` é a linha lida NESTE ciclo, antes de começar: a cópia atende o
+    pedido que existia até aqui. Um clique que chegue durante a cópia fica com
+    `pedido_em` maior e é atendido no ciclo seguinte — a página que ela leu
+    pode ser de antes da liberação que ele quer ver.
+    """
+    inicio = _agora()
+    feito = {"sincronizado_em": inicio}
+    if estado and estado.get("pedido_em"):
+        feito["atendido_pedido_em"] = estado["pedido_em"]
+    try:
+        # Sonda antes de logar: fora da VPN o login só desiste em 45 s, e a
+        # tela está esperando com o modal aberto.
+        if not alcancavel():
+            raise RuntimeError("o coletor está fora da rede do WVSA (VPN)")
+        por_tipo = sincronizar_catalogos(Wvsa().login(),
+                                         _CAMPOS_TUDO if completo else _CAMPO_AGENDAMENTO)
+        if por_tipo is None:
+            raise RuntimeError("o WVSA devolveu o formulário sem técnicos — sessão expirada?")
+    except Exception as e:
+        log("catalogo_erro", erro=str(e)[:160])
+        _gravar_agenda({**feito, "ok": False, "erro": str(e)[:300]})
+        return False
+    _gravar_agenda({**feito, "ok": True, "erro": None,
+                    "ultimo_ok_em": inicio, "contagem": por_tipo})
+    return True
 
 
 # ----------------------------------------------------------------- payload
@@ -513,7 +615,7 @@ def main():
         sessao = Wvsa().login()
         n = (sincronizar_agendamento(sessao) if args.agenda
              else sincronizar_catalogos(sessao))
-        log("fim", opcoes=n)
+        log("fim", opcoes=n)  # {tipo: quantidade}, ou None se recusou
         return
 
     if not args.daemon:
@@ -534,24 +636,26 @@ def main():
             agora = time.time()
             vence_catalogo = agora >= proximo_catalogo
             vence_agenda = agora >= proxima_agenda
-            if vence_catalogo or vence_agenda:
-                try:
-                    # Uma sessão serve para os dois: `sincronizar_catalogos`
-                    # baixa a mesma página, e abrir dois logins seguidos só
-                    # gastaria uma volta a mais no WVSA.
-                    sessao = Wvsa().login()
-                    if vence_catalogo:
-                        sincronizar_catalogos(sessao)
-                    if vence_agenda:
-                        sincronizar_agendamento(sessao)
-                except Exception as e:
-                    log("catalogo_erro", erro=str(e)[:160])
+            # Uma leitura a mais por ciclo (~17 mil por dia) é o preço de o
+            # botão responder em segundos. Ler de minuto em minuto deixaria o
+            # operador olhando o modal parado pelo mesmo tempo.
+            estado = estado_agenda()
+            pedido = pedido_pendente(estado)
+            if vence_catalogo or vence_agenda or pedido:
+                if pedido:
+                    log("agenda_pedida", pedido_em=pedido)
+                # Uma leitura do formulário serve para tudo: as listas moram na
+                # mesma página, e dois logins seguidos só gastariam uma volta a
+                # mais no WVSA.
+                completo = vence_catalogo or bool(pedido)
+                copiar_agenda(completo, estado)
                 # Reagenda mesmo em erro: insistir de 5 em 5 s contra um WVSA
                 # fora do ar é o que transforma indisponibilidade em enxurrada.
-                if vence_catalogo:
+                # O pedido também não se repete: o erro fica gravado e a tela
+                # mostra — tentar de novo é um clique novo.
+                if completo:
                     proximo_catalogo = agora + CATALOGO_HORAS * 3600
-                if vence_agenda:
-                    proxima_agenda = agora + AGENDAMENTO_MINUTOS * 60
+                proxima_agenda = agora + AGENDAMENTO_MINUTOS * 60
 
             n, wvsa = rodada(wvsa)
             if n == 0:
