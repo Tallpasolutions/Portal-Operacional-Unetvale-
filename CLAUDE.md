@@ -2174,28 +2174,44 @@ a.run(port=5001, use_reloader=False)"
   em tela real — a verificação correu com o painel oculto, onde o layout é
   adiado (§6).
 
-- **Anexar ao WVSA uma foto do mapa da troca** foi pedido em 10/09/2026 e
-  ficou para depois. O que já se sabe, para a próxima tentativa não repetir a
-  sondagem:
+- **Mapa do local anexado à OS** em 13/10/2026, sem migration (pedido em
+  10/09). Logo depois de gravar `criada`, o `enviar_os.py` monta um PNG com os
+  trechos do grupo sobre o OpenStreetMap (`coletor/mapa_os.py`) e o anexa à
+  OS. O desfecho vai para `resposta_bruta.mapa`; falha no mapa NUNCA mexe no
+  status da OS, que já existe no WVSA. Desliga com `OS_MAPA_ANEXO=false`, e
+  `enviar_os.py --mapa N` anexa a uma OS já criada (`--mapa-png N` só gera o
+  arquivo, sem tocar no WVSA).
 
-  * o botão é *Fotos/Anexos → Incluir Fotos/Anexos*, um `<a class="abrir-form"
-    data-u-botao-id="anexos" data-u-url="anexos">`;
-  * **o padrão de rota é `/os/{acao}`, não `/os/{id}/{acao}`**: `/os/anexos`
-    responde **500** (a rota existe, falta parâmetro) enquanto
-    `/os/586420/anexos` responde **404** (rota inexistente). `/os/editar` se
-    comporta igual, então vale para todos os botões daquele menu;
-  * `os`, `id`, `os_id` e `OS` na query string: todos 500;
-  * o JS que monta a requisição **não está** em nenhum dos 60 scripts da
-    página nem no `app.js` (1,4 MB) — procurei por `abrir-form`, `u-url` e
-    `anexo`, zero ocorrências.
+  **O contrato foi lido do formulário, não adivinhado.** A sondagem de 10/09
+  procurava em `/os/{ação}`; o anexo é um Dropzone em
+  `/operacional/oshelpers/anexos/{os}` — POST multipart, campo `file`, um
+  arquivo por requisição. Descoberto com o Jhoni anexando uma imagem à mão
+  na #594466 e o formulário lido no Chrome dele (sem enviar nada além). As
+  imagens vão para o S3 do WVSA e aparecem em `/helpers/fotos/os/{os}`, que é
+  como o coletor PROVA o anexo: conta as imagens antes e depois, porque 200
+  do WVSA não prova nada (§6).
 
-  O caminho barato é capturar UM envio real pelo DevTools (aba Network →
-  Payload) em vez de adivinhar parâmetro contra produção.
+  ⚠️ O "Incluir Fotos/Anexos" abre um SweetAlert "Deseja realmente
+  continuar?" por cima do formulário. Não foi clicado; o coletor não passa
+  por ele.
 
-  A outra metade é gerar a imagem: precisa de **Pillow**, que não está em
-  nenhum dos dois venvs, para costurar tiles do OpenStreetMap em zoom 17-18
-  (onde o nome da rua fica legível). Enquanto isso não existe, o técnico tem o
-  link do Google Maps que já vai no script.
+  **O quadro é do NÚCLEO do grupo**, com a mesma regra do mapa do portal
+  (mediana, 1.500 m, dois pontos só com `revisar`): na #586440 (PEREQUE, 14
+  trechos) um trecho caiu a 3,3 km dos outros e, enquadrado, afastava o mapa
+  até os 13 virarem um borrão. Ele vira pino âmbar na borda, apontando para
+  onde está, e a legenda diz "FORA DO LUGAR: a 3,3 km dos outros". ⚠️ A regra
+  agora existe em DOIS lugares (`troca_poste_mapa.js` e `mapa_os.py`); a do
+  JS é a definição.
+
+  A numeração do mapa segue a posição de cada rua no texto `SOLICITACAO`
+  gravado: o "1" é a primeira rua que o técnico lê. Ladrilhos do OSM com
+  User-Agent próprio e cache em `~/unetvale-coletor/tiles` (política de uso
+  do OSM). Precisa de **Pillow** no venv do coletor.
+
+  Provado por script (13 casos: núcleo, zoom, PNG enviado e contado, 200 sem
+  o anexo aparecer, 500, exceção que não propaga, status `criada` intocado,
+  chave desligada) e pela leitura real da contagem (1 anexo na #594466, 0 na
+  #594472).
 
 - ✅ **A primeira OS real saiu em 10/09/2026: `#586420` no WVSA.**
   Governador Celso Ramos · GANCHOS DO MEIO · 14/09, 1 trecho, crítico. HTTP 200,
