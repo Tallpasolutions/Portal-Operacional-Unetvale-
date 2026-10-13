@@ -22,36 +22,56 @@
   </div>
 </div>
 
+<!-- ===================== Filtro (três abas) ===================== -->
+{# O filtro é UM só e vale para Desligamentos, Ordens de Serviço e Mapa —
+   as três sempre recortaram pelo mesmo estado, mas a barra morava dentro de
+   Desligamentos, e em Ordens a lista aparecia filtrada sem dizer por quê.
+   Some só na Revisão, cuja fila não passa por ele. #}
+<div class="toolbar" id="tp-filtros">
+  <label>Período
+    <span class="toggle" id="tp-presets">
+      {# Para trás: o histórico vem do servidor (a página recarrega com o
+         período), porque o pacote padrão só traz de hoje em diante. #}
+      <button data-dias="-30">Últimos 30 dias</button>
+      <button data-dias="0">Hoje</button>
+      <button data-dias="1">Amanhã</button>
+      <button data-dias="7" class="active">7 dias</button>
+      <button data-dias="30">30 dias</button>
+    </span>
+  </label>
+  <label>De <input type="date" id="tp-de"></label>
+  <label>Até <input type="date" id="tp-ate"></label>
+  {# Cidade, risco e tipo de serviço aceitam VÁRIOS valores (13/10/2026):
+     "Itajaí e Navegantes" e "crítico e alto" são as perguntas da operação,
+     e um select de um valor só obrigava a olhar uma cidade por vez. O "só"
+     de cada linha volta a um valor só num clique. `<div>` e não `<label>`:
+     label em volta da lista marcaria o primeiro checkbox ao clicar no
+     nome do campo. #}
+  <div class="campo">Cidade
+    <details class="dropdown" id="tp-cidade"><summary><span data-resumo>Todas</span></summary>
+      <div class="lista-marcar"></div></details>
+  </div>
+  <label id="tp-bairro-wrap" style="display:none">Bairro <select id="tp-bairro"></select></label>
+  <label>Turno
+    <span class="toggle" id="tp-turno">
+      <button data-turno="" class="active">Todos</button>
+      <button data-turno="manha">Manhã</button>
+      <button data-turno="tarde">Tarde</button>
+    </span>
+  </label>
+  <div class="campo">Risco
+    <details class="dropdown" id="tp-risco"><summary><span data-resumo>Todos</span></summary>
+      <div class="lista-marcar"></div></details>
+  </div>
+  <div class="campo">Tipo de serviço
+    <details class="dropdown" id="tp-causa"><summary><span data-resumo>Todos</span></summary>
+      <div class="lista-marcar"></div></details>
+  </div>
+  <button class="btn sec" id="tp-limpar">Limpar filtros</button>
+</div>
+
 <!-- ===================== Desligamentos ===================== -->
 <section data-painel="desligamentos">
-  <div class="toolbar">
-    <label>Período
-      <span class="toggle" id="tp-presets">
-        {# Para trás: o histórico vem do servidor (a página recarrega com o
-           período), porque o pacote padrão só traz de hoje em diante. #}
-        <button data-dias="-30">Últimos 30 dias</button>
-        <button data-dias="0">Hoje</button>
-        <button data-dias="1">Amanhã</button>
-        <button data-dias="7" class="active">7 dias</button>
-        <button data-dias="30">30 dias</button>
-      </span>
-    </label>
-    <label>De <input type="date" id="tp-de"></label>
-    <label>Até <input type="date" id="tp-ate"></label>
-    <label>Cidade <select id="tp-cidade"></select></label>
-    <label id="tp-bairro-wrap" style="display:none">Bairro <select id="tp-bairro"></select></label>
-    <label>Turno
-      <span class="toggle" id="tp-turno">
-        <button data-turno="" class="active">Todos</button>
-        <button data-turno="manha">Manhã</button>
-        <button data-turno="tarde">Tarde</button>
-      </span>
-    </label>
-    <label>Risco <select id="tp-risco"></select></label>
-    <label>Tipo de serviço <select id="tp-causa"></select></label>
-    <button class="btn sec" id="tp-limpar">Limpar filtros</button>
-  </div>
-
   <p class="subnote" id="tp-subnote"></p>
   <div class="chips" id="tp-chips"></div>
 

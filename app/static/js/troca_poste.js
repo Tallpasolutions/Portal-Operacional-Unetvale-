@@ -50,8 +50,12 @@
   // chega, e o link com o período continua valendo se for mandado a alguém.
   const PEDIDO = TP.pedido || TP.padrao;
   const CARREGADO = TP.carregado || { de: HOJE, ate: null };
-  const estado = { de: PEDIDO.de, ate: PEDIDO.ate, cidade: "", bairro: "",
-                   risco: "", causa: "", turno: "", ordem: null, desc: false };
+  // Cidade, risco e tipo de serviço são CONJUNTOS: vazio = todos. O bairro
+  // segue um só, com chave "cidade|bairro" — com duas cidades marcadas,
+  // "CENTRO" sozinho seria dois lugares.
+  const estado = { de: PEDIDO.de, ate: PEDIDO.ate, cidades: new Set(), bairro: "",
+                   riscos: new Set(), causas: new Set(), turno: "", ordem: null, desc: false };
+  const chaveBairro = (l) => `${l.cidade}|${l.bairro}`;
 
   // Turno pelo início do desligamento: até 12:00 é manhã, depois é tarde.
   // Sem hora de início não dá para afirmar o turno — a linha fica de fora de
@@ -76,10 +80,67 @@
     return LINHAS.filter((l) =>
       noPeriodo(l) &&
       (o.semTurno || noTurno(l)) &&
-      (o.semCidade || !estado.cidade || l.cidade === estado.cidade) &&
-      (o.semBairro || !estado.bairro || l.bairro === estado.bairro) &&
-      (o.semRisco || !estado.risco || l.classificacao === estado.risco) &&
-      (o.semCausa || !estado.causa || l.causa_categoria === estado.causa));
+      (o.semCidade || !estado.cidades.size || estado.cidades.has(l.cidade)) &&
+      (o.semBairro || !estado.bairro || chaveBairro(l) === estado.bairro) &&
+      (o.semRisco || !estado.riscos.size || estado.riscos.has(l.classificacao)) &&
+      (o.semCausa || !estado.causas.size || estado.causas.has(l.causa_categoria)));
+  }
+
+  // ---- seleção múltipla (`.dropdown` de marcar) ---------------------------
+  //
+  // A lista é redesenhada a cada filtro (as contagens mudam), mas só é
+  // RECRIADA quando as opções mudam: com as mesmas opções, atualiza contagem
+  // e marcação no lugar. Recriar o HTML a cada clique troca o nó sob o cursor
+  // e o clique seguinte cai num nó já removido (CLAUDE.md §6, "chips que se
+  // reconstroem") — numa lista que fica aberta enquanto se marca, é o caso.
+  function desenharMulti(id, opcoes, marcados, vazio, total) {
+    const det = $(id);
+    const lista = det.querySelector(".lista-marcar");
+    const assinatura = opcoes.map((o) => o.valor).join("\u0001");
+    if (lista.dataset.assinatura !== assinatura) {
+      lista.dataset.assinatura = assinatura;
+      lista.innerHTML = `<button type="button" class="todos-marcar" data-todos>${vazio}</button>` +
+        opcoes.map((o) => `
+          <label class="linha-marcar"><input type="checkbox" value="${escHtml(o.valor)}">
+            <span>${escHtml(o.rotulo)} <span class="n"></span></span>
+            <button type="button" class="so" data-so="${escHtml(o.valor)}" title="Só esta opção">só</button>
+          </label>`).join("");
+    }
+    const porValor = new Map(opcoes.map((o) => [o.valor, o]));
+    lista.querySelector("[data-todos]").textContent = `${vazio} (${fmt(total)})`;
+    lista.querySelectorAll(".linha-marcar").forEach((linha) => {
+      const cb = linha.querySelector("input");
+      cb.checked = marcados.has(cb.value);
+      linha.querySelector(".n").textContent = `(${fmt(porValor.get(cb.value).n)})`;
+    });
+    const escolhidos = opcoes.filter((o) => marcados.has(o.valor));
+    det.querySelector("[data-resumo]").textContent = !escolhidos.length ? vazio
+      : escolhidos.length === 1 ? escolhidos[0].rotulo
+      : `${escolhidos.length} escolhidos`;
+    det.querySelector("summary").classList.toggle("on", escolhidos.length > 0);
+  }
+
+  /** Liga um `.dropdown` ao conjunto do estado. Delegado no contêiner, que
+   * sobrevive aos redesenhos da lista. */
+  function ligarMulti(id, conjunto, depois) {
+    const lista = $(id).querySelector(".lista-marcar");
+    lista.addEventListener("change", (e) => {
+      const cb = e.target.closest("input[type=checkbox]");
+      if (!cb) return;
+      if (cb.checked) estado[conjunto].add(cb.value); else estado[conjunto].delete(cb.value);
+      if (depois) depois();
+      render();
+    });
+    lista.addEventListener("click", (e) => {
+      const so = e.target.closest("[data-so]");
+      const todos = e.target.closest("[data-todos]");
+      if (!so && !todos) return;
+      // Dentro do <label>: sem isto o clique no "só" também alternaria o checkbox.
+      e.preventDefault();
+      estado[conjunto] = new Set(so ? [so.dataset.so] : []);
+      if (depois) depois();
+      render();
+    });
   }
 
   // ---- selects dependentes do período ------------------------------------
@@ -96,14 +157,15 @@
     const ordenado = [...cont.entries()].sort((a, b) => b[1].critico - a[1].critico || b[1].total - a[1].total);
     const total = [...cont.values()].reduce((s, c) => s + c.total, 0);
 
-    if (estado.cidade && !cont.has(estado.cidade)) {
-      avisar(`${estado.cidade} não tem desligamento neste período — filtro de cidade removido.`);
-      estado.cidade = ""; estado.bairro = "";
+    const sumidas = [...estado.cidades].filter((c) => !cont.has(c));
+    if (sumidas.length) {
+      avisar(`${sumidas.join(", ")} não ${sumidas.length > 1 ? "têm" : "tem"} desligamento neste período — ${sumidas.length > 1 ? "saíram" : "saiu"} do filtro de cidade.`);
+      sumidas.forEach((c) => estado.cidades.delete(c));
+      estado.bairro = "";
     }
-    const sel = $("#tp-cidade");
-    sel.innerHTML = `<option value="">Todas (${total})</option>` +
-      ordenado.map(([nome, c]) => `<option value="${nome}">${nome} (${c.total})</option>`).join("");
-    sel.value = estado.cidade;
+    desenharMulti("#tp-cidade",
+      ordenado.map(([nome, c]) => ({ valor: nome, rotulo: nome, n: c.total })),
+      estado.cidades, "Todas", total);
   }
 
   // O atributo `hidden` não basta aqui: `.toolbar label` tem `display:flex` no
@@ -113,18 +175,23 @@
 
   function preencherBairros() {
     const wrap = $("#tp-bairro-wrap");
-    if (!estado.cidade) { mostrar(wrap, false); estado.bairro = ""; return; }
+    if (!estado.cidades.size) { mostrar(wrap, false); estado.bairro = ""; return; }
     const cont = new Map();
     for (const l of aplicar({ semBairro: true })) {
-      if (l.bairro) cont.set(l.bairro, (cont.get(l.bairro) || 0) + 1);
+      if (l.bairro) cont.set(chaveBairro(l), (cont.get(chaveBairro(l)) || 0) + 1);
     }
     if (!cont.size) { mostrar(wrap, false); estado.bairro = ""; return; }
     if (estado.bairro && !cont.has(estado.bairro)) estado.bairro = "";
     mostrar(wrap, true);
+    // Com mais de uma cidade, o nome dela vai junto: "CENTRO" existe em várias.
+    const comCidade = estado.cidades.size > 1;
     const sel = $("#tp-bairro");
     sel.innerHTML = `<option value="">Todos</option>` +
       [...cont.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-        .map(([b, n]) => `<option value="${b}">${b} (${n})</option>`).join("");
+        .map(([k, n]) => {
+          const [cid, b] = k.split("|");
+          return `<option value="${escHtml(k)}">${escHtml(b)}${comCidade ? ` · ${escHtml(cid)}` : ""} (${n})</option>`;
+        }).join("");
     sel.value = estado.bairro;
   }
 
@@ -142,22 +209,21 @@
       if (l.causa_categoria) cont[l.causa_categoria] = (cont[l.causa_categoria] || 0) + 1;
     }
     const chaves = Object.keys(cont).sort((a, b) => cont[b] - cont[a]);
-    const sel = $("#tp-causa");
-    sel.innerHTML = `<option value="">Todos (${fmt(base.length)})</option>` +
-      chaves.map((c) => `<option value="${c}">${ROTULO_CAUSA[c] || c} (${fmt(cont[c])})</option>`).join("");
-    if (estado.causa && !cont[estado.causa]) estado.causa = "";
-    sel.value = estado.causa;
+    [...estado.causas].forEach((c) => { if (!cont[c]) estado.causas.delete(c); });
+    desenharMulti("#tp-causa",
+      chaves.map((c) => ({ valor: c, rotulo: ROTULO_CAUSA[c] || c, n: cont[c] })),
+      estado.causas, "Todos", base.length);
   }
 
   function preencherRiscos() {
+    const base = aplicar({ semRisco: true });
     const cont = new Map();
-    for (const l of aplicar({ semRisco: true })) cont.set(l.classificacao, (cont.get(l.classificacao) || 0) + 1);
-    const sel = $("#tp-risco");
+    for (const l of base) cont.set(l.classificacao, (cont.get(l.classificacao) || 0) + 1);
     const presentes = ORDEM.filter((r) => cont.has(r));
-    if (estado.risco && !cont.has(estado.risco)) estado.risco = "";
-    sel.innerHTML = `<option value="">Todos</option>` +
-      presentes.map((r) => `<option value="${r}">${ROTULO[r] || r} (${cont.get(r)})</option>`).join("");
-    sel.value = estado.risco;
+    [...estado.riscos].forEach((r) => { if (!cont.has(r)) estado.riscos.delete(r); });
+    desenharMulti("#tp-risco",
+      presentes.map((r) => ({ valor: r, rotulo: ROTULO[r] || r, n: cont.get(r) })),
+      estado.riscos, "Todos", base.length);
   }
 
   let timerAviso = null;
@@ -873,6 +939,8 @@
     // os "já com OS" com selo verde dizia o contrário.
     const cand = noRecorte.filter((g) => (!g.ordem || reenviavel(g.ordem)) && (g.data || "") >= HOJE);
     const abertos = noRecorte.filter((g) => g.ordem && !reenviavel(g.ordem));
+    candidatosOs = cand;
+    renderKpisOs();
 
     $("#tp-cand-contagem").textContent =
       `${fmt(cand.length)} ${cand.length === 1 ? "grupo" : "grupos"} no recorte` +
@@ -972,6 +1040,24 @@
     };
   }
 
+  // Os dois primeiros KPIs seguem o FILTRO, como a lista logo abaixo: com a
+  // barra de filtro nesta aba (13/10/2026), "89 grupos candidatos" em cima
+  // de uma lista de 8 de Penha parecia defeito — e já não batia antes, porque
+  // contava todo o pacote carregado, não o período. Os de status são da
+  // tabela de ordens, que não passa pelo filtro.
+  let kpisStatusOs = [];
+  // Os MESMOS candidatos da lista (sem OS, de hoje em diante), para o número
+  // de cima fechar com o "N grupos no recorte" do cartão logo abaixo.
+  let candidatosOs = [];
+  function renderKpisOs() {
+    const criticos = candidatosOs.filter((g) => g.classificacao === "critico");
+    $("#tp-os-kpis").innerHTML = [
+      `<div class="kpi"><div class="v">${fmt(candidatosOs.length)}</div><div class="l">Candidatos a OS (bairro · dia)</div></div>`,
+      `<div class="kpi"><div class="v">${fmt(criticos.length)}</div><div class="l">Deles, críticos</div></div>`,
+      ...kpisStatusOs,
+    ].join("");
+  }
+
   function renderOrdens() {
     // Três estados, não dois. Descrever o envio como se ele acontecesse, com o
     // botão em ensaio, seria pior do que não explicar nada.
@@ -1002,14 +1088,12 @@
     }
     const os = TP.ordens || [];
     const conta = (s) => os.filter((o) => o.status === s).length;
-    const criticos = GRUPOS.filter((g) => g.classificacao === "critico");
-    $("#tp-os-kpis").innerHTML = [
-      `<div class="kpi"><div class="v">${fmt(GRUPOS.length)}</div><div class="l">Grupos candidatos (bairro · dia)</div></div>`,
-      `<div class="kpi"><div class="v">${fmt(criticos.length)}</div><div class="l">Deles, críticos</div></div>`,
+    kpisStatusOs = [
       `<div class="kpi"><div class="v">${fmt(conta("rascunho"))}</div><div class="l">Rascunhos</div></div>`,
       `<div class="kpi"><div class="v">${fmt(conta("ensaio"))}</div><div class="l">Ensaios</div></div>`,
       `<div class="kpi"><div class="v">${fmt(conta("criada"))}</div><div class="l">Enviadas ao WVSA</div></div>`,
-    ].join("");
+    ];
+    renderKpisOs();
     $("#tp-os-tabela").querySelector("tbody").innerHTML = os.map((o) => `
       <tr>
         <td><span class="badge ${o.status === "criada" ? "badge-verde" : o.status === "erro" ? "badge-vermelho" : o.status === "ensaio" ? "badge-ambar" : "badge-cinza"}">${o.status}</span></td>
@@ -1113,10 +1197,20 @@
   });
   $("#tp-de").addEventListener("change", (e) => { estado.de = e.target.value; mudouPeriodo(); });
   $("#tp-ate").addEventListener("change", (e) => { estado.ate = e.target.value; mudouPeriodo(); });
-  $("#tp-cidade").addEventListener("change", (e) => { estado.cidade = e.target.value; estado.bairro = ""; render(); });
+  ligarMulti("#tp-cidade", "cidades", () => { estado.bairro = ""; });
+  ligarMulti("#tp-risco", "riscos");
+  ligarMulti("#tp-causa", "causas");
   $("#tp-bairro").addEventListener("change", (e) => { estado.bairro = e.target.value; render(); });
-  $("#tp-risco").addEventListener("change", (e) => { estado.risco = e.target.value; render(); });
-  $("#tp-causa").addEventListener("change", (e) => { estado.causa = e.target.value; render(); });
+
+  // Um `.dropdown` aberto por vez, e clicar fora fecha: são três listas
+  // lado a lado na barra, e abertas juntas uma cobriria a outra.
+  const DROPS = [...document.querySelectorAll("#tp-filtros .dropdown")];
+  DROPS.forEach((d) => d.addEventListener("toggle", () => {
+    if (d.open) DROPS.forEach((x) => { if (x !== d) x.open = false; });
+  }));
+  document.addEventListener("click", (e) => {
+    DROPS.forEach((d) => { if (d.open && !d.contains(e.target)) d.open = false; });
+  });
   $("#tp-turno").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-turno]");
     if (!b) return;
@@ -1125,8 +1219,8 @@
     render();
   });
   $("#tp-limpar").addEventListener("click", () => {
-    Object.assign(estado, { de: TP.padrao.de, ate: TP.padrao.ate, cidade: "", bairro: "",
-                            risco: "", causa: "", turno: "", ordem: null, desc: false });
+    Object.assign(estado, { de: TP.padrao.de, ate: TP.padrao.ate, cidades: new Set(), bairro: "",
+                            riscos: new Set(), causas: new Set(), turno: "", ordem: null, desc: false });
     [...$("#tp-turno").children].forEach((x) => x.classList.toggle("active", x.dataset.turno === ""));
     mudouPeriodo();
   });
@@ -1164,6 +1258,8 @@
     document.querySelectorAll("section[data-painel]").forEach((s) => {
       s.hidden = s.dataset.painel !== b.dataset.aba;
     });
+    // `style.display`: `.toolbar` tem display próprio e venceria o `hidden`.
+    mostrar($("#tp-filtros"), b.dataset.aba !== "revisao");
     const u = new URL(location.href);
     u.searchParams.set("aba", b.dataset.aba);
     history.replaceState(null, "", u);

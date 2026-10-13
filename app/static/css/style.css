@@ -114,6 +114,12 @@ body.collapsed .brand-text, body.collapsed .menu a span:not(.ic){ display:none; 
 /* ===== Toolbar / filtros ===== */
 .toolbar{ display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-bottom:16px; }
 .toolbar label{ font-size:12.5px; font-weight:600; color:var(--muted); display:flex; align-items:center; gap:6px; }
+/* Campo da barra que NÃO pode ser `<label>`: um `.dropdown` de marcar dentro
+   de um label marcaria o primeiro checkbox ao clicar no nome do campo. */
+.toolbar .campo{ font-size:12.5px; font-weight:600; color:var(--muted); display:flex; align-items:center; gap:6px; }
+.toolbar .dropdown{ min-width:150px; }
+.toolbar .dropdown > .lista-marcar{ max-height:320px; min-width:240px; font-weight:500; }
+.toolbar .dropdown > summary.on{ border-color:var(--brand); color:var(--brand-d); font-weight:600; }
 /* `date`, `time` e `search` estavam de fora desta lista, e por isso caíam no
    visual nativo do navegador — borda quadrada, fonte do sistema, altura
    diferente — no meio de campos arredondados. Aparecia no filtro das Reuniões
@@ -336,7 +342,8 @@ tr.clicavel{ cursor:pointer; }
 
   /* Alvos de dedo: no campo a atualização é feita em pé, com uma mão. */
   .toolbar{ gap:10px; }
-  .toolbar label, .toolbar select, .toolbar input{ width:100%; }
+  .toolbar label, .toolbar select, .toolbar input, .toolbar .campo{ width:100%; }
+  .toolbar .campo .dropdown{ flex:1; min-width:0; }
   .field input, .field select, .field textarea{ font-size:16px; }  /* 16px evita o zoom do iOS */
   .btn, .btn.sec{ padding:11px 18px; }
   #rng-progresso{ height:28px; }
@@ -839,6 +846,19 @@ textarea.acao-p-titulo{ resize:none; overflow:hidden; font-size:19px; font-weigh
 .dropdown[open] > summary::after{ content:"▴"; }
 .dropdown > .lista-marcar{ position:absolute; z-index:30; left:0; right:0; margin-top:4px;
   box-shadow:0 10px 28px rgba(11,23,39,.14); }
+/* "só": escolhe aquela opção sozinha, num clique, em vez de desmarcar as
+   outras uma a uma. Aparece no hover onde há mouse; no toque fica sempre à
+   vista, porque lá não existe hover. */
+.lista-marcar .linha-marcar .so{ margin-left:auto; border:0; background:transparent;
+  color:var(--brand); font-size:12px; font-weight:700; cursor:pointer; padding:2px 6px; border-radius:5px; }
+.lista-marcar .linha-marcar .so:hover{ background:var(--branco); }
+@media (hover:hover){
+  .lista-marcar .linha-marcar .so{ visibility:hidden; }
+  .lista-marcar .linha-marcar:hover .so{ visibility:visible; }
+}
+.lista-marcar .todos-marcar{ display:block; width:100%; text-align:left; border:0; background:transparent;
+  padding:5px 8px; border-radius:6px; font-size:13px; font-weight:600; color:var(--muted); cursor:pointer; }
+.lista-marcar .todos-marcar:hover{ background:var(--brand-l); color:var(--ink); }
 
 
 /* ===== Módulo Dashboard ===== */
