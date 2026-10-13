@@ -591,7 +591,16 @@ def anexar_mapa(ordem, numero, wvsa):
         # de APARECER na lista de fotos da OS.
         feito["ok"] = status < 400 and depois > antes
         if not feito["ok"]:
-            feito["erro"] = (f"WVSA respondeu HTTP {status}" if status >= 400
+            # A frase do WVSA vem antes do primeiro " | " ("Você não deveria
+            # estar aqui | <id> | <rota>"). Foi a resposta da #594276, que
+            # estava FECHADA: OS fechada perde o "Incluir Fotos/Anexos" e
+            # recusa o anexo — "HTTP 500" sozinho não dizia isso.
+            frase = (texto or "").split(" | ")[0].strip()
+            frase = "" if frase.startswith("<") else frase[:160]
+            feito["erro"] = (f"WVSA respondeu HTTP {status}" + (f": {frase}" if frase else "")
+                             + (" (OS fechada no WVSA não aceita anexo)"
+                                if "não deveria estar aqui" in frase else "")
+                             if status >= 400
                              else "o WVSA respondeu, mas o anexo não apareceu na OS")
     except Exception as e:
         feito.update({"ok": False, "erro": str(e)[:300]})

@@ -2221,6 +2221,15 @@ a.run(port=5001, use_reloader=False)"
   agora existe em DOIS lugares (`troca_poste_mapa.js` e `mapa_os.py`); a do
   JS é a definição.
 
+  ⚠️ **Todos "fora do lugar" = nenhum.** Na #594276 os três trechos eram
+  `revisar` e estavam a quilômetros entre si: a regra marcou os três, o
+  núcleo ficou vazio e o desenho quebrava. Sem núcleo não há referência para
+  acusar ninguém — o quadro pega todos e a legenda marca os duvidosos.
+
+  ⚠️ **OS fechada no WVSA não aceita anexo**: perde o botão "Incluir
+  Fotos/Anexos" e responde HTTP 500 "Você não deveria estar aqui" (a mesma
+  #594276, "Fechada - ERROINTERNO"). O erro registrado traz essa frase.
+
   A numeração do mapa segue a posição de cada rua no texto `SOLICITACAO`
   gravado: o "1" é a primeira rua que o técnico lê. Ladrilhos do OSM com
   User-Agent próprio e cache em `~/unetvale-coletor/tiles` (política de uso
