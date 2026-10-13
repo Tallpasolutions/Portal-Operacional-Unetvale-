@@ -798,6 +798,34 @@ E o grupo sai da lista **na hora do clique**, sem esperar recarregar
 (`marcarAberto`): é exatamente na janela entre o clique e o próximo
 carregamento que alguém clica de novo.
 
+**Ordem que não chegou ao WVSA NÃO sai da lista: vira "Tentar de novo"**
+(09/10/2026). `erro` e `rascunho` (o clique que caiu entre criar e autorizar)
+ficam entre os candidatos, com o motivo em vermelho embaixo do bairro, e o
+botão também aparece na tabela de Ordens. Antes, o "Erro — tentar de novo"
+refazia a CRIAÇÃO: o banco devolvia a mesma ordem pela `chave_idempotencia`,
+nada era reenviado, e depois de recarregar o grupo ia para os "já com OS" com
+selo verde — a falha ficava presa para sempre.
+
+O reenvio é `POST /troca-poste/os/<id>/enviar` com `{campos}` — o mesmo modal,
+já preenchido com a escolha anterior, e o que for trocado é gravado
+(`tp.CAMPOS_REENVIO`; texto, cidade, bairro e data são o fato do grupo e não
+mudam). Três regras:
+
+* **o horário antigo só volta selecionado se ainda estiver livre.** As duas
+  recusas do WVSA até 09/10/2026 foram "O campo selecionado da agenda já está
+  sendo usado" — o slot foi ocupado entre a cópia da agenda (15 min) e o
+  envio. Repetir com o mesmo slot falharia igual;
+* **falha de CONEXÃO é ambígua e a tela diz isso** (`erro_ambiguo`, prefixo
+  `falha na requisição` do `enviar_os.py`). "Connection reset" depois de mandar
+  o corpo não diz se o WVSA gravou; o modal pede para conferir a listagem
+  antes, ou a OS sai duas vezes. HTTP 4xx/5xx é recusa limpa;
+* **a troca de status é condicional** (`status=eq.<lido>` no PATCH): dois
+  cliques simultâneos promovem a ordem uma vez só. Data passada volta 400.
+
+O motivo vem de `tp.motivo_erro`: o `erro` gravado dizia só "WVSA respondeu
+HTTP 500", e a frase útil estava no corpo da resposta
+(`resposta_bruta->>corpo`, lido sem trazer o JSON inteiro).
+
 **Clicar na linha abre "onde é" e "o que vai".** Um mini-mapa com os trechos
 daquele grupo, de perto, e o script ao lado — em dois blocos ROTULADOS. O mapa
 não tem como entrar no texto da OS (o envio manda `g.script_os`, do pacote do
@@ -871,6 +899,25 @@ select fica desabilitado e a nota explica, em vez de a tela parecer quebrada.
 ⚠️ A trava de "catálogo vazio é sessão expirada" **não** vale para a agenda:
 ela pode estar legitimamente vazia (ninguém agendou nada), e recusar isso
 deixaria slots cancelados vivos no portal para sempre.
+
+**"Atualizar do WVSA" no modal: a agenda sob demanda** (migration `0019`,
+13/10/2026). O operador libera a agenda de um técnico no WVSA, volta ao portal
+e o horário não está lá — a cópia é de 15 em 15 min. O botão abaixo do select
+deixa um PEDIDO em `troca_poste.agenda_sincronizacao` (uma linha só, `check (id
+= 1)`: dois cliques são o mesmo pedido), o `enviar_os.py` atende no ciclo
+seguinte (5 s) copiando o formulário INTEIRO numa leitura, e a tela espera até
+90 s e redesenha o modal **sem fechar e sem perder o que já foi escolhido**
+(equipe, período, horário se ainda livre). Ao lado do botão, "Agenda copiada do
+WVSA às 14:32 (há 12 min)" — é o que explica por que a lista não tem o horário.
+
+⚠️ Atendido é `atendido_pedido_em >= pedido_em`, e os DOIS carimbos são do
+portal: o coletor copia o `pedido_em` que leu ao começar. Comparar com o
+relógio do Mac faria uma cópia iniciada antes do clique parecer posterior a
+ele. Clique que chega durante a cópia fica pendente e é atendido no ciclo
+seguinte. Falha (fora da VPN, sessão expirada) também marca atendido, com o
+`erro` — insistir de 5 em 5 s seria enxurrada; tentar de novo é outro clique.
+Sem a tabela (404 `PGRST205`), o coletor desliga só o pedido e segue enviando
+OS; a rota responde 503.
 
 ⚠️ **`DATA` e `DATAFIM` vão em ISO, não em DD/MM/AAAA.** São
 `<input type="date">` no formulário — conferido no HTML em 09/09/2026, com o
@@ -1377,6 +1424,15 @@ bater com o percentual do CMT logo acima, na mesma tela. Peça o recorte AO
 relatório (`motivos_grupos : problema tecnico`), como faz
 `_motivos_do_grupo_tecnico`.
 
+**Copiar o coletor para `~/unetvale-coletor` é passo de deploy — e foi
+esquecido.** O TMA/TMF, a Cat 6, o drill do IDF e o técnico do cancelamento
+entraram na `main` em 29/09/2026, mas o `enviar.py` e o `gerencial.py` em
+execução continuaram os de 29-31/08 até 09/10/2026: dez dias com o Dashboard
+pronto para dados que nenhuma coleta produzia, e `ger_atendimento` sem linha
+nenhuma em `dados_modulo` — sem erro em lugar algum, porque módulo que não é
+coletado não falha. Depois de todo merge que toque em `coletor/`, confira:
+`for f in coletor/*.py; do diff -q "$f" ~/unetvale-coletor/; done`.
+
 **`.charts-2` tinha mínimo de 380px, maior que um iPhone de 375.** A coluna
 estourava a página em ~27px e o corpo inteiro rolava de lado, em todos os
 módulos que usam a classe. Agora é `minmax(min(380px,100%),1fr)`. E
@@ -1684,6 +1740,14 @@ Pedindo só 01/09/2026 vieram 872 conversas de 01/09 e mais 69 abertas de
 28-29/09. O `fim` é respeitado; é o "aberto" que escapa. O corte é refeito
 por "Iniciado em" e a sala (id do link `/live/<id>`) deduplica entre janelas.
 
+**O RRO devolve HTTP 500 quando a janela pesa — e um 500 jogava o ano fora.**
+O servidor do WVSA desiste em ~30 s. Medido em 09/10/2026: 01/10 a 07/10 dava
+500 sempre, e cada dia sozinho respondia 200 (o 02/10 teve 3.675 conversas,
+~3x um dia comum). Como o coletor junta os meses em memória e só grava no fim,
+o 500 na ÚLTIMA janela descartou 17 min de backfill — e a rodada diária
+falharia todo dia de outubro. `coletar_atendimento` agora parte ao meio a
+janela que volta 5xx, até um dia; um dia que ainda falha sobe como erro.
+
 **`data-order` da célula de tempo do RRO não é o tempo.** "30 minutos 19
 segundos" (1819 s) vinha com `data-order=654394`. Lê-se o texto.
 
@@ -1788,6 +1852,10 @@ lembre que agora é um processo residente: a 2s eram ~43 mil consultas por dia
 ao PostgREST para uma fila que enche algumas vezes por semana. O teto é a tela,
 que espera o desfecho por 90 s. Ele não escreve log quando a fila está vazia,
 então `enviar_os.log` só cresce com atividade.
+
+Desde a `0019` cada ciclo faz DUAS leituras: a fila e a linha de
+`agenda_sincronizacao` (o pedido do botão "Atualizar do WVSA", §4) — ~17 mil
+a mais por dia, o preço de o botão responder em segundos.
 
 O segundo precisa do `pnpm` por **caminho absoluto**: o launchd roda com
 `PATH=/usr/bin:/bin:/usr/sbin:/sbin` e um `pnpm` solto sai com "command not
@@ -2334,6 +2402,48 @@ a.run(port=5001, use_reloader=False)"
   não aparece no ranking, sem erro em lugar nenhum. Na medição de 01/09/2026
   foram 0 falhas em 132, mas nada avisaria se não fosse.
 
+- **"Tentar de novo" na OS da Troca de Poste** em 09/10/2026, sem migration
+  (§4). Antes, o coletor de OS foi conferido em produção: agente de pé, 59 OS
+  criadas (três delas no próprio dia), 3 em `erro` — duas por agenda ocupada,
+  uma por conexão caída — e as três de datas já passadas.
+
+  Provado pelo `test_client` (34 casos): motivo extraído do corpo do WVSA,
+  falha de rede marcada ambígua, campos limpos, reenvio com troca condicional
+  de status, data passada 400, `criada`/`enviando`/`pronta` 409, corrida 409,
+  id que não é uuid 404 (antes 500), envio desligado 503. No navegador, num
+  servidor de ensaio que recusava toda escrita, com duas ordens simuladas:
+  modal preenchido com a escolha anterior, horário ocupado avisado, segunda
+  falha mantendo o botão, terceira tentativa saindo `criada` sem duplicar a
+  linha, aviso de conferência na falha de rede; desktop e 375 px, console
+  limpo.
+
+  **Ainda não exercitado:** o reenvio real de uma ordem em produção (nenhuma
+  em `erro` com data futura) e o PATCH condicional contra o PostgREST de
+  verdade — o filtro `status=eq.` tem a forma do `id=eq.` que o `update` já
+  usa.
+
+- **"Atualizar do WVSA" no modal da OS** em 13/10/2026, migration `0019`
+  (`troca_poste.agenda_sincronizacao`), aplicada em produção pelo Jhoni no
+  mesmo dia e conferida pelo PostgREST (linha 1 semeada, RLS ligado, `anon`
+  sem acesso, `id = 2` recusado). O porquê está no §4.
+
+  Coletor por script (17 casos): pendente/atendido nos limites (mesmo
+  carimbo, clique durante a cópia, fusos diferentes), fora da VPN grava erro e
+  marca atendido, sessão expirada vira erro sem gravar nada, leitura combinada
+  inativa o slot que sumiu, sem tabela desliga só o pedido. Rotas pelo
+  `test_client` (16 casos): pedido, atendido com catálogos, falha com motivo,
+  seis `?pedido=` ruins com 400, sem migration 503. No navegador, num servidor
+  de ensaio que lia produção e recusava toda escrita, com o clique do mouse:
+  28 → 29 horários com equipe, período e horário mantidos; erro de VPN;
+  coletor mudo ("Aguardando o coletor…" e a mensagem dos 90 s); 375 px sem
+  rolar de lado (o select do agendamento passava 4 px — corrigido); console
+  limpo.
+
+  **Ainda não exercitado:** o `enviar_os.py` novo rodando de verdade — ele
+  precisa ser copiado para `~/unetvale-coletor` e o agente reiniciado
+  (`launchctl kickstart -k gui/$(id -u)/net.unetvale.enviar-os`). Até lá o
+  botão termina em "o coletor não respondeu em 90 s".
+
 - **Dashboard: filtro global, cross-filter, Cat 6, IDF detalhado, TMA/TMF e
   técnico ofensor do cancelamento** entrou em 29/09/2026, sem migration (tudo
   em `dados_modulo`; metas novas `idf_alerta`, `tma_chat`, `tmf_chat` pela lista
@@ -2350,10 +2460,15 @@ a.run(port=5001, use_reloader=False)"
   `test_client` com payload de produção, vazio, novo e malformado: todas 200.
   A página do Dashboard vai de ~106 KB para ~244 KB com os dados novos.
 
+  **A cópia do coletor só aconteceu em 09/10/2026** (§6): até ali,
+  `ger_atendimento` não existia em `dados_modulo`. Copiados `enviar.py` e
+  `gerencial.py` (backup em `~/unetvale-coletor/bak-20261009-1808/`), o TMA/TMF
+  de outubro gravou em produção (11.255 conversas, 271 pares) depois da
+  correção do 500 do RRO, e o `/dashboard` passou a servir o bloco.
+
   **Ainda não exercitado:**
-  * **a coleta nova gravando em produção** — espera o deploy do app (§6);
-    depois, copiar o `coletor/` para `~/unetvale-coletor` e rodar
-    `enviar.py --so ger_categorias --full` (Cat 6 do ano) e `--so ger_atendimento --full`;
+  * **`enviar.py --so ger_categorias --full`** (Cat 6 dos meses antes de
+    29/09) — a rodada normal já traz Cat 6 do mês corrente e do anterior;
   * **o supervisor no filtro global** com vínculos reais — o select aparece
     para o admin, mas não foi exercitado com um alcance escolhido;
   * **a cadência diária pelo launchd** — a decisão foi provada com Supabase e

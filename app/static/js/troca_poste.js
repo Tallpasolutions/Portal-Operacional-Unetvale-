@@ -15,7 +15,9 @@
   const HOJE = TP.hoje;
   const ENVIO_LIGADO = TP.envio_os_habilitado === true;
   const ENSAIO = TP.envio_os_ensaio !== false;
-  const CATALOGO = TP.catalogos || {};
+  // `let`: o botão "Atualizar do WVSA" do modal troca o catálogo inteiro pelo
+  // que o coletor acabou de copiar, sem recarregar a página.
+  let CATALOGO = TP.catalogos || {};
   const ROTULO_CAUSA = TP.rotulos_causa || {};
 
   // O grupo vem do servidor só com os `ids` — os trechos são procurados aqui,
@@ -352,7 +354,7 @@
       return `
         <tr class="tp-grupo" data-grupo="${g.chave}" style="cursor:pointer">
           <td><span class="badge ${BADGE[g.classificacao] || "badge-cinza"}">${ROTULO[g.classificacao] || g.classificacao}</span></td>
-          <td><b>${g.cidade}</b><div style="font-size:12px;color:var(--muted)">${g.bairro || "sem bairro"}</div></td>
+          <td><b>${g.cidade}</b><div style="font-size:12px;color:var(--muted)">${g.bairro || "sem bairro"}</div>${motivoHtml(g.ordem)}</td>
           <td>
             <b>${g.itens.length} ${g.itens.length === 1 ? "trecho" : "trechos"}</b>
             <span class="tp-seta" style="color:var(--muted)">${aberto ? "▾" : "▸"}</span>
@@ -396,6 +398,24 @@
    * a opção neutra e a OS sai como saía antes — sem escolha, não quebrada.
    */
   function montarCamposOs() {
+    desenharOpcoesOs();
+    // `infra` é o padrão histórico (era o valor cravado no código), mas agora é
+    // um default visível que dá para trocar, não uma decisão escondida.
+    $("#tp-os-executor").value = "infra";
+
+    const conta = () => {
+      const n = $("#tp-os-tecnicos").querySelectorAll("input:checked").length;
+      $("#tp-os-tec-conta").textContent = n ? `· ${n} selecionado${n > 1 ? "s" : ""}` : "";
+    };
+    // Ouvinte no contêiner, preso UMA vez: a lista é redesenhada quando a
+    // agenda é atualizada, e um ouvinte por desenho contaria em dobro.
+    $("#tp-os-tecnicos").addEventListener("change", conta);
+    conta();
+    $("#tp-os-agenda-atualizar").addEventListener("click", atualizarAgenda);
+  }
+
+  /** Os selects fixos e a lista da equipe, a partir do CATALOGO atual. */
+  function desenharOpcoesOs() {
     const opcoes = (lista, vazio) =>
       `<option value="">${vazio}</option>` +
       (lista || []).map((o) => `<option value="${o.valor}">${o.rotulo}</option>`).join("");
@@ -403,9 +423,6 @@
     $("#tp-os-executor").innerHTML = opcoes(CATALOGO.executor, "— escolher —");
     $("#tp-os-periodo").innerHTML = opcoes(CATALOGO.periodo, "não definir");
     $("#tp-os-tipo-tecnico").innerHTML = opcoes(CATALOGO.tipo_tecnico, "não definir");
-    // `infra` é o padrão histórico (era o valor cravado no código), mas agora é
-    // um default visível que dá para trocar, não uma decisão escondida.
-    $("#tp-os-executor").value = "infra";
 
     const grupos = CATALOGO.tecnicos_por_empresa || [];
     $("#tp-os-tecnicos").innerHTML = grupos.length
@@ -417,13 +434,6 @@
               <span>${t.rotulo}</span>
             </label>`).join("")}`).join("")
       : `<div style="padding:12px;color:var(--muted);font-size:12.5px">Catálogo do WVSA ainda não sincronizado — a OS sairá sem equipe designada.</div>`;
-
-    const conta = () => {
-      const n = $("#tp-os-tecnicos").querySelectorAll("input:checked").length;
-      $("#tp-os-tec-conta").textContent = n ? `· ${n} selecionado${n > 1 ? "s" : ""}` : "";
-    };
-    $("#tp-os-tecnicos").addEventListener("change", conta);
-    conta();
   }
 
   /** Preenche a agenda com os slots DO DIA daquele grupo.
@@ -434,7 +444,11 @@
    * estar semanas à frente, então o normal é NÃO haver slot: a tela diz isso,
    * em vez de mostrar uma lista de outro dia.
    */
+  let grupoNoModal = null;
+
   function montarAgenda(g) {
+    grupoNoModal = g;
+    mostrarCopia();
     const sel = $("#tp-os-agendamento");
     const nota = $("#tp-os-agenda-nota");
     const doDia = (CATALOGO.agendamento_por_data || {})[g.data] || [];
@@ -448,6 +462,94 @@
     nota.textContent = doDia.length
       ? `${doDia.length} horário${doDia.length > 1 ? "s" : ""} livre${doDia.length > 1 ? "s" : ""} em ${g.data_br}.`
       : `Nenhum horário na agenda do WVSA para ${g.data_br}. A OS é criada sem agendamento — dá para encaixar depois, no próprio WVSA.`;
+  }
+
+  const hhmm = (iso) => new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+
+  /** "Agenda copiada do WVSA às 14:32 (há 12 min)" — ao lado do botão.
+   *
+   * É o que explica por que o horário que a pessoa acabou de liberar no WVSA
+   * não está na lista: a cópia é de antes. Sem isso a lista parece a verdade.
+   */
+  function mostrarCopia(extra) {
+    const quando = CATALOGO.agenda_copiada_em;
+    let txt = "";
+    if (quando) {
+      const min = Math.max(0, Math.round((Date.now() - new Date(quando)) / 60000));
+      const dia = new Date(quando).toLocaleDateString("pt-BR");
+      const hoje = new Date().toLocaleDateString("pt-BR");
+      txt = `Agenda copiada do WVSA ${dia === hoje ? "" : `em ${dia} `}às ${hhmm(quando)}` +
+            (dia === hoje ? ` (${min < 1 ? "agora" : `há ${min} min`})` : "") + ".";
+    }
+    $("#tp-os-agenda-copia").innerHTML = [txt, extra].filter(Boolean).join(" ");
+  }
+
+  /** Botão "Atualizar do WVSA": pede ao coletor uma cópia da agenda AGORA.
+   *
+   * O caso: o operador liberou a agenda de um técnico no WVSA e o horário
+   * não aparece, porque a cópia automática é de 15 em 15 min. O portal não
+   * alcança o WVSA (CLAUDE.md §2) — o pedido fica no banco, o `enviar_os.py`
+   * atende de dentro da rede (ciclo de 5 s), e a tela espera o desfecho.
+   *
+   * O modal fica aberto e o que já foi escolhido fica escolhido: refazer
+   * equipe e período depois de atualizar é o atrito que manda a pessoa
+   * abrir a OS direto no WVSA.
+   */
+  async function atualizarAgenda() {
+    const btn = $("#tp-os-agenda-atualizar");
+    const rotulo = btn.textContent;
+    const fim = (extra) => { btn.disabled = false; btn.textContent = rotulo; mostrarCopia(extra); };
+    const erro = (t) => `<span style="color:var(--danger)">${escHtml(t)}</span>`;
+    btn.disabled = true;
+    btn.textContent = "Pedindo ao coletor…";
+    try {
+      const r = await fetch("/troca-poste/agenda/atualizar", { method: "POST" });
+      const p = await r.json();
+      if (!r.ok) throw new Error(p.erro || `HTTP ${r.status}`);
+      const inicio = Date.now();
+      while (Date.now() - inicio < 90000) {
+        await new Promise((ok) => setTimeout(ok, 2000));
+        let e;
+        try {
+          const r2 = await fetch(`/troca-poste/agenda/atualizar?pedido=${encodeURIComponent(p.pedido_em)}`);
+          e = await r2.json();
+          if (!r2.ok) throw new Error(e.erro || `HTTP ${r2.status}`);
+        } catch { continue; }  // uma volta perdida não é desfecho
+        if (!e.atendido) {
+          // Passou de um ciclo e meio do coletor: dizer que é ELE que falta,
+          // e não o portal, poupa a pessoa de clicar de novo achando que travou.
+          if (Date.now() - inicio > 15000) btn.textContent = "Aguardando o coletor…";
+          continue;
+        }
+        if (!e.ok) { fim(erro(`Não deu para copiar a agenda: ${e.erro || "falha sem detalhe"}.`)); return; }
+        const antes = ((CATALOGO.agendamento_por_data || {})[grupoNoModal && grupoNoModal.data] || []).length;
+        aplicarCatalogos(e.catalogos || {});
+        const depois = ((CATALOGO.agendamento_por_data || {})[grupoNoModal && grupoNoModal.data] || []).length;
+        fim(grupoNoModal && antes !== depois ? `<b>${antes} → ${depois} horários em ${grupoNoModal.data_br}.</b>` : "");
+        return;
+      }
+      fim(erro("O coletor não respondeu em 90 s. Ele roda na máquina da Unetvale, dentro da rede do WVSA — pode estar desligada ou fora da VPN. A lista abaixo continua sendo a da última cópia."));
+    } catch (e) {
+      fim(erro(`Não foi possível pedir a atualização: ${e.message}`));
+    }
+  }
+
+  /** Troca o catálogo e redesenha o modal sem perder o que já foi escolhido. */
+  function aplicarCatalogos(novo) {
+    const c = camposOs();
+    CATALOGO = novo;
+    desenharOpcoesOs();
+    preencherCampos(c);
+    if (!grupoNoModal) return;
+    montarAgenda(grupoNoModal);
+    const sel = $("#tp-os-agendamento");
+    if (c.agendamento) {
+      if ([...sel.options].some((op) => op.value === c.agendamento)) {
+        sel.value = c.agendamento;
+      } else {
+        $("#tp-os-agenda-nota").textContent += " O horário que estava escolhido não está mais livre.";
+      }
+    }
   }
 
   /** O que o operador escolheu no modal. */
@@ -477,6 +579,7 @@
   async function abrirEEnviar(g, botao, campos) {
     const marcar = (txt, on) => { botao.textContent = txt; botao.disabled = on; };
     marcar("Criando…", true);
+    let ordemId = null;
     try {
       const r1 = await fetch("/troca-poste/os", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -492,12 +595,16 @@
         // Já havia OS para este bairro/dia — o desfecho normal de dois
         // operadores na mesma tela, e agora também de uma tela aberta antes de
         // o grupo ter sido resolvido em outra aba.
-        avisar(`Este bairro/dia já tem OS (${rascunho.status}). Nada foi criado em duplicidade.`);
         const r = await fetch(`/troca-poste/os/${rascunho.ordem_id}`);
-        marcarAberto(g, await r.json());
+        const o = await r.json();
+        marcarAberto(g, o);
+        avisar(reenviavel(g.ordem)
+          ? `Este bairro/dia já tem uma ordem que não chegou ao WVSA (${o.status}). Use "Tentar de novo" na linha dele.`
+          : `Este bairro/dia já tem OS (${rascunho.status}). Nada foi criado em duplicidade.`);
         return;
       }
 
+      ordemId = rascunho.ordem_id;
       marcar("Enviando…", true);
       const r2 = await fetch(`/troca-poste/os/${rascunho.ordem_id}/enviar`, { method: "POST" });
       const env = await r2.json();
@@ -507,6 +614,12 @@
     } catch (e) {
       marcar("Erro — tentar de novo", false);
       avisar(`Não foi possível enviar: ${e.message}`);
+      // A ordem já nasceu (o rascunho foi gravado) e o que falhou foi o passo
+      // seguinte: a linha passa a apontar para ELA, senão o próximo clique
+      // tentaria criar de novo e cairia na ordem existente.
+      if (ordemId) {
+        try { marcarAberto(g, await (await fetch(`/troca-poste/os/${ordemId}`)).json()); } catch { /* fica o botão */ }
+      }
     }
   }
 
@@ -518,16 +631,60 @@
    * que a primeira vez não pegou.
    */
   function marcarAberto(g, o) {
-    if (!g) return;
-    g.ordem = { ordem_id: o.id, status: o.status,
-                wvsa_os_numero: o.wvsa_os_numero, ensaio: o.dry_run === true };
-    TP.ordens = [{ status: o.status, wvsa_os_numero: o.wvsa_os_numero,
-                   executor: o.executor, periodo: o.periodo, agendamento: o.agendamento,
-                   criado_em: new Date().toISOString(),
-                   agrupamentos: { rotulo: `${g.bairro || "SEM BAIRRO"} — ${g.data_br}` } },
-                 ...(TP.ordens || [])];
+    if (g) {
+      g.ordem = { ordem_id: o.id, status: o.status,
+                  wvsa_os_numero: o.wvsa_os_numero, ensaio: o.dry_run === true,
+                  erro: o.erro || null, erro_ambiguo: o.erro_ambiguo === true,
+                  campos: o.campos || {} };
+    }
+    // A MESMA ordem pode passar por aqui várias vezes (falhou, tentou de novo,
+    // saiu): troca a linha pelo id em vez de empilhar uma linha por tentativa.
+    const linha = { id: o.id, status: o.status, wvsa_os_numero: o.wvsa_os_numero,
+                    executor: o.executor, periodo: o.periodo, agendamento: o.agendamento,
+                    data_inicio: o.data_inicio, erro: o.erro || null,
+                    erro_ambiguo: o.erro_ambiguo === true, campos: o.campos || {},
+                    criado_em: new Date().toISOString(),
+                    agrupamentos: { rotulo: g ? `${g.bairro || "SEM BAIRRO"} — ${g.data_br}` : "—" } };
+    const atual = (TP.ordens || []).findIndex((x) => x.id === o.id);
+    if (atual >= 0) {
+      TP.ordens[atual] = { ...TP.ordens[atual], ...linha,
+                           criado_em: TP.ordens[atual].criado_em,
+                           agrupamentos: TP.ordens[atual].agrupamentos || linha.agrupamentos };
+    } else {
+      TP.ordens = [linha, ...(TP.ordens || [])];
+    }
     renderOrdens();
     renderCandidatos(aplicar());
+  }
+
+  /** A ordem do grupo não chegou ao WVSA e pode ser enviada de novo?
+   *
+   * `erro` é a falha do envio; `rascunho` é o clique que criou a ordem e caiu
+   * antes de autorizar o envio. Os dois deixavam o grupo preso: o botão
+   * "Abrir OS" refazia a CRIAÇÃO, o banco devolvia a ordem existente pela
+   * `chave_idempotencia`, e nada era reenviado — a ordem ficava parada para
+   * sempre, com o grupo listado entre os "já com OS". Ensaio fica de fora: ele
+   * carrega `dry_run` da criação e nunca vira envio real.
+   */
+  function reenviavel(o) {
+    return !!o && !o.ensaio && (o.status === "erro" || o.status === "rascunho");
+  }
+
+  /** Reenvia a ordem que já existe, com os campos escolhidos agora. */
+  async function reenviar(g, botao, campos) {
+    botao.textContent = "Enviando…"; botao.disabled = true;
+    try {
+      const r = await fetch(`/troca-poste/os/${g.ordem.ordem_id}/enviar`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ campos }),
+      });
+      const env = await r.json();
+      if (!r.ok) throw new Error(env.erro || `HTTP ${r.status}`);
+      await acompanhar(g.ordem.ordem_id, botao, g);
+    } catch (e) {
+      botao.textContent = "Tentar de novo"; botao.disabled = false;
+      avisar(`Não foi possível reenviar: ${e.message}`);
+    }
   }
 
   async function acompanhar(ordemId, botao, grupo) {
@@ -555,9 +712,12 @@
         return;
       }
       if (o.status === "erro") {
-        botao.textContent = "Erro — tentar de novo";
-        botao.disabled = false;
-        avisar(`O WVSA recusou: ${o.erro || "sem detalhe"}`);
+        // `o.erro` já é a frase do servidor (`motivo_erro`), com o texto do
+        // WVSA quando ele explicou. Redesenhar põe o grupo de volta na lista
+        // com "Tentar de novo" ligado a ESTA ordem — antes o botão refazia a
+        // criação, e o banco devolvia a mesma ordem sem reenviar nada.
+        marcarAberto(grupo, o);
+        avisar(`A OS não foi criada. ${o.erro || "Falha sem detalhe."}`);
         return;
       }
     }
@@ -625,6 +785,67 @@
     return pts.length;
   }
 
+  const escHtml = (t) => String(t == null ? "" : t)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+  /** Por que a última tentativa falhou, embaixo do bairro. Vazio se não falhou. */
+  function motivoHtml(o) {
+    if (!o || o.status !== "erro") return "";
+    return `<div style="font-size:12px;color:var(--danger);margin-top:4px;max-width:46ch;">` +
+      `${escHtml(o.erro || "A tentativa anterior falhou.")}</div>`;
+  }
+
+  /** Põe no modal o que a tentativa anterior escolheu. */
+  function preencherCampos(c) {
+    c = c || {};
+    if (c.executor) $("#tp-os-executor").value = c.executor;
+    $("#tp-os-periodo").value = c.periodo || "";
+    $("#tp-os-tipo-tecnico").value = c.tipo_tecnico || "";
+    const marcados = new Set((c.tecnico_ids || []).map(String));
+    $("#tp-os-tecnicos").querySelectorAll("input[type=checkbox]").forEach((i) => {
+      i.checked = marcados.has(i.value);
+    });
+    $("#tp-os-tecnicos").dispatchEvent(new Event("change"));
+  }
+
+  /** "Tentar de novo": o mesmo modal, com a escolha anterior e o motivo da falha.
+   *
+   * A falha mais comum em produção (as duas recusas do WVSA até 09/10/2026) é
+   * "O campo selecionado da agenda já está sendo usado": o slot foi ocupado
+   * entre a cópia da agenda e o envio. Repetir com o MESMO slot falharia igual,
+   * então o horário anterior só volta selecionado se ainda estiver livre.
+   */
+  function abrirReenvio(g, botao) {
+    const o = g.ordem;
+    const c = o.campos || {};
+    preencherCampos(c);
+    montarAgenda(g);
+    const sel = $("#tp-os-agendamento");
+    if (c.agendamento) {
+      if ([...sel.options].some((op) => op.value === c.agendamento)) {
+        sel.value = c.agendamento;
+      } else {
+        $("#tp-os-agenda-nota").textContent +=
+          " O horário escolhido na tentativa anterior não está mais livre.";
+      }
+    }
+    $("#tp-dlg-os-ok").textContent = "Tentar de novo";
+    const trechos = g.ids.length === 1 ? "1 trecho" : `${g.ids.length} trechos`;
+    // Conexão que caiu no meio do POST não diz se o WVSA gravou. Reenviar sem
+    // conferir é o caminho para a OS sair DUAS vezes e deslocar duas equipes.
+    const aviso = o.erro_ambiguo
+      ? `<div class="alert alert-erro" style="margin:12px 0 0;"><b>Confira no WVSA antes.</b> ` +
+        `A conexão caiu durante o envio, e a OS pode ter sido criada mesmo assim. ` +
+        `Procure por ${escHtml(g.bairro || "este bairro")} em ${g.data_br} na listagem de OS de infra; ` +
+        `se ela estiver lá, não tente de novo.</div>`
+      : "";
+    confirmarModal($("#tp-dlg-os"),
+      `<b>${escHtml(g.cidade)} — ${escHtml(g.bairro || "sem bairro")}</b><br>${g.data_br} · ${trechos}<br><br>` +
+      `A tentativa anterior não criou a OS:<br><span style="color:var(--danger)">${escHtml(o.erro || "o clique anterior criou a ordem, mas o envio não chegou a ser autorizado.")}</span>` +
+      aviso,
+      (campos) => reenviar(g, botao, campos));
+  }
+
   function renderCandidatos(linhas) {
     // Os grupos vêm prontos do servidor (com o script do bairro/dia já
     // montado). Aqui só se recorta pelos ids que sobreviveram ao filtro da
@@ -647,8 +868,11 @@
     // e OS de obra que já aconteceu não desloca ninguém. O servidor recusa
     // também — isto só evita o botão convidando ao clique.
     const passados = noRecorte.filter((g) => (g.data || "") < HOJE).length;
-    const cand = noRecorte.filter((g) => !g.ordem && (g.data || "") >= HOJE);
-    const abertos = noRecorte.filter((g) => g.ordem);
+    // Ordem que NÃO chegou ao WVSA (falhou, ou o clique caiu no meio) continua
+    // aqui, com "Tentar de novo": o lugar não está resolvido, e escondê-la entre
+    // os "já com OS" com selo verde dizia o contrário.
+    const cand = noRecorte.filter((g) => (!g.ordem || reenviavel(g.ordem)) && (g.data || "") >= HOJE);
+    const abertos = noRecorte.filter((g) => g.ordem && !reenviavel(g.ordem));
 
     $("#tp-cand-contagem").textContent =
       `${fmt(cand.length)} ${cand.length === 1 ? "grupo" : "grupos"} no recorte` +
@@ -680,12 +904,12 @@
     corpo.innerHTML = cand.map((g, i) => `
       <tr data-i="${i}" class="tp-cand" style="cursor:pointer">
         <td><span class="badge ${BADGE[g.classificacao]}">${g.risco_rotulo}</span></td>
-        <td><b>${g.cidade}</b><div style="font-size:12px;color:var(--muted)">${g.bairro || "sem bairro"}</div></td>
+        <td><b>${g.cidade}</b><div style="font-size:12px;color:var(--muted)">${g.bairro || "sem bairro"}</div>${motivoHtml(g.ordem)}</td>
         <td style="white-space:nowrap">${g.data_br}<div style="font-size:12px;color:var(--muted)">${g.hora_inicio || ""}${g.hora_fim ? "–" + g.hora_fim : ""}</div></td>
         <td class="num">${g.qtd}</td>
         <td><button class="btn-ghost" data-script="${i}">Ver no mapa</button></td>
         <td>${ENVIO_LIGADO
-          ? `<button class="btn" data-enviar="${i}">${ENSAIO ? "Abrir OS (ensaio)" : "Abrir OS no WVSA"}</button>`
+          ? `<button class="btn" data-enviar="${i}">${reenviavel(g.ordem) ? "Tentar de novo" : ENSAIO ? "Abrir OS (ensaio)" : "Abrir OS no WVSA"}</button>`
           : `<button class="btn sec" disabled title="O envio ao WVSA está desligado no ambiente (OS_ENVIO_HABILITADO).">Envio desligado</button>`}</td>
       </tr>
       <tr data-script-de="${i}" hidden>
@@ -735,7 +959,9 @@
       // este caminho não existe. A recusa de verdade está no servidor.
       if (!enviar) return;
       const g = cand[Number(enviar.dataset.enviar)];
+      if (reenviavel(g.ordem)) { abrirReenvio(g, enviar); return; }
       montarAgenda(g);
+      $("#tp-dlg-os-ok").textContent = "Abrir OS";
       const trechos = g.ids.length === 1 ? "1 trecho" : `${g.ids.length} trechos`;
       confirmarModal($("#tp-dlg-os"),
         `<b>${g.cidade} — ${g.bairro || "sem bairro"}</b><br>${g.data_br} · ${trechos}<br><br>` +
@@ -787,12 +1013,30 @@
     $("#tp-os-tabela").querySelector("tbody").innerHTML = os.map((o) => `
       <tr>
         <td><span class="badge ${o.status === "criada" ? "badge-verde" : o.status === "erro" ? "badge-vermelho" : o.status === "ensaio" ? "badge-ambar" : "badge-cinza"}">${o.status}</span></td>
-        <td><b>${(o.agrupamentos && o.agrupamentos.rotulo) || "—"}</b></td>
+        <td><b>${(o.agrupamentos && o.agrupamentos.rotulo) || "—"}</b>${motivoHtml(o)}${botaoReenvio(o)}</td>
         <td>${o.criado_em ? dataBR((o.criado_em || "").slice(0, 10)) : "—"}</td>
         <td>${o.executor || "—"}</td><td>${o.periodo || "—"}</td>
         <td>${o.agendamento || "—"}</td><td>${o.wvsa_os_numero || "—"}</td>
       </tr>`).join("") ||
       `<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted)">Nenhuma OS criada ainda.</td></tr>`;
+  }
+
+  /** O grupo desta ordem, se ele está no pacote (de hoje em diante). */
+  const grupoDaOrdem = (o) => GRUPOS.find((g) => g.ordem && g.ordem.ordem_id === o.id);
+
+  /** "Tentar de novo" também na tabela de ordens — é onde se vê o `erro`.
+   *
+   * Só aparece se o grupo está no pacote: o modal precisa da agenda do dia e
+   * dos trechos, e ordem de obra que já passou não se reenvia (o servidor
+   * recusa com 400). Aí a linha mostra só o motivo.
+   */
+  function botaoReenvio(o) {
+    if (!ENVIO_LIGADO || o.status !== "erro") return "";
+    if ((o.data_inicio || "") && o.data_inicio.slice(0, 10) < HOJE) {
+      return `<div style="font-size:12px;color:var(--muted);margin-top:2px;">Data já passou — não se reenvia.</div>`;
+    }
+    if (!grupoDaOrdem(o)) return "";
+    return `<div style="margin-top:6px;"><button class="btn-ghost" data-reenviar="${escHtml(o.id)}">Tentar de novo</button></div>`;
   }
 
   // ---- CSV ---------------------------------------------------------------
@@ -896,6 +1140,15 @@
     estado.desc = estado.ordem === col ? !estado.desc : false;
     estado.ordem = col;
     renderTabela(aplicar());
+  });
+
+  // Delegado no `tbody`: a tabela de ordens é redesenhada a cada mudança de
+  // estado, e um ouvinte preso ao botão morreria com ele.
+  $("#tp-os-tabela").querySelector("tbody").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-reenviar]");
+    if (!b) return;
+    const g = GRUPOS.find((x) => x.ordem && x.ordem.ordem_id === b.dataset.reenviar);
+    if (g && reenviavel(g.ordem)) abrirReenvio(g, b);
   });
 
   /** Troca de aba, com o estado na URL.
