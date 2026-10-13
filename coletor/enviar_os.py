@@ -303,11 +303,15 @@ def sincronizar_catalogos(wvsa, campos=None):
         opcoes = _opcoes(html, campo)
         por_tipo[tipo] = len(opcoes)
         for valor, rotulo in opcoes:
-            linha = {"tipo": tipo, "valor": valor, "rotulo": rotulo,
-                     "ativo": True, "sincronizado_em": _agora()}
-            if tipo == "agendamento":
-                linha["metadados"] = _metadados_agendamento(rotulo)
-            linhas.append(linha)
+            # `metadados` em TODA linha, nula fora da agenda: o PostgREST
+            # recusa lote com chaves diferentes (400 `PGRST102`). Enquanto
+            # agenda e catálogo iam em POSTs separados isso não aparecia; a
+            # leitura combinada do pedido sob demanda (13/10/2026) quebrou na
+            # primeira volta.
+            linhas.append({"tipo": tipo, "valor": valor, "rotulo": rotulo,
+                           "ativo": True, "sincronizado_em": _agora(),
+                           "metadados": (_metadados_agendamento(rotulo)
+                                         if tipo == "agendamento" else None)})
 
     # A trava do catálogo vazio vale para o conjunto ESTÁVEL: lista vazia ali é
     # quase sempre sessão expirada devolvendo a tela de login. Já a agenda pode
