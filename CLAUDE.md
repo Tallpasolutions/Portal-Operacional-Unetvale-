@@ -2439,10 +2439,14 @@ a.run(port=5001, use_reloader=False)"
   rolar de lado (o select do agendamento passava 4 px — corrigido); console
   limpo.
 
-  **Ainda não exercitado:** o `enviar_os.py` novo rodando de verdade — ele
-  precisa ser copiado para `~/unetvale-coletor` e o agente reiniciado
-  (`launchctl kickstart -k gui/$(id -u)/net.unetvale.enviar-os`). Até lá o
-  botão termina em "o coletor não respondeu em 90 s".
+  Na primeira volta do coletor novo em produção (13/10/2026 17:48) a cópia
+  combinada falhou com 400 `PGRST102` ("All object keys must match"): só as
+  linhas da agenda levavam `metadados`, e o PostgREST recusa lote com chaves
+  diferentes. Enquanto agenda e catálogo iam em POSTs separados isso nunca
+  apareceu — e o teste simulava o `requests.post`, que não confere chave.
+  Corrigido (toda linha leva `metadados`, nula fora da agenda) e conferido
+  contra o PostgREST de verdade com um `tipo` inválido: com chaves iguais o
+  lote passa para o banco e só a `check` recusa.
 
 - **Dashboard: filtro global, cross-filter, Cat 6, IDF detalhado, TMA/TMF e
   técnico ofensor do cancelamento** entrou em 29/09/2026, sem migration (tudo
