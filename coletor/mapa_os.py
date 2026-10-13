@@ -199,6 +199,12 @@ def gerar_png(cab, trechos, agora=None):
         raise ValueError("nenhum trecho do grupo tem posição no mapa")
 
     fora = {i + 1 for i in fora_do_lugar(trechos)}
+    # Todos "fora" = não há núcleo: os pontos estão espalhados e nenhum é
+    # referência para acusar o outro (OS #594276, 13/10/2026: três trechos
+    # `revisar` a quilômetros entre si — o núcleo vazio derrubava o desenho).
+    # Enquadra todos e não acusa ninguém; a legenda já marca os duvidosos.
+    if len(fora) == len(com_pos):
+        fora = set()
     nucleo = [(i, t) for i, t in com_pos if i not in fora]
     pontos = [(t["lat"], t["lon"]) for _, t in nucleo]
     z = escolher_zoom(pontos)
