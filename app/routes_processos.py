@@ -146,6 +146,8 @@ def processo_detalhe(codigo):
 
     area = next((a for a in areas if a["id"] == p["area_id"]), None)
     editor = _pacote_editor(p, fluxo) if fluxo else None
+    proxima_it = (pr.proxima_it_prevista(area)
+                  if p["status"] == "ativo" and aba != "visao" else None)
     return render_template(
         "processo.html", ativo="processos", sem_sync=True, aba=aba,
         processo=p, area=area, fluxos=fluxos, fluxo=fluxo, editor=editor, instrucoes=its,
@@ -153,7 +155,7 @@ def processo_detalhe(codigo):
         usuarios=usuarios, nomes=_nomes(usuarios),
         publicos=pr.PUBLICOS, executa=pr.EXECUTA, modelos=pr.MODELOS,
         status_revisao=pr.STATUS_REVISAO,
-        pode_aprovar=pr.pode_aprovar(u, p), eu=u["id"])
+        pode_aprovar=pr.pode_aprovar(u, p), eu=u["id"], proxima_it=proxima_it)
 
 
 @bp.route("/processos/<codigo>/editar", methods=["POST"])
@@ -250,6 +252,20 @@ def _fluxo_ou_404(fluxo_id, documento=False):
 def _corpo_json():
     corpo = request.get_json(silent=True)
     return corpo if isinstance(corpo, dict) else None
+
+
+@bp.route("/processos/fluxos/<fluxo_id>/documento")
+@login_obrigatorio
+@modulo_obrigatorio("processos")
+def fluxo_documento(fluxo_id):
+    """O documento salvo, para o diálogo de Nova instrução listar as raias e
+    contar os passos de cada uma pelo gerador do JS (o único). Buscado ao
+    abrir o diálogo: a aba Instruções não paga o documento de todo fluxo."""
+    f, _p = _fluxo_ou_404(fluxo_id, documento=True)
+    if f.get("arquivado"):
+        abort(404)
+    return jsonify({"ok": True, "id": f["id"], "titulo": f["titulo"], "versao": f["versao"],
+                    "documento": f["documento"]})
 
 
 @bp.route("/processos/fluxos/<fluxo_id>/salvar", methods=["POST"])
@@ -430,22 +446,31 @@ def instrucao_nova(codigo):
     if p["status"] != "ativo":
         flash("Processo arquivado não recebe instrução nova.", "erro")
         return redirect(url_for("dash.processo_detalhe", codigo=p["codigo"], aba="instrucoes"))
+    # Com fluxo, a IT é de UMA ou mais raias dele (decisão de 20/10/2026): o
+    # executor sai da raia e o nome, se vier vazio, do processo + raias. Sem
+    # fluxo ("escrever à mão"), continua valendo o select de quem executa.
+    volta = request.form.get("voltar") if request.form.get("voltar") in ("instrucoes", "fluxograma") else "instrucoes"
     fluxo_id = request.form.get("fluxo_id") or None
-    doc = None
-    if fluxo_id:
-        f = pr.obter_fluxo(fluxo_id)
-        if not f or f["processo_id"] != p["id"]:
-            flash("Esse fluxo não é deste processo.", "erro")
-            return redirect(url_for("dash.processo_detalhe", codigo=p["codigo"], aba="instrucoes"))
-        doc = f["documento"]
+    dados = {"titulo": request.form.get("titulo"), "executa": request.form.get("executa"),
+             "fluxo_id": fluxo_id}
+    raias = None
     try:
-        novo = pr.criar_instrucao(p, request.form, u["id"], conteudo=pr.conteudo_inicial(p, doc))
+        if fluxo_id:
+            f = pr.obter_fluxo(fluxo_id) if pr.eh_uuid(fluxo_id) else None
+            if not f or f["processo_id"] != p["id"]:
+                raise ValueError("Esse fluxo não é deste processo.")
+            raias = pr.escolher_raias(f["documento"], request.form.getlist("raias"))
+            dados["executa"] = pr.executa_das_raias(raias)
+            if not (dados["titulo"] or "").strip():
+                dados["titulo"] = pr.titulo_sugerido(p, raias)
+        novo = pr.criar_instrucao(p, dados, u["id"],
+                                  conteudo=pr.conteudo_inicial(p, f["documento"] if fluxo_id else None, raias))
     except ValueError as e:
         flash(str(e), "erro")
-        return redirect(url_for("dash.processo_detalhe", codigo=p["codigo"], aba="instrucoes"))
+        return redirect(url_for("dash.processo_detalhe", codigo=p["codigo"], aba=volta))
     flash(f"Instrução {novo['codigo']} criada.", "ok")
     return redirect(url_for("dash.instrucao_detalhe", codigo=novo["codigo"],
-                            gerar=1 if (fluxo_id and request.form.get("gerar")) else None))
+                            gerar=1 if fluxo_id else None))
 
 
 @bp.route("/instrucoes/<codigo>")
@@ -493,6 +518,7 @@ def instrucao_detalhe(codigo):
         "instrucao.html", ativo="processos", sem_sync=True,
         it=it, processo=p, rev=rev, revisoes=revs, eventos=evs, nomes=nomes,
         fluxos=fluxos, pacote=pacote, editavel=editavel, conteudo=(rev or {}).get("conteudo") or {},
+        quem_executa=pr.quem_executa(it, (rev or {}).get("conteudo")),
         executa=pr.EXECUTA, publicos=pr.PUBLICOS, status_revisao=pr.STATUS_REVISAO,
         pode_aprovar=pr.pode_aprovar(u, p), eu_elaborei=eu_elaborei,
         tem_aberta=any(r["status"] in pr.ABERTAS for r in revs),
@@ -662,6 +688,7 @@ def instrucao_pdf(codigo):
     return render_template(
         "instrucao_pdf.html", it=it, processo=p, rev=rev, revisoes=revs,
         conteudo=rev.get("conteudo") or {}, nomes=_nomes(usuarios),
+        quem_executa=pr.quem_executa(it, rev.get("conteudo")),
         executa=pr.EXECUTA, status_revisao=pr.STATUS_REVISAO,
         fluxo_doc=fluxo_doc, fluxo_titulo=fluxo_titulo, fluxo_congelado=congelado,
         impresso_em=_agora_br(), impresso_por=u.get("nome") or "—",

@@ -72,7 +72,7 @@
       <dl class="acao-p-campos">
         <dt>Código</dt><dd><b>{{ it.codigo }}</b>{% if rev %} · Rev. {{ '%02d' % rev.numero }}{% endif %}</dd>
         <dt>Processo</dt><dd><a href="{{ url_proc }}">{{ processo.codigo }}</a> · {{ processo.titulo }}</dd>
-        <dt>Quem executa</dt><dd>{{ executa[it.executa] }}</dd>
+        <dt>Quem executa</dt><dd>{{ quem_executa }}</dd>
         <dt>Fluxo de origem</dt>
         <dd>
           {% if editavel and fluxos %}

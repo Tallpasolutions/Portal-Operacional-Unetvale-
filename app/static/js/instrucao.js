@@ -215,13 +215,15 @@
 
   function abrirGerar() {
     if (!D.fluxo || !dlg) return;
-    const g = IT.gerar(D.fluxo.documento);
+    // O recorte da criação vale em toda regeração: a IT do técnico continua
+    // sendo do técnico. Sem `raias` (ITs de antes de 20/10/2026), o fluxo inteiro.
+    const g = IT.gerar(D.fluxo.documento, { raias: (c.raias || []).map((r) => r.id) });
     const m = IT.mesclar(c.passos, g.passos);
     previa = m;
     const item = (p) => `<li>${esc(p.atividade || "(sem texto)")}${p.quem ? ` <span class="rotulo-leve">${esc(p.quem)}</span>` : ""}</li>`;
     let h = "";
     if (g.avisos.length) h += `<div class="alert alert-erro" style="margin-top:10px">${g.avisos.map(esc).join("<br>")}</div>`;
-    if (!g.passos.length) h += `<p>O fluxo não tem nenhuma forma de ação ligada ao Início. Desenhe o caminho e tente de novo.</p>`;
+    if (!g.passos.length && !g.avisos.length) h += `<p>O fluxo não tem nenhuma forma de ação ligada ao Início. Desenhe o caminho e tente de novo.</p>`;
     else {
       h += `<p>${g.passos.length} passos no fluxo: <b>${m.novos.length}</b> novos, <b>${m.alterados.length}</b> atualizados, ${m.iguais} iguais.` +
            ` Detalhe e atenção escritos à mão ficam.</p>`;
@@ -244,8 +246,9 @@
     const manter = [...document.querySelectorAll("#it-previa [data-manter]:checked")].map((x) => previa.removidos[Number(x.dataset.manter)]);
     c.passos = previa.passos.concat(manter.map((p) => Object.assign({}, p, { no_id: null, desvios: [], gerado: null })));
     // Responsabilidades em branco ganham as raias do fluxo: são os papéis.
-    if (!c.responsabilidades.length && D.raias && D.raias.length) {
-      c.responsabilidades = D.raias.map((t) => ({ papel: t, descricao: "" }));
+    const papeis = (c.raias || []).length ? c.raias.map((r) => r.titulo).filter(Boolean) : (D.raias || []);
+    if (!c.responsabilidades.length && papeis.length) {
+      c.responsabilidades = papeis.map((t) => ({ papel: t, descricao: "" }));
     }
     dlg.close();
     agendar();

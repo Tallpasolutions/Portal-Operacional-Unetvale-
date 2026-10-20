@@ -627,6 +627,15 @@ textarea.acao-p-titulo{ resize:none; overflow:hidden; font-size:19px; font-weigh
 .modal.modal-largo{ max-width:none; width:min(640px, calc(100vw - 32px)); }
 .modal-largo .field label{ display:block; }
 .modal-largo .field input, .modal-largo .field select, .modal-largo .field textarea{ width:100%; }
+/* Lista de marcar DENTRO de um .modal-largo .field (a "Para quem é" do
+   Gerar instrução): as duas regras acima têm 2 classes + elemento e venceriam
+   a `.lista-marcar .linha-marcar`, pondo a caixa de marcar numa linha e o nome
+   na de baixo. Uma classe a mais desempata sem `!important`. */
+.modal-largo .field .lista-marcar .linha-marcar{ display:flex; margin-bottom:0; font-size:13.5px; font-weight:500; color:var(--ink); }
+.modal-largo .field .lista-marcar .linha-marcar input{ width:auto; }
+/* Resumo do "Gerar instrução": passos e executor da escolha. */
+.ni-resumo{ margin:2px 0 0; font-size:13px; color:var(--muted); }
+.ni-resumo:empty{ display:none; }
 .modal-largo textarea{ font-family:inherit; font-size:13.5px; padding:8px 10px; border:1px solid var(--borda-2); border-radius:8px; }
 .rotulo-leve{ font-weight:400; color:var(--muted-l); margin-left:4px; }
 .rotulo-forte{ font-weight:700; color:var(--danger); margin-left:4px; }

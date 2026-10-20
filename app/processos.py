@@ -21,6 +21,7 @@ import math
 from pathlib import Path
 import re
 import sys
+import unicodedata
 import zlib
 from datetime import datetime, timedelta, timezone
 
@@ -651,6 +652,8 @@ def normalizar_conteudo(c):
                 item["fim"] = True
             elif _txt(d.get("fora"), 120):
                 item["fora"] = _txt(d.get("fora"), 120)
+            elif _txt(d.get("com"), 120):
+                item["com"] = _txt(d.get("com"), 120)
             else:
                 continue
             desvios.append(item)
@@ -665,6 +668,11 @@ def normalizar_conteudo(c):
             "gerado": {"atividade": _txt(g.get("atividade"), 1000), "quem": _txt(g.get("quem"), 120)} if g else None,
         }
     out["passos"] = lista("passos", 200, passo)
+    # Para quem é a instrução: as raias do fluxo que viraram passo. Guardado
+    # aqui, e não numa coluna, porque é o recorte que a REGERAÇÃO repete —
+    # sem ele, regerar a IT do técnico traria o processo inteiro de volta.
+    out["raias"] = lista("raias", 40, lambda r: isinstance(r, dict) and _id_curto(r.get("id")) and {
+        "id": r["id"], "titulo": _txt(r.get("titulo"), 120)})
     # id repetido (passo duplicado à mão) quebraria o casamento da próxima
     # geração: o segundo ganha id novo.
     vistos = set()
@@ -675,14 +683,79 @@ def normalizar_conteudo(c):
     return out
 
 
-def conteudo_inicial(processo, documento=None):
-    """A IT nasce com o que o processo já sabe: objetivo e as raias do fluxo
-    como responsabilidades. Os passos vêm do gerador, no navegador."""
-    raias = [r.get("titulo") for r in (documento or {}).get("raias", []) if r.get("titulo")]
+def raias_do_documento(documento):
+    return [{"id": r["id"], "titulo": (r.get("titulo") or "").strip()}
+            for r in (documento or {}).get("raias", []) if isinstance(r, dict) and r.get("id")]
+
+
+def escolher_raias(documento, ids):
+    """As raias pedidas, conferidas contra o fluxo, na ordem da folha.
+
+    Id que não é do fluxo é descartado — vem do formulário, e uma raia
+    inventada faria a IT nascer sem passo nenhum. Nenhuma válida: ValueError.
+    """
+    pedidas = set(ids or [])
+    raias = [r for r in raias_do_documento(documento) if r["id"] in pedidas]
+    if not raias:
+        raise ValueError("Marque para quem é a instrução (pelo menos uma raia do fluxo).")
+    return raias
+
+
+def executa_das_raias(raias):
+    """`executa` (interno/campo) sai da raia escolhida, não de um select.
+
+    Com cinco executores no mesmo fluxo, perguntar "quem executa" com duas
+    opções obrigava a pessoa a adivinhar (decisão de 20/10/2026). A coluna
+    continua porque é ela que pinta o selo e separa as listas: campo quando
+    alguma raia é de campo — a mesma palavra que `documento_inicial` usa ao
+    criar a raia "Técnico de campo".
+    """
+    def norm(t):
+        return unicodedata.normalize("NFD", t or "").encode("ascii", "ignore").decode().lower()
+    return "campo" if any("campo" in norm(r["titulo"]) for r in raias) else "interno"
+
+
+def quem_executa(it, conteudo):
+    """Rótulo de "Quem executa" na tela e no PDF: as raias da IT, quando ela
+    tem recorte ("Técnico de campo, Supervisor de Infra"), que dizem mais
+    que o interno/campo da coluna."""
+    nomes = [r.get("titulo") for r in ((conteudo or {}).get("raias") or [])
+             if isinstance(r, dict) and r.get("titulo")]
+    return ", ".join(nomes) if nomes else EXECUTA.get(it.get("executa"), "—")
+
+
+def titulo_sugerido(processo, raias):
+    nomes = [r["titulo"] for r in raias if r["titulo"]]
+    quem = nomes[0] if len(nomes) == 1 else (", ".join(nomes[:-1]) + " e " + nomes[-1] if nomes else "")
+    return f"{processo['titulo']} — {quem}"[:160] if quem else processo["titulo"][:160]
+
+
+def proxima_it_prevista(area):
+    """O código que a próxima IT da área DEVE receber — só para mostrar.
+
+    Lido do contador sem incrementá-lo: quem gera o código de verdade é
+    `instrucao_criar`, na mesma transação. Dois cliques simultâneos podem
+    levar números diferentes do previsto, e a tela diz "deve sair", não "sai".
+    """
+    prefixo = f"IT-{(area or {}).get('sigla') or 'GER'}"
+    try:
+        linha = supa.select_one("processo_contadores", {"select": "ultimo", "prefixo": f"eq.{prefixo}"})
+    except Exception as e:
+        _falhou("proxima_it_prevista", e)
+        return None
+    return f"{prefixo}-{((linha or {}).get('ultimo') or 0) + 1:03d}"
+
+
+def conteudo_inicial(processo, documento=None, raias=None):
+    """A IT nasce com o que o processo já sabe: objetivo e as raias como
+    responsabilidades — só as escolhidas, quando houver recorte. Os passos
+    vêm do gerador, no navegador."""
+    escolhidas = raias if raias is not None else raias_do_documento(documento)
     return normalizar_conteudo({
         "objetivo": processo.get("objetivo") or "",
         "aplicacao": processo.get("escopo") or "",
-        "responsabilidades": [{"papel": t, "descricao": ""} for t in raias],
+        "responsabilidades": [{"papel": r["titulo"], "descricao": ""} for r in escolhidas if r["titulo"]],
+        "raias": raias or [],
     })
 
 

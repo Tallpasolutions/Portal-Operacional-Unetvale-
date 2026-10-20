@@ -593,8 +593,34 @@ Início vira um passo, na ordem do caminho (Sim antes de Não); a raia vira o
 "Quem"; a anotação ligada vira a "Atenção"; conector, junção e Fim são
 atravessados.
 
+**Uma IT por executor: o recorte é por RAIA** (decisão de 20/10/2026). O
+diálogo "Gerar instrução" (abas Fluxograma e Instruções) lista as raias do
+fluxo com quantos passos cada uma vira, e a IT sai só com as formas das raias
+marcadas — o PR-INF-003 (FTTA) tem cinco executores, e uma IT do processo
+inteiro mandaria ao técnico os passos do comercial e do financeiro. Três
+consequências:
+
+* **o recorte mora em `conteudo.raias`** (`[{id, titulo}]`, sem migration) e
+  vale em toda regeração. IT sem `raias` (as de antes) gera o fluxo inteiro,
+  como sempre; raia guardada que sumiu do fluxo dá aviso e ZERO passos, nunca
+  o fluxo inteiro em silêncio;
+* **o caminho é percorrido inteiro e só depois recortado**: a ordem dos passos
+  é a do processo. Onde a saída leva a outra raia, o desvio vira `{com:
+  "<raia>"}` → "Depois → segue com Infra — time interno" (a passagem de
+  bastão);
+* **`executa` (interno/campo) sai da raia**, não de um select
+  (`processos.executa_das_raias`: campo quando alguma raia tem "campo" no
+  nome, a palavra que `documento_inicial` usa). A coluna segue pintando o selo;
+  "Quem executa" na tela e no PDF mostra as raias (`processos.quem_executa`).
+  Sem fluxo ("escrever à mão"), o select volta.
+
+O diálogo mostra o código que DEVE sair (`proxima_it_prevista`, lido do
+contador sem incrementar — quem numera é `instrucao_criar`) e diz que a
+numeração das ITs é separada da dos processos: a pergunta "o número da IT é o
+do processo?" foi o que motivou a mudança.
+
 **Desvio é estruturado, o texto é derivado.** O passo guarda `desvios:
-[{rotulo, no|fim|fora}]` e `desvio_texto` ("Sim → passo 5 · Não → encerrar")
+[{rotulo, no|fim|fora|com}]` e `desvio_texto` ("Sim → passo 5 · Não → encerrar")
 é recalculado a cada mudança por `FluxoIT.textoDesvios` — a única função que o
 escreve. Reordenar os passos renumera sozinho. O PDF e a leitura usam o texto
 salvo.
@@ -2034,6 +2060,34 @@ a.run(port=5001, use_reloader=False)"
 
   **Ainda não medido:** o `Server-Timing` das rotas novas contra o Supabase
   de verdade — o banco de ensaio não passa pela contagem de idas.
+
+- **Processos — instrução por executor** em 20/10/2026, sem migration (§4,
+  "Uma IT por executor"). Pedido depois de o PR-INF-003 (Ampliação FTTA,
+  cinco raias) ser criado em produção: o diálogo antigo pedia nome, "quem
+  executa" com duas opções e não dizia de onde vinha o número.
+
+  Gerador por `node` sobre o fluxo real da FTTA: sem recorte, 32 passos
+  idênticos aos de antes; Técnico + Supervisor, 9 passos com "segue com Infra
+  — time interno" nas duas saídas; raia inexistente, aviso e zero passos.
+  Rotas pelo `test_client` num servidor de ensaio (lê produção, ITs em
+  memória, toda escrita real recusada): 41 casos — diálogo nas duas abas,
+  código previsto, documento do fluxo com id ruim 404, sem raia / raia
+  inventada / fluxo torto recusados sem `5xx`, título e executor automáticos,
+  `raias` e desvio `com` sobrevivendo ao salvar, PDF, ITs antigas intactas,
+  nenhuma escrita real. No navegador, com o mouse: marcar/desmarcar
+  recalculando passos e nome, nome digitado preservado, botão travado sem
+  raia, criação abrindo a prévia com 9 passos, regeração com "9 iguais",
+  caminho "escrever à mão", 375 px sem rolar de lado; console limpo.
+
+  ⚠️ A lista de marcar dentro de `.modal-largo .field` perdia para as regras
+  do modal (2 classes + elemento) — caixa numa linha, nome na de baixo. Pego
+  no screenshot; corrigido com uma classe a mais (§6, especificidade).
+
+  Contra produção, em transação com `rollback`: `instrucao_criar` com o
+  conteúdo novo grava as `raias`, e `instrucao_salvar` mantém raias e o desvio
+  `com`; depois do rollback, zero ITs no PR-INF-003.
+
+  **Ainda não exercitado:** o clique em produção, depois do deploy.
 
 - **Ações** entrou vazio: zero ação, zero gestor, 10 áreas. Em 29/09/2026
   eram 11 ações e 3 gestores (Matheus Dias, Patricia Schveitzer, Renato Barreto).

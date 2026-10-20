@@ -134,10 +134,25 @@
     return !!F.forma(no.tipo).acao;
   }
 
-  function gerar(doc) {
+  // `opcoes.raias` recorta a instrução por executor: só viram passo as formas
+  // dessas raias (vazio ou ausente = o fluxo inteiro, como sempre foi). Um
+  // processo com cinco executores não cabe numa IT só — o PDF do técnico
+  // levaria os passos do comercial e do financeiro. Onde o caminho sai do
+  // recorte, o desvio vira `{com: "<raia>"}` ("segue com Supervisor de
+  // Infra"): é a passagem de bastão, e esconder isso deixaria o passo sem
+  // dizer o que acontece depois dele.
+  function gerar(doc, opcoes) {
     const idx = indices(doc);
     const raias = {};
     (doc.raias || []).forEach((r) => { raias[r.id] = (r.titulo || "").trim(); });
+    const pedidas = (opcoes && opcoes.raias) || [];
+    const recorte = new Set(pedidas.filter((id) => id in raias));
+    // Raia pedida que sumiu do fluxo NÃO vira "o fluxo inteiro": a IT do
+    // técnico regerada com os 32 passos do processo seria pior que nenhum.
+    if (pedidas.length && !recorte.size) {
+      return { passos: [], avisos: ["As raias desta instrução foram apagadas do fluxo. Os passos atuais ficam como estão."] };
+    }
+    const noRecorte = (no) => !recorte.size || recorte.has(no.raia);
     const conectores = (doc.nos || []).filter((x) => x.tipo === "conector");
     const pares = (no) => conectores.filter((c) => c.id !== no.id && norm(c.texto) === norm(no.texto));
 
@@ -149,17 +164,21 @@
     const nos = (doc.nos || []).filter(participa);
     const inicios = nos.filter((x) => ehInicio(x, idx)).sort(ordemLeitura);
     const raizes = inicios.length ? inicios : nos.filter((x) => !idx.entram[x.id].length).sort(ordemLeitura);
-    const ordem = [], visto = new Set();
+    const ordemTotal = [], visto = new Set();
     function visitar(id) {
       if (visto.has(id)) return;
       visto.add(id);
       const no = idx.nos[id];
       if (!no) return;
-      if (ehPasso(no)) ordem.push(id);
+      if (ehPasso(no)) ordemTotal.push(id);
       saidasOrdenadas(id).forEach((l) => visitar(l.para.no));
       if (no.tipo === "conector" && !idx.saem[id].length) pares(no).forEach((c) => visitar(c.id));
     }
     raizes.forEach((r) => visitar(r.id));
+    // O caminho é percorrido inteiro e SÓ DEPOIS recortado: a ordem dos passos
+    // de uma raia é a ordem em que eles acontecem no processo, e percorrer só
+    // as formas do recorte perderia quem vem depois de uma passagem de bastão.
+    const ordem = ordemTotal.filter((id) => noRecorte(idx.nos[id]));
 
     // Para onde uma saída leva, atravessando o que não é passo.
     function destino(id, guarda) {
@@ -168,7 +187,7 @@
       guarda.add(id);
       const no = idx.nos[id];
       if (!no) return null;
-      if (ehPasso(no)) return { no: id };
+      if (ehPasso(no)) return noRecorte(no) ? { no: id } : { com: raias[no.raia] || "outra equipe" };
       if (no.tipo === "terminal") return { fim: true };
       if (no.tipo === "fora_pagina") return { fora: (no.texto || "outro fluxo").trim() };
       let prox = idx.saem[id];
@@ -222,7 +241,7 @@
     });
 
     const avisos = [];
-    const fora = nos.filter((x) => ehPasso(x) && !visto.has(x.id));
+    const fora = nos.filter((x) => ehPasso(x) && noRecorte(x) && !visto.has(x.id));
     if (!raizes.length) avisos.push("Não há por onde começar: falta o Terminal de Início.");
     if (fora.length) avisos.push(`${fora.length} forma${fora.length > 1 ? "s" : ""} fora do caminho do Início não ${fora.length > 1 ? "viraram passos" : "virou passo"}: ` +
       fora.map((x) => `“${(x.texto || F.forma(x.tipo).nome).replace(/\s+/g, " ").slice(0, 30)}”`).join(", ") + ".");
@@ -298,6 +317,7 @@
         if (d.no) alvo = pos[d.no] ? `passo ${pos[d.no]}` : "passo removido";
         else if (d.fim) alvo = "encerrar";
         else if (d.fora) alvo = `continua em ${d.fora}`;
+        else if (d.com) alvo = `segue com ${d.com}`;
         else return null;
         return `${d.rotulo} → ${alvo}`;
       }).filter(Boolean).join(" · ");
