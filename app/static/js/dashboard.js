@@ -468,9 +468,15 @@
         kpi("Entraram na fila", sinal(m.entraram, "+"), m.entraram ? css("--danger") : "") +
         kpi("Saíram da fila", sinal(m.sairam, "−"), m.sairam ? css("--success") : "") +
         kpi("Saldo do dia", (m.saldo > 0 ? "+" : m.saldo < 0 ? "−" : "") + Dash.num(Math.abs(m.saldo))) +
-        kpi("Na abertura", Dash.num(m.abertura_total));
-      $("es-mov-quando").textContent = "abertura " + m.abertura_em + " → " + m.atual_em +
-        " · " + m.capturas + " coleta(s)";
+        (m.fonte === "esteira" ? "" : kpi("Na abertura", Dash.num(m.abertura_total)));
+      // Do módulo Esteira (coleta de 10 em 10 min): dia operacional das 21h
+      // às 21h e CADA entrada e saída — a mesma conta da tela /esteira. Do
+      // `ger_esteira` antigo: diferença entre a primeira e a última foto do
+      // dia civil.
+      $("es-mov-quando").textContent = m.fonte === "esteira"
+        ? "dia operacional, desde as 21h de ontem · até " + m.atual_em +
+          (m.apos_lacuna ? " · " + m.apos_lacuna + " movimento(s) após lacuna de coleta, fora da conta" : "")
+        : "abertura " + m.abertura_em + " → " + m.atual_em + " · " + m.capturas + " coleta(s)";
     }
     // Retirada aparece na lista, mas sem o destaque de "maior ofensor": ela é
     // sempre a maior e não é trabalho que a operação escolha fazer.

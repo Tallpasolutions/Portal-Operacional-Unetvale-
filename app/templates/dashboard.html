@@ -139,7 +139,9 @@
     <div class="card-b tabela-wrap dash-lista"><table class="tbl" id="ca-of-cid"></table></div></div>
 </div>
 
-<h3 class="secao">Esteira de agendamento <span class="nao-recorta">não recortado pelo filtro</span></h3>
+<h3 class="secao">Esteira de agendamento <span class="nao-recorta">não recortado pelo filtro</span>
+  {% if 'esteira' in usuario.modulos_visiveis %}<a class="subnote" style="margin:0 0 0 10px;font-weight:600"
+     href="{{ url_for('dash.esteira_view') }}">abrir a esteira ↗</a>{% endif %}</h3>
 <p class="subnote">
   <b>Esteira útil</b> = fila sem as retiradas. Retirada é equipamento a recolher de quem já cancelou —
   somada ao resto, ela domina a fila e esconde o que a operação consegue atacar.

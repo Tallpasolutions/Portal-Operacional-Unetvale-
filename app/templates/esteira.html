@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block title %}Esteira · Unetvale{% endblock %}
+{% block page_title %}Esteira de agendamento{% endblock %}
+{% block content %}
+{% if sem_migration %}
+  <div class="vazio">O módulo ainda não tem as tabelas no banco (migration <code>0020_esteira.sql</code>).</div>
+{% elif not pacote.os and not pacote.coleta.ok_em %}
+  {# Nunca sugere falha: antes da primeira coleta, não há o que mostrar. #}
+  <div class="vazio">
+    A primeira coleta preenche esta tela. O coletor lê a esteira do WVSA de 10 em 10 minutos, das 6h às 22h.
+  </div>
+{% else %}
+
+<div class="view-bar">
+  <div class="view-switch" id="es-abas">
+    <button data-aba="painel" class="active">Painel</button>
+    <button data-aba="roteirizador">Roteirizador</button>
+  </div>
+</div>
+
+{# UM filtro, no topo, para as duas abas (CLAUDE.md §5, e o que o Dashboard
+   aprendeu). Finalidade e cidade são de marcar, com o "só" de cada linha —
+   o mesmo `.dropdown` da Troca de Poste. O clique direito do Esteira-OS para
+   ocultar uma finalidade saiu: ninguém descobre e não existe no celular; o
+   "Sem retiradas" cobre o caso que ele atendia. #}
+<div class="toolbar" id="es-filtros">
+  <label>Busca <input type="search" id="es-busca" placeholder="OS, cliente, bairro, endereço…"></label>
+  <div class="campo">Finalidade
+    <details class="dropdown" id="es-fin"><summary><span data-resumo>Todas</span></summary>
+      <div class="lista-marcar"></div></details>
+  </div>
+  <div class="campo">Cidade
+    <details class="dropdown" id="es-cid"><summary><span data-resumo>Todas</span></summary>
+      <div class="lista-marcar"></div></details>
+  </div>
+  <label>Agendamento
+    <select id="es-agend">
+      <option value="">Todos</option>
+      <option value="nao_agendada">Não agendada</option>
+      <option value="agendada_nao_confirmada">Agendada, não confirmada</option>
+      <option value="agendada_confirmada">Agendada e confirmada</option>
+      <option value="pendente">Ficha ainda não lida</option>
+    </select>
+  </label>
+  <label>Tempo na fila
+    <select id="es-urg">
+      <option value="">Qualquer</option>
+      <option value="168">7 dias ou mais</option>
+      <option value="336">14 dias ou mais</option>
+      <option value="720">30 dias ou mais</option>
+    </select>
+  </label>
+  <span class="toggle toggle-mini" id="es-retirada" title="Retirada é equipamento a recolher de quem já cancelou">
+    <button data-ret="" class="active">Com retiradas</button><button data-ret="sem">Sem retiradas</button>
+  </span>
+  <label title="Reincidente = idas ao local (fechada sem sucesso) E tentativas de contato acima dos limites">
+    <input type="checkbox" id="es-reinc" style="width:auto"> Só reincidentes
+    (≥ <input type="number" id="es-rv" min="1" max="20" style="width:52px"> idas,
+     ≥ <input type="number" id="es-rc" min="1" max="20" style="width:52px"> contatos)
+  </label>
+  <button class="btn-ghost" id="es-limpar" type="button">Limpar filtros</button>
+</div>
+<p class="subnote" id="es-coleta"></p>
+
+<!-- ===================== Painel ===================== -->
+<section data-painel="painel">
+  <div class="kpis" id="es-kpis"></div>
+
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-h"><span>Entraram e saíram da fila, por dia</span>
+      <span class="subnote" style="margin:0" id="es-fluxo-nota"></span></div>
+    <div class="card-b">
+      <div class="chart-box"><canvas id="es-ch-fluxo"></canvas></div>
+      {# "Saiu" é saiu da FILA — a OS é agendada e sai; volta quando a visita
+         falha (no histórico, metade das que voltaram voltou em menos de 2
+         dias). Por isso a palavra "resolvida" não aparece nesta tela. #}
+      <p class="subnote" style="margin:10px 0 0">
+        Dia operacional: das 21h à 21h. <b>Saiu da fila</b> não é OS resolvida — ela sai ao ser agendada e
+        volta se a visita falhar. Clique numa barra para ver as OS daquele dia.
+        Dias sem barra não tiveram coleta (fim de semana com o coletor antigo desligado, por exemplo).
+      </p>
+    </div>
+  </div>
+
+  <div class="grid charts-2" style="margin-bottom:16px;">
+    <div class="card"><div class="card-h"><span>Fila por dia</span>
+        <span class="subnote" style="margin:0">foto da última coleta de cada dia</span></div>
+      <div class="card-b"><div class="chart-box"><canvas id="es-ch-fila"></canvas></div></div></div>
+    <div class="card"><div class="card-h"><span>Backlog oficial do WVSA, por mês</span>
+        <select id="es-oficial-grupo" class="toggle-mini"></select></div>
+      <div class="card-b"><div class="chart-box"><canvas id="es-ch-oficial"></canvas></div>
+        <p class="subnote" style="margin:10px 0 0">Do relatório do WVSA (indicadores2 por grupo, agendamento1 no total) —
+          não passa pelo filtro desta tela.</p></div></div>
+  </div>
+
+  <div class="grid charts-2" style="margin-bottom:16px;">
+    <div class="card"><div class="card-h"><span>Por finalidade</span>
+        <span class="subnote" style="margin:0">clique para filtrar</span></div>
+      <div class="card-b"><div class="rank" id="es-rank-fin"></div></div></div>
+    <div class="card"><div class="card-h"><span>Por cidade</span>
+        <span class="subnote" style="margin:0">clique para filtrar</span></div>
+      <div class="card-b"><div class="rank" id="es-rank-cid"></div></div></div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-h">Cidades por finalidade</div>
+    <div class="card-b tabela-wrap"><table class="tbl tbl-mensal es-matriz" id="es-matriz"></table></div>
+  </div>
+
+  <div class="card">
+    <div class="card-h"><span>Ordens de serviço na esteira <span class="subnote" style="margin:0" id="es-contagem"></span></span>
+      <button class="btn-ghost" id="es-csv" type="button">⬇ CSV</button></div>
+    <div class="card-b tabela-wrap"><table class="tbl es-tabela" id="es-tabela"></table>
+      <button type="button" class="btn-ghost" id="es-mais" style="display:none;margin-top:10px"></button></div>
+  </div>
+</section>
+
+<!-- ===================== Roteirizador ===================== -->
+<section data-painel="roteirizador" hidden>
+  <div class="es-rot">
+    <div class="card es-rot-lista">
+      <div class="card-h"><span>OS do filtro <span class="subnote" style="margin:0" id="es-rot-contagem"></span></span></div>
+      <div class="card-b" id="es-rot-cards"></div>
+    </div>
+    <div class="es-rot-mapa">
+      <div class="card" style="margin-bottom:12px;"><div class="card-b" style="padding:0">
+        <div id="es-mapa"></div></div></div>
+      <div class="card">
+        <div class="card-h"><span>Rota <span class="badge badge-azul" id="es-rota-n">0</span></span>
+          <span>
+            <button class="btn-ghost" id="es-rota-limpar" type="button">Limpar</button>
+            <button class="btn" id="es-rota-gmaps" type="button">Abrir no Google Maps</button>
+          </span></div>
+        <div class="card-b"><ol class="es-rota" id="es-rota"></ol>
+          <p class="subnote" style="margin:8px 0 0">A rota fica guardada neste navegador. Posição por rua, bairro ou só
+            cidade conforme o endereço da OS permitiu — o ponto de cada OS diz qual.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+{# Modal do dia: as OS que entraram/saíram. `.modal.modal-largo` — as DUAS
+   classes, senão o max-width do `.modal` vence (§5). #}
+<dialog class="modal modal-largo" id="es-dlg">
+  <h3 id="es-dlg-titulo" style="margin:0 0 6px"></h3>
+  <p class="subnote" id="es-dlg-nota" style="margin:0 0 10px"></p>
+  <div class="tabela-wrap" style="max-height:60vh;overflow-y:auto"><table class="tbl" id="es-dlg-tab"></table></div>
+  <div class="modal-acoes"><button class="btn" type="button" data-fechar>Fechar</button></div>
+</dialog>
+
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if pacote and (pacote.os or pacote.coleta.ok_em) %}
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet.css') }}">
+<script src="{{ url_for('static', filename='vendor/leaflet.js') }}"></script>
+<script>window.__ESTEIRA__ = {{ pacote|tojson }};</script>
+<script src="{{ url_for('static', filename='js/dashboard_rank.js') }}"></script>
+<script src="{{ url_for('static', filename='js/esteira.js') }}"></script>
+<script src="{{ url_for('static', filename='js/esteira_mapa.js') }}"></script>
+{% endif %}
+{% endblock %}

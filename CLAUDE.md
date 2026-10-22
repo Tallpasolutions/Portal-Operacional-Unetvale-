@@ -41,6 +41,12 @@ App Flask (app/ + api/) na Vercel
 **O app NUNCA fala com o WVSA.** A Vercel não alcança um IP privado. Qualquer
 coisa que precise do WVSA vive em `coletor/` e roda na máquina do Jhoni.
 
+A **Esteira** (`/esteira`) tem coleta própria, fora da grade de 2 em 2 h:
+`coletor/esteira.py`, LaunchAgent `net.unetvale.esteira`, de 10 em 10 min das
+6h às 22h, gravando por função (`esteira_aplicar_*`, migration `0020`). Entrou
+e saiu da fila é diferença entre duas coletas; com 2 h de intervalo, a OS
+agendada na mesma manhã em que entrou nunca apareceria (§4).
+
 ### A Troca de Poste tem OUTRO pipeline, em OUTRO repositório
 
 O diagrama acima cobre o WVSA. O schema `troca_poste` é alimentado por um
@@ -74,7 +80,7 @@ data mais próxima primeiro (§6). A varredura do passado segue manual:
 | Tipo | Módulos | Se o dado sumir |
 |---|---|---|
 | **Espelho** do WVSA | Produtividade, IQI/IQM, Massivas | recoleta-se |
-| **Dado nasce aqui** | **Ações**, **Processos**, Troca de Poste (OS/revisão) | **não há de onde recoletar** |
+| **Dado nasce aqui** | **Ações**, **Processos**, Troca de Poste (OS/revisão), **Esteira** (entrou/saiu — `esteira_movimentos`) | **não há de onde recoletar** |
 
 Nos módulos do segundo tipo: histórico append-only, recorte de permissão no
 servidor, e cuidado redobrado com migration destrutiva.
@@ -108,7 +114,7 @@ servidor, e cuidado redobrado com migration destrutiva.
 
 ---
 
-## 4. Os sete módulos
+## 4. Os oito módulos
 
 | Rota | Módulo | Origem do dado | Quem vê |
 |---|---|---|---|
@@ -116,6 +122,7 @@ servidor, e cuidado redobrado com migration destrutiva.
 | `/produtividade` | Produtividade | `dados_modulo` (coletor) | todos; supervisor só o time dele |
 | `/iqi` | IQI / IQM | `dados_modulo` (coletor) | todos |
 | `/massivas` | Massivas | `dados_modulo` (coletor) | todos |
+| `/esteira` | **Esteira** de agendamento | tabelas `esteira_*` (migration `0020`, coletor próprio) | todos (pela matriz de Configurações) |
 | `/troca-poste` | Troca de Poste | schema `troca_poste` | todos menos supervisor |
 | `/acoes` | **Ações** | `public.acoes` e cia. | cada um as suas; gestor a área dele |
 | `/processos` | **Processos** | `public.processos` e cia. (migration `0018`) | todos (pela matriz de Configurações); todos editam; gestor da área aprova |
@@ -1003,6 +1010,92 @@ A correção humana é durável: `marcar_coordenadas_colapsadas` tem
 `and g.validacao <> 'manual'` e o upsert da geocodificação preserva `manual`.
 Nenhuma rodada posterior rebaixa o que uma pessoa apontou no mapa.
 
+### Esteira de agendamento: a fila do WVSA, OS a OS, e quem entrou e saiu
+
+Veio do **Esteira-OS** do Renan (app Flask próprio, Supabase próprio
+`aycqeccgmhxjjckrhawq`, Vercel própria, coletor no PC Windows dele) e virou
+módulo do portal em 22/10/2026. O histórico dele foi importado do backup
+(`coletor/importar_esteira_legado.py`, uma vez só).
+
+Página única com duas abas no `.view-switch` — **Painel** (KPIs, entrou/saiu
+por dia, fila por dia, backlog oficial do WVSA, ranks, matriz cidade ×
+finalidade e a tabela) e **Roteirizador** (mapa + rota montada à mão,
+"Abrir no Google Maps") — debaixo de UM filtro que vale para as duas.
+
+**Tudo em `public` com prefixo `esteira_`, não num schema próprio.** Schema
+novo só responde pelo PostgREST depois de marcado à mão em Settings → API →
+Exposed schemas; os módulos nascidos aqui moram todos em `public`.
+
+**O DIA OPERACIONAL vai das 21h às 21h, e é a DATA UTC** (21h de Brasília =
+00h UTC). Mora numa coluna gerada (`esteira_movimentos.dia_operacional`); o
+Python só a usa para saber qual é "hoje" (`esteira.dia_operacional`) e manda
+pronto para a tela. O JS não recalcula.
+
+**`esteira_movimentos` é append-only, uma linha por (dia operacional, tipo,
+OS).** Uma OS que entra duas vezes no mesmo dia conta uma — a definição das
+listas do Esteira-OS, que é o que foi importado. O total diário antigo
+(`fluxo_diario`) contava cada transição e fica 3–10% acima; não foi importado.
+
+⚠️ **Sair da fila NÃO é OS resolvida.** A OS sai ao ser agendada e volta
+quando a visita falha: no histórico, 5.667 voltas, mediana de 1,8 dia. Nenhum
+texto da tela diz "resolvida". E por isso, **fora das retiradas, quase nada na
+fila está agendado** — medido em 22/10/2026: 432 não agendadas e 2 agendadas
+entre 434 OS que não são retirada; as 326 agendadas da fila eram retiradas
+(retirada agendada continua na esteira, o resto sai).
+
+**A coleta é atômica e tem três travas** (`esteira_aplicar_coleta`): recusa
+lista vazia, recusa fila que encolheu para menos da metade (`--forcar` passa)
+e recusa coleta mais antiga que a última. Sem fila ativa nenhuma, a primeira
+coleta é linha de base (zero movimentos). O Esteira-OS fazia `PATCH
+ativa=false` em tudo e depois o upsert: entre os dois o site via zero OS, e
+uma falha no meio fazia a coleta seguinte registrar a fila inteira como
+entrada.
+
+**Lacuna: mais de 12 h sem coleta boa marca, não recusa.** Os movimentos da
+primeira coleta depois disso saem com `apos_lacuna` — a fila mudou de verdade,
+mas não se sabe em que dia — e o gráfico os mostra à parte. Foi o que fez o
+20/10/2026 aparecer com 904 entradas no site antigo (coletor parado de 09/10 a
+19/10). Os 12 h cobrem a noite (22h → 06h).
+
+**Fichas (`/os/{n}`)**: agendamento, idas ao local ("fechada sem sucesso"),
+tentativas de contato e — só para quem ainda não tem — endereço, na MESMA
+leitura. O Esteira-OS lia a ficha duas vezes por OS nova. Endereço e
+coordenada moram na linha da OS (sem `addrcache.json`); OS que volta para a
+fila não é geocodificada de novo.
+
+**O Dashboard lê o bloco "Esteira de agendamento" daqui** (decisão de
+22/10/2026), por `esteira.resumo_dashboard` — a foto do dia (`esteira_backlog
+_diario`, regravada a cada coleta) e o fluxo de hoje, três leituras pequenas
+em SÉRIE (dentro do `supa.paralelo` do Dashboard; paralelo aninhado no mesmo
+pool pode prender as 8 threads). Sem coleta do módulo nas últimas 26 h, o
+bloco volta ao `ger_esteira`. ⚠️ As duas contas são diferentes, e a subnota
+diz qual vale: no mesmo instante de 22/10/2026, `ger_esteira` dava **64
+entraram / 72 saíram** (dia civil desde 08:21, diferença líquida entre fotos)
+e o módulo **224 / 189** (desde 21h de ontem, cada movimento). O
+`ger_esteira` sai do `enviar.py` depois de uma semana com o módulo em produção.
+
+**O que o filtro recorta no fluxo e na fila por dia.** Eles chegam agregados
+por dia, com quebra por finalidade OU por cidade. Precedência: finalidade
+marcada > cidade marcada > "Sem retiradas". Busca, agendamento, tempo na fila
+e reincidência são da fila de AGORA e não recortam o dia — a nota do gráfico
+diz o que ficou de fora.
+
+**Pacote enxuto: 462 KB com 1.095 OS.** Linhas compactas (lista por OS, como
+a Produtividade), catálogo de tags com índice, a tag "Tempo na esteira" fora
+(é o `hrs_parada`, e com o número dentro seriam ~1.100 entradas únicas), a
+última tentativa como `[data, técnico, motivo]` (o texto inteiro pesava 215
+KB) e `solicitacao` fora (a tela não mostra; 51 KB). Medido: 683 → 462 KB.
+
+**Tags na tabela: só as que informam.** Três aparecem em TODAS as OS ("Não
+foi Fechada pelo Técnico", "Não Finalizada", "Não Faturada" — 1.095 de 1.095)
+e o calendário cinza/laranja é o próprio agendamento; ficam fora. Os ícones
+eram Font Awesome, que o portal não carrega: viram texto curto.
+
+O que o módulo **não** faz, de propósito: Telegram (alertas 6/12/18h de
+instalação/mudança não agendada e o resumo das 18h) — fase seguinte, no mesmo
+coletor; "baixar imagem do quadro" (html2canvas por CDN); a projeção do
+próximo mês, que era pendência do próprio Esteira-OS.
+
 ### Papéis
 
 Três, independentes — a pessoa pode ser um, vários ou nenhum:
@@ -1017,7 +1110,7 @@ Três, independentes — a pessoa pode ser um, vários ou nenhum:
 
 Configuração, não código, desde 04/09/2026 (migration `0014`). O admin marca em
 *Configurações → Acesso aos módulos* o que cada pessoa vê; `auth.MODULOS` lista
-os sete configuráveis.
+os oito configuráveis.
 
 ⚠️ A tabela `usuario_modulos_bloqueados` guarda o que foi **TIRADO**, não o que
 foi liberado. Sem linha = vê — que é como o portal sempre funcionou, e por isso
@@ -1178,6 +1271,14 @@ baixo do cabeçalho enquanto está fechado; sem ela sobra um risco separando o
 nada. O estado **não** é guardado: depois de enviar, a página recarrega fechada,
 que é o estado de leitura. Quem abre uma ação vem ver o que ela é e o que foi
 feito, não editar.
+
+Os que nasceram na Esteira:
+
+| Classe | O que é |
+|---|---|
+| `.kpi.es-kpi-clicavel` / `.es-kpi-on` | KPI que liga um filtro ao clique; clicar de novo desliga |
+| `.es-rot` / `.es-card` / `.es-rota` | roteirizador: lista com altura limitada, cartão da OS, lista numerada da rota |
+| `tr.es-vista` | OS que a pessoa já abriu no WVSA a partir da tabela (guardado no navegador) |
 
 **Nada de `confirm()` do navegador.** Ele abre uma caixa do sistema, com o
 domínio no topo, que não pertence à tela — use `.modal` com `<dialog>`. As
@@ -1861,6 +1962,33 @@ mais lenta (~1,7 s só no download do Supabase, daqui) e não foi mexida em
 
 ---
 
+**O histórico do Esteira-OS tem hora local gravada como UTC.** `entrou_fila` e
+`data_evento` das tentativas estavam 3 h no passado em TODAS as linhas
+comparadas com a leitura nova do WVSA (1.091 e 602 de 602, medido em
+22/10/2026) — a armadilha do `datetime.now()` acima, no coletor dele. A
+importação lê o relógio como hora de Brasília. Não é só cosmético: a
+tentativa é única por `(os, data_evento)`, e sem a correção a primeira coleta
+nova gravaria cada tentativa já conhecida como NOVA, 3 h depois. Provado:
+com a correção, a coleta seguinte à importação gravou 1 tentativa (a das
+16:00, posterior ao backup).
+
+**A lista da esteira se lê pelo CABEÇALHO, nunca por índice.** O Esteira-OS
+lia por posição e a coleta dele voltou VAZIA em 22/10/2026 quando o número de
+colunas deixou de ser o esperado. Por índice, uma coluna a menos não dá erro:
+desliza todos os campos. `gerencial.parse_esteira_linhas` acha cada coluna
+pelo nome e serve o Dashboard e o módulo — um parser só. (No mesmo dia, a
+resposta que o NOSSO coletor pede tinha 13 colunas, com "Solicitação"; o
+pedido dele ia como formulário, o daqui vai como JSON.)
+
+**A ficha da OS tem outros blocos com rótulo "Endereço" e "Bairro".** O
+parser herdado às vezes pegava texto de OS relacionada ("RUA TIJUCAS - 596608
+- Previsão: 18:00 …", 1 em 10.378) ou o rótulo vizinho como bairro (25 OS com
+bairro "Endereço"). `coletor/esteira.py` descarta os dois.
+
+**PGlite não aguenta o `supa.paralelo`.** Ele é UMA sessão: conexões
+simultâneas se atropelam e o socket cai. No servidor de ensaio, serialize o
+acesso a ele com uma trava — o paralelo continua no código do app.
+
 ## 7. Ambiente
 
 O coletor precisa de **duas** credenciais do WVSA: `W8_USER`/`W8_PASS` e
@@ -1876,13 +2004,14 @@ O coletor **em execução** vive em `~/unetvale-coletor` (cópia do `coletor/`).
 Editar aqui não muda o que roda: copie o arquivo e confira com `diff`.
 Log em `~/unetvale-coletor/coletor.log`, banco em `dados.db`.
 
-São **três** LaunchAgents, com propósitos diferentes:
+São **quatro** LaunchAgents, com propósitos diferentes:
 
 | Agente | Roda | Quando | Log |
 |---|---|---|---|
 | `com.unetvale.coletor` | `watcher.py` → `enviar.py` (WVSA) | contínuo, grade 08–18h | `coletor.log` |
 | `net.unetvale.troca-poste` | `coletar_celesc.sh` (Celesc) | a cada 15 min; coleta se a rodada de 07h/13h não saiu | `celesc.log` |
 | `net.unetvale.enviar-os` | `enviar_os.py --daemon` (OS no WVSA) | **residente** | `enviar_os.log` |
+| `net.unetvale.esteira` | `esteira.py` (fila de agendamento no WVSA) | a cada 10 min, 06h–22h | `esteira.log` |
 
 O terceiro não tem grade porque a fila dele não se enche por relógio: ela se
 enche quando alguém clica em "Abrir OS" no portal. Uma OS que esperasse o
@@ -1970,6 +2099,53 @@ a.run(port=5001, use_reloader=False)"
 ---
 
 ## 9. Estado atual e pendências
+
+- **Esteira de agendamento** entrou em 22/10/2026, migration `0020` (tabelas
+  `esteira_*` e as funções `esteira_aplicar_coleta`, `_status`, `_backlog`,
+  `esteira_fluxo` e `esteira_importar_legado`), **aplicada em produção pelo
+  Jhoni no mesmo dia** (pelo `psycopg`: o SQL Editor do Supabase enfiou um `;`
+  numa linha diferente a cada colagem) e conferida pelo PostgREST. O porquê
+  está no §4.
+
+  Migration no PGlite: aplicada e reaplicada; 32 travas (linha de base,
+  entrada/saída/reentrada no mesmo dia, lista vazia, encolhimento, coleta fora
+  de ordem, `p_forcar`, lacuna 11h59/12h01, dia operacional 20:59/21:00,
+  append-only, `anon` sem acesso, `service_role` lendo e gravando).
+
+  Coletor contra o WVSA real em `--arquivo` (nada no banco): 1.095 OS, 1.095
+  fichas em 142 s, backlog oficial com 38 linhas. **Paridade com o
+  Esteira-OS** (backup das 15:58 × coleta das 16:23): 1.091 OS em comum (as 9
+  de diferença são o movimento dos 25 min), agendamento igual em 1.090,
+  visitas, contatos, finalidade, cidade, tempo e entrada na fila iguais em
+  100%. Funções puras por script: 28 casos.
+
+  Importação no PGlite com o backup real: contagens = manifesto, segunda
+  rodada grava zero, por dia importado = lista (85 de 85), e a coleta real
+  aplicada em cima gravou **+4/−5** e 1 tentativa nova — exatamente o que
+  mudou.
+
+  Rotas pelo `test_client` num servidor de ensaio (esteira no PGlite, resto
+  lendo produção, toda escrita e o Storage recusados): 31 casos — entrada ruim
+  toda 400, módulo bloqueado 404 nas duas rotas, sem migration e antes da
+  primeira coleta sem 5xx, card no /monitoramento, coluna na matriz. No
+  navegador, com o mouse: cross-filter, `.dropdown` com "só", sem retiradas,
+  KPI que filtra, clique na barra abrindo o dia (01/09: 240 saídas = lista do
+  backup), busca, ordenação, rota e o link do Google Maps; 375 px sem rolar de
+  lado nas duas abas; console limpo. Dashboard: em produção (tabelas vazias)
+  o bloco segue IDÊNTICO ao `ger_esteira`; com o módulo, lê dele.
+
+  **Ainda não feito — a virada (F5 do plano):**
+  * parar o coletor do Renan, exportar backup novo e rodar
+    `importar_esteira_legado.py` contra produção;
+  * copiar `coletor/esteira.py` e `coletor/gerencial.py` para
+    `~/unetvale-coletor` e instalar `net.unetvale.esteira`;
+  * desligar o Tailscale Funnel e a Vercel dele; pausar o Supabase antigo;
+  * contas no portal para quem só tinha login no Esteira-OS;
+  * trocar a senha da Unetvale que foi colada num chat (registro dele).
+
+  **Ainda não exercitado:** o LaunchAgent pelo launchd, a gravação real
+  (`esteira_aplicar_*` contra o PostgREST de produção) e o `Server-Timing`
+  contra o Supabase de verdade (o ensaio serializa o PGlite).
 
 - **Processos — fase 1 (fundação)** em 08/10/2026, migration `0018`
   (todas as tabelas e funções do módulo: processos, fluxos, fotos do fluxo,
