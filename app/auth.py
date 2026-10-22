@@ -42,14 +42,15 @@ def _eh_supervisor_cache(uid):
 # `configuracoes` ficam de fora: os dois primeiros já são admin, e o terceiro é
 # onde a pessoa troca a própria senha — esconder aquilo trancaria alguém para
 # fora da própria conta.
-MODULOS = ("dashboard", "produtividade", "iqi", "massivas", "troca-poste", "acoes",
-           "processos")
+MODULOS = ("dashboard", "produtividade", "iqi", "massivas", "esteira", "troca-poste",
+           "acoes", "processos")
 
 ROTULO_MODULO = {
     "dashboard": "Dashboard",
     "produtividade": "Produtividade",
     "iqi": "IQI / IQM",
     "massivas": "Massivas",
+    "esteira": "Esteira",
     "troca-poste": "Troca de Poste",
     "acoes": "Ações",
     "processos": "Processos",

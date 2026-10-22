@@ -76,6 +76,7 @@ def create_app():
     # Rotas do módulo Processos no mesmo blueprint `dash` (arquivo à parte
     # só por tamanho). Precisa ser importado ANTES do registro do blueprint.
     from . import routes_processos  # noqa: F401
+    from . import routes_esteira  # noqa: F401
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(routes_bp)

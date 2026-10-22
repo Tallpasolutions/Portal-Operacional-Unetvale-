@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Coleta da esteira de agendamento (módulo Esteira, /esteira).
+
+  Instalação (DEPOIS do deploy do app e da importação do histórico — §6,
+  "deploy do app ANTES do coletor"; e a primeira coleta precisa encontrar a
+  fila importada, senão vira linha de base e o histórico do Esteira-OS fica
+  sem continuidade):
+      cp coletor/esteira.py ~/unetvale-coletor/
+      cp coletor/gerencial.py ~/unetvale-coletor/        # parse_esteira_linhas
+      cp coletor/net.unetvale.esteira.plist ~/Library/LaunchAgents/
+      launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/net.unetvale.esteira.plist
+  Rodar na hora (teste, sem gravar no banco):
+      ~/unetvale-coletor/.venv/bin/python ~/unetvale-coletor/esteira.py --arquivo /tmp/esteira.json
+  Log:
+      ~/unetvale-coletor/esteira.log
+
+  Separado do `com.unetvale.coletor` (rodada do WVSA de 2 em 2 h): entrou e
+  saiu da fila é diferença entre duas coletas, e com 2 h de intervalo a OS
+  agendada na mesma manhã em que entrou nunca apareceria. E a varredura das
+  fichas (~3 min com 1.100 OS) não pode atrasar a rodada do Dashboard.
+
+  O horário (06h às 22h) mora no script: fora dele, o tique sai calado.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>net.unetvale.esteira</string>
+
+    <!-- Caminho absoluto do Python do venv: o launchd roda com
+         PATH=/usr/bin:/bin:/usr/sbin:/sbin, e um `python3` solto pegaria o do
+         sistema, sem `requests` nem `bs4` — falha calada. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/jhonicleyton/unetvale-coletor/.venv/bin/python</string>
+        <string>/Users/jhonicleyton/unetvale-coletor/esteira.py</string>
+    </array>
+
+    <!-- 10 min. O launchd não começa uma segunda cópia enquanto a primeira
+         roda, e o script se limita a 8 min por relógio de parede — uma
+         rodada lenta atrasa a próxima, nunca se sobrepõe a ela. -->
+    <key>StartInterval</key>
+    <integer>600</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jhonicleyton/unetvale-coletor/esteira.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jhonicleyton/unetvale-coletor/esteira.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

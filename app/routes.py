@@ -13,7 +13,7 @@ from flask import (
     session, url_for
 )
 
-from . import (acoes, auth, supa, dados, gerencial, reuniao_ia, solicitacao,
+from . import (acoes, auth, supa, dados, esteira, gerencial, reuniao_ia, solicitacao,
                supervisores, troca_poste as tp)
 from .auth import (login_obrigatorio, admin_obrigatorio, modulo_obrigatorio,
                    usuario_atual)
@@ -74,7 +74,7 @@ def injeta_status():
 # onde mandar quem não tem o Dashboard liberado.
 _ENDPOINT_MODULO = {
     "dashboard": "dash.dashboard", "produtividade": "dash.produtividade",
-    "iqi": "dash.iqi", "massivas": "dash.massivas",
+    "iqi": "dash.iqi", "massivas": "dash.massivas", "esteira": "dash.esteira_view",
     "troca-poste": "dash.troca_poste", "acoes": "dash.acoes_view",
     "processos": "dash.processos_view",
 }
@@ -785,6 +785,8 @@ def monitoramento():
     # A Troca de Poste entra na mesma grade por fora, com limiar próprio: ela
     # não mora em `dados_modulo` (ver `tp.resumo_coleta`).
     resumo.append(tp.resumo_coleta())
+    # A Esteira também: mora nas tabelas `esteira_*`, com cadência de 10 min.
+    resumo.append(esteira.resumo_coleta())
     return render_template("monitoramento.html", ativo="monitoramento",
                            resumo=resumo, rodada=rodada, pulso=dados.heartbeat(),
                            logs=dados.get_log(150), coletas=tp.coletas(30))

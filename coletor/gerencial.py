@@ -668,38 +668,24 @@ def coletar_esteira(sessao):
 
 
 def parse_esteira(html):
-    soup = BeautifulSoup(html, "lxml")
-    tabela = soup.find("table")
-    if not tabela:
-        return {"total": 0, "util": 0, "retiradas": 0, "por_finalidade": {}, "oss": []}
-    cabec = _cabecalho(tabela)
-    idx = {n: i for i, n in enumerate(cabec)}
-    i_os, i_fin = idx.get("OS"), idx.get("Finalidade")
-    i_cid, i_fila = idx.get("Cidade"), idx.get("Entrou na fila")
+    """Resumo da fila para o Dashboard, contado a partir das linhas.
 
+    As linhas saem de `parse_esteira_linhas`, que é também o parser do módulo
+    Esteira (`esteira.py`). Um parser só: com dois, a mesma fila teria duas
+    contagens no mesmo dia.
+    """
+    linhas, tem_fila = parse_esteira_linhas(html)
     finalidades, cidades, oss, retiradas = Counter(), Counter(), [], 0
-    for tr in tabela.select("tbody tr"):
-        tds = tr.find_all("td")
-        if i_os is None or i_os >= len(tds):
-            continue
-        # A celula traz "533677 Cristhian Gazziero" — numero da OS e quem abriu.
-        m = re.match(r"\s*(\d+)", tds[i_os].get_text(" ", strip=True))
-        if m:
-            oss.append(int(m.group(1)))
-        fin = _limpa(tds[i_fin].get_text(" ", strip=True)) if i_fin is not None and i_fin < len(tds) else ""
+    for l in linhas:
+        if l["os"] is not None:
+            oss.append(l["os"])
+        fin = l["finalidade"]
         if fin:
             finalidades[fin] += 1
             if fin.lower().startswith(_FINALIDADES_RETIRADA):
                 retiradas += 1
-        if i_cid is not None and i_cid < len(tds):
-            # A celula traz DOIS spans: cidade e, embaixo, bairro
-            # ("Balneario Picarras" / "N SENHORA DA CONCEICAO"). O texto
-            # concatenado nao da para separar por espaco — "Porto Belo" virava
-            # "Porto". O primeiro span e a cidade.
-            span = tds[i_cid].find("span")
-            c = _limpa(span.get_text(" ", strip=True)) if span else ""
-            if c:
-                cidades[c] += 1
+        if l["cidade"]:
+            cidades[l["cidade"]] += 1
 
     total = len(oss)
     return {
@@ -709,8 +695,73 @@ def parse_esteira(html):
         "por_finalidade": dict(finalidades.most_common()),
         "cidades": dict(cidades.most_common(15)),
         "oss": oss,
-        "tem_entrada_na_fila": i_fila is not None,
+        "tem_entrada_na_fila": tem_fila,
     }
+
+
+def parse_esteira_linhas(html):
+    """Uma linha por OS da esteira, com as colunas achadas PELO CABEÇALHO.
+
+    Devolve `(linhas, tem_coluna_entrou_na_fila)`. Linha sem número de OS
+    legível vem com `os=None` (o resumo do Dashboard sempre contou a
+    finalidade dela; o módulo a descarta).
+
+    O Esteira-OS do Renan lia por índice fixo, e a coleta dele voltou VAZIA
+    em 22/10/2026 quando o número de colunas deixou de ser o esperado (o
+    registro dele fala em 12; a resposta que ESTE coletor pede tinha 13 no
+    mesmo dia, medido às 16h — o pedido dele ia como formulário, o daqui vai
+    como JSON). Por índice, uma coluna a menos não dá erro: desliza todos os
+    campos à direita dela. Aqui coluna que sai do cabeçalho vira "" no campo
+    dela, e nada muda de lugar.
+    """
+    soup = BeautifulSoup(html, "lxml")
+    tabela = soup.find("table")
+    if not tabela:
+        return [], False
+    idx = {n: i for i, n in enumerate(_cabecalho(tabela))}
+
+    def col(tds, nome):
+        i = idx.get(nome)
+        return tds[i] if i is not None and i < len(tds) else None
+
+    def txt(td):
+        return _limpa(td.get_text(" ", strip=True)) if td is not None else ""
+
+    linhas = []
+    for tr in tabela.select("tbody tr"):
+        tds = tr.find_all("td")
+        c_os = col(tds, "OS")
+        if c_os is None:
+            continue
+        # A celula traz "533677 Cristhian Gazziero" — numero da OS e quem abriu.
+        m = re.match(r"\s*(\d+)\s*(.*)", c_os.get_text(" ", strip=True))
+        # Cidade: DOIS spans, cidade e, embaixo, bairro ("Balneario Picarras"
+        # / "N SENHORA DA CONCEICAO"). O texto concatenado nao da para
+        # separar por espaco — "Porto Belo" virava "Porto". O primeiro span e
+        # a cidade.
+        c_cid = col(tds, "Cidade")
+        spans = c_cid.find_all("span") if c_cid is not None else []
+        cidade = txt(spans[0]) if spans else ""
+        bairro = txt(spans[1]) if len(spans) > 1 else ""
+        # Dados: o span guarda o nome COMPLETO; o texto da celula vem cortado
+        # com "..." ("IVANIZE RAIMUNDO FIS...").
+        c_dados = col(tds, "Dados")
+        span_cli = c_dados.find("span") if c_dados is not None else None
+        c_tags = col(tds, "Tags")
+        linhas.append({
+            "os": int(m.group(1)) if m else None,
+            "aberto_por": _limpa(m.group(2)) if m else "",
+            "cliente": txt(span_cli) if span_cli is not None else txt(c_dados),
+            "solicitacao": txt(col(tds, "Solicitação")),
+            "finalidade": txt(col(tds, "Finalidade")),
+            "cidade": cidade,
+            "bairro": bairro,
+            "tipo_pessoa": txt(col(tds, "Tipo pessoa")),
+            "categorias": txt(col(tds, "Categorias")),
+            "entrou_fila_txt": txt(col(tds, "Entrou na fila")),
+            "tags_td": c_tags,
+        })
+    return linhas, "Entrou na fila" in idx
 
 
 # ==========================================================================

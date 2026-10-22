@@ -11,6 +11,7 @@ from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 
 from . import dados, supa, supervisores
+from . import esteira as esteira_mod  # o bloco da esteira lê do módulo (ver `pacote`)
 
 BR_TZ = timezone(timedelta(hours=-3))
 
@@ -523,8 +524,8 @@ def pacote():
     # Seis leituras independentes, juntas ao banco (07/10/2026: eram seis
     # viagens em série). Os payloads de IQI e IQM entram aqui só para aquecer
     # o cache da requisição (`dados.get_modulo`): quem os usa é `qualidade`.
-    p, mapa, cfg, movimento, _, _ = supa.paralelo(
-        _payloads, metas, config, movimento_esteira,
+    p, mapa, cfg, movimento, do_modulo, _, _ = supa.paralelo(
+        _payloads, metas, config, movimento_esteira, esteira_mod.resumo_dashboard,
         lambda: dados.get_modulo("iqi"), lambda: dados.get_modulo("iqm"))
     quantos = meses_visiveis(cfg)
 
@@ -532,7 +533,15 @@ def pacote():
         return (p.get(m) or {}).get("payload") or {}
 
     cat = payload("ger_categorias")
-    esteira = payload("ger_esteira")
+    # A esteira vem do módulo Esteira quando ele tem coleta recente — uma
+    # coleta e uma definição de entrou/saiu para as duas telas. Sem ela
+    # (antes da virada, ou coletor parado há mais de um dia), o bloco segue
+    # no `ger_esteira` da rodada do WVSA, como sempre foi.
+    if do_modulo:
+        esteira = do_modulo
+        movimento = do_modulo["movimento"]
+    else:
+        esteira = payload("ger_esteira")
     salas = payload("ger_salas")
     idf = payload("ger_idf")
 
