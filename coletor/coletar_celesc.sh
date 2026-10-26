@@ -222,7 +222,16 @@ for etapa in tp:coletar tp:geocodificar tp:sync-rede tp:match; do
       total=$(grep '"msg":"coleta_concluida"' "$LOG" | tail -1 |
               sed -n 's/.*"total":\([0-9]*\).*/\1/p')
       if [ "${total:-0}" -eq 0 ]; then
-        registrar "   $etapa VOLTOU VAZIO (0 desligamentos) — a Celesc não respondeu"
+        # Desde 21/10/2026 o site responde 503 com a página de manutenção, e
+        # "não respondeu" mandava procurar defeito do nosso lado. O cliente
+        # do monorepo põe "em manutenção" no erro da cidade; aqui só se lê
+        # o trecho do log desta rodada (depois do último coleta_iniciada).
+        motivo="a Celesc não respondeu"
+        if awk '/"msg":"coleta_iniciada"/{n=NR} {l[NR]=$0} END{for(i=n;i<=NR;i++) print l[i]}' "$LOG" |
+             grep -q 'em manutenção'; then
+          motivo="o site da Celesc está EM MANUTENÇÃO (HTTP 503) — nada a corrigir deste lado"
+        fi
+        registrar "   $etapa VOLTOU VAZIO (0 desligamentos) — $motivo"
         falhas=$((falhas + 1))
         break
       fi

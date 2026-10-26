@@ -27,6 +27,7 @@ import re
 import sqlite3
 import subprocess
 import sys
+import time
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -49,25 +50,50 @@ def log(msg):
 # --------------------------------------------------------------------------
 # Supabase
 # --------------------------------------------------------------------------
+# Esperas entre as tentativas do upsert. O Supabase é compartilhado: um 500
+# `57014` (statement timeout de 8 s) ou um 520 da Cloudflare costuma passar em
+# segundos — medido em 26/10/2026, de quatro gravações seguidas do mesmo
+# payload, duas passaram e duas não. Desistir na primeira jogava fora a coleta
+# inteira do módulo (o extrator da Produtividade leva ~1 min) até a rodada
+# seguinte, 2 h depois.
+UPSERT_ESPERAS = (10, 30)
+
+
 def supa_upsert(modulo, payload, status="ok"):
     url = os.environ["SUPABASE_URL"].rstrip("/")
     key = os.environ["SUPABASE_SERVICE_KEY"]
-    r = requests.post(
-        f"{url}/rest/v1/dados_modulo",
-        params={"on_conflict": "modulo"},
-        headers={
-            "apikey": key, "Authorization": f"Bearer {key}",
-            "Content-Type": "application/json",
-            "Prefer": "resolution=merge-duplicates,return=minimal",
-        },
-        json={
-            "modulo": modulo, "payload": payload, "status": status,
-            "atualizado_em": datetime.now(timezone.utc).isoformat(),
-        },
-        timeout=30,
-    )
-    r.raise_for_status()
-    log(f"  -> Supabase: {modulo} ({status})")
+    # Serializa uma vez só: o payload não muda entre as tentativas, e o
+    # `json=` do requests refaria o trabalho a cada uma.
+    corpo = json.dumps({
+        "modulo": modulo, "payload": payload, "status": status,
+        "atualizado_em": datetime.now(timezone.utc).isoformat(),
+    }, ensure_ascii=False, separators=(",", ":")).encode()
+    for tentativa, espera in enumerate((*UPSERT_ESPERAS, None), start=1):
+        try:
+            r = requests.post(
+                f"{url}/rest/v1/dados_modulo",
+                params={"on_conflict": "modulo"},
+                headers={
+                    "apikey": key, "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json",
+                    "Prefer": "resolution=merge-duplicates,return=minimal",
+                },
+                data=corpo,
+                timeout=60,
+            )
+            # 4xx é recusa do pedido (chave, coluna, JSON): repetir não muda.
+            if r.status_code < 500:
+                r.raise_for_status()
+                break
+            erro = requests.HTTPError(
+                f"{r.status_code} do Supabase: {r.text[:200]}", response=r)
+        except (requests.Timeout, requests.ConnectionError) as e:
+            erro = e
+        if espera is None:
+            raise erro
+        log(f"  !! Supabase recusou {modulo} (tentativa {tentativa}): {erro} — de novo em {espera}s")
+        time.sleep(espera)
+    log(f"  -> Supabase: {modulo} ({status}, {len(corpo) / 1e6:.1f} MB)")
 
 
 def supa_ler(modulo):
@@ -217,25 +243,43 @@ def coletar_produtividade(full=False):
         m = re.sub(r"^[Nn][ãa]o\s*-\s*(\d+\s*)?", "", s).strip()
         return False, (m or "Não informado")
 
-    registros = []
+    # Formato `v: 2` — uma LINHA por OS, na ordem
+    #   [d, e, t, ti, f, su, rj, ta, mo?]
+    # com dia, empresa, técnico e id do técnico como índice nas listas `dias`,
+    # `emp`, `tec` e `tid`. O registro com chaves (`v: 1`) chegou a 6,8 MB em
+    # 26/10/2026, e o upsert passou a estourar o statement timeout de 8 s do
+    # PostgREST (500 `57014`) quase todo dia; compacto são 1,35 MB e grava em
+    # 3–5 s. `mo` vai no FIM porque só existe na OS não concluída. Quem volta
+    # ao formato de registro é `app/dados.expandir_produtividade` — a tela, o
+    # recorte de supervisor e o JS não mudaram. As listas são refeitas a cada
+    # rodada (o payload é regravado inteiro), então não há índice antigo para
+    # preservar, ao contrário das do `ger_categorias`.
+    dia_list, dia_idx = [], {}
+    emp_list, emp_idx = [], {}
+    tec_list, tec_idx = [], {}
+    tid_list, tid_idx = [], {}
+    linhas = []
     for r in rows:
         su, mot = sucesso_motivo(r["sucesso"])
-        rec = {
-            "d": r["dia"], "e": r["empresa"] or "—", "t": r["tecnico"] or "—",
-            "ti": r["tecnico_id"],
-            "f": idx_of(r["finalidade"] or "—", fin_idx, fin_list),
-            "su": 1 if su else 0,
-            "rj": 1 if (r["rejeitada"] or "").strip().lower() == "sim" else 0,
-            "ta": 1 if (r["tipo_atendimento"] or "").strip().lower() == "externo" else 0,
-        }
+        linha = [
+            idx_of(r["dia"], dia_idx, dia_list),
+            idx_of(r["empresa"] or "—", emp_idx, emp_list),
+            idx_of(r["tecnico"] or "—", tec_idx, tec_list),
+            idx_of(r["tecnico_id"], tid_idx, tid_list),
+            idx_of(r["finalidade"] or "—", fin_idx, fin_list),
+            1 if su else 0,
+            1 if (r["rejeitada"] or "").strip().lower() == "sim" else 0,
+            1 if (r["tipo_atendimento"] or "").strip().lower() == "externo" else 0,
+        ]
         if not su:
-            rec["mo"] = idx_of(mot, mot_idx, mot_list)
-        registros.append(rec)
+            linha.append(idx_of(mot, mot_idx, mot_list))
+        linhas.append(linha)
 
     meta = {m["chave"]: m["valor"] for m in conn.execute("SELECT chave, valor FROM meta")}
     conn.close()
     payload = {
-        "registros": registros, "total": len(registros),
+        "v": 2, "linhas": linhas, "total": len(linhas),
+        "dias": dia_list, "emp": emp_list, "tec": tec_list, "tid": tid_list,
         "fin": fin_list, "mot": mot_list,
         "ultima_atualizacao": meta.get("ultima_atualizacao"),
         "intervalo": meta.get("intervalo"),
@@ -460,6 +504,31 @@ def wvsa_alcancavel():
         return False
 
 
+# Uma segunda chance por módulo quando o WVSA demora. Medido de 21 a 26/10/2026:
+# extrator da Produtividade com `Read timed out` (120 s) em 22 e 23/10 e Massivas
+# com `Read timed out` (180 s) em 26/10 — e nos três casos a rodada seguinte
+# passou. O módulo ficava em "Erro" por 2 h por causa de uma resposta lenta.
+REPETIR_MODULO_S = 30
+
+
+def falha_passageira(e):
+    """Vale repetir o módulo? Só para lentidão ou queda do WVSA.
+
+    `CalledProcessError` é o extrator ou o `fetch_wvsa.py` morrendo — nos logs,
+    sempre por timeout de leitura no WVSA. Erro do SUPABASE fica de fora: o
+    `supa_upsert` já repetiu três vezes, e refazer a coleta inteira só para
+    regravar o mesmo payload seria martelar o banco que acabou de recusar.
+    """
+    if isinstance(e, subprocess.TimeoutExpired):
+        return False  # 30 min sem terminar não é lentidão passageira
+    if isinstance(e, subprocess.CalledProcessError):
+        return True
+    if isinstance(e, (requests.Timeout, requests.ConnectionError)):
+        url = getattr(getattr(e, "request", None), "url", "") or ""
+        return "supabase" not in url
+    return False
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--full", action="store_true",
@@ -483,15 +552,27 @@ def main():
     # cards exibe o carimbo da rodada anterior, e isso já passou por defeito.
     log_evento("geral", "inicio", f"Rodada iniciada ({len(alvos)} módulos)")
 
+    def rodar_modulo(modulo):
+        if modulo == "produtividade" or modulo.startswith("ger_"):
+            # Estes aceitam `full`: para a Produtividade é recriar o SQLite,
+            # para os `ger_*` é o backfill dos 13 meses.
+            return MODULOS[modulo](full=args.full)
+        return MODULOS[modulo]()
+
     falhas = 0
     for modulo in alvos:
         try:
-            if modulo == "produtividade" or modulo.startswith("ger_"):
-                # Estes aceitam `full`: para a Produtividade é recriar o SQLite,
-                # para os `ger_*` é o backfill dos 13 meses.
-                msg = MODULOS[modulo](full=args.full)
-            else:
-                msg = MODULOS[modulo]()
+            try:
+                msg = rodar_modulo(modulo)
+            except Exception as e:  # noqa
+                # WVSA fora do ar não é lentidão: repetir só somaria outro
+                # timeout por módulo, e a rodada passaria dos 30 min com que o
+                # watcher a mata.
+                if not falha_passageira(e) or not wvsa_alcancavel():
+                    raise
+                log(f"  !! {modulo}: {e} — nova tentativa em {REPETIR_MODULO_S}s")
+                time.sleep(REPETIR_MODULO_S)
+                msg = rodar_modulo(modulo)
             # Módulo que devolve texto não coletou de propósito (cadência
             # própria) — o log diz isso, em vez de "Atualizado".
             log_evento(modulo, "ok", msg if isinstance(msg, str) else "Atualizado com sucesso")

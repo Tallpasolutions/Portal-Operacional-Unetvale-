@@ -100,9 +100,47 @@ def get_modulo(modulo):
         )
     except Exception:
         return None
+    if modulo == "produtividade" and row:
+        row["payload"] = expandir_produtividade(row.get("payload"))
     if cache is not None:
         cache[modulo] = row
     return row
+
+
+# Ordem das posições na linha compacta da Produtividade (`v: 2`). `mo` fica no
+# FIM porque só existe quando a OS não foi concluída — a linha sem ele tem 8
+# posições, e um campo opcional no meio deslocaria os seguintes.
+_CAMPOS_PROD = ("d", "e", "t", "ti", "f", "su", "rj", "ta", "mo")
+
+
+def expandir_produtividade(payload):
+    """Devolve o payload da Produtividade no formato de registro (`v: 1`).
+
+    Em 26/10/2026 o payload de registro chegou a 6,8 MB (57.379 OS) e o upsert
+    do coletor passou a ser cancelado pelo `statement_timeout` de 8 s do
+    PostgREST (`57014`): gravar levava 15–20 s, e a Produtividade ficava em
+    "Erro" quase todo dia. O coletor passou a gravar em linhas compactas, com
+    data, empresa, técnico e id como índice de listas (1,35 MB) — e é aqui,
+    num ponto só, que elas voltam a ser os dicionários que a rota, o recorte de
+    supervisor e o JS sempre leram. O formato antigo passa intacto: o app sobe
+    antes do coletor (§6, ordem de deploy).
+    """
+    if not isinstance(payload, dict) or "linhas" not in payload:
+        return payload
+    listas = {"d": payload.get("dias") or [], "e": payload.get("emp") or [],
+              "t": payload.get("tec") or [], "ti": payload.get("tid") or []}
+    registros = []
+    for linha in payload.get("linhas") or []:
+        rec = {}
+        for campo, valor in zip(_CAMPOS_PROD, linha):
+            lista = listas.get(campo)
+            rec[campo] = lista[valor] if lista is not None else valor
+        registros.append(rec)
+    p = {k: v for k, v in payload.items()
+         if k not in ("v", "linhas", "dias", "emp", "tec", "tid")}
+    p["registros"] = registros
+    p["total"] = len(registros)
+    return p
 
 
 def get_todos():

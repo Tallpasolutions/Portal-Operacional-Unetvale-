@@ -130,8 +130,18 @@ def motivo_para_rodar():
 
 def rodar(motivo):
     log(f"Disparando coleta ({motivo})…")
+    # Sob `caffeinate -ims`, como o `coletar_celesc.sh`: em 22/10/2026 a rodada
+    # disparada às 21:47 dormiu junto com o Mac no meio das Massivas e só
+    # "terminou" às 04:18, com seis módulos em `connect timeout` gravados como
+    # erro — de madrugada, numa rede que já não existia. `-i` segura o idle
+    # sleep na bateria, `-s` o system sleep na tomada. Tampa fechada na bateria
+    # ainda dorme; isso nenhuma asserção vence. O `caffeinate` morre com o
+    # filho, então não sobra asserção depois da rodada.
+    cmd = [PY, os.path.join(DIR, "enviar.py")]
+    if os.path.exists("/usr/bin/caffeinate"):
+        cmd = ["/usr/bin/caffeinate", "-ims", *cmd]
     try:
-        subprocess.run([PY, os.path.join(DIR, "enviar.py")], cwd=DIR, timeout=1800)
+        subprocess.run(cmd, cwd=DIR, timeout=1800)
         log("coleta concluída")
     except Exception as e:  # noqa
         log(f"erro ao executar enviar.py: {e}")
