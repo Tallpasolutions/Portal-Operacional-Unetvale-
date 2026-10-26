@@ -1955,10 +1955,65 @@ IGUAL ao da `main`. Três consequências:
 `[tempo]` no log da Vercel. `supa` é a SOMA das idas: passar do `total` é o
 paralelo funcionando. Ao mexer numa rota, compare as idas antes e depois.
 
-⚠️ **A Produtividade baixa 6,3 MB do banco a cada abertura** (o payload inteiro
-de `dados_modulo`, 53.992 OS) e manda tudo para o navegador. É hoje a tela
-mais lenta (~1,7 s só no download do Supabase, daqui) e não foi mexida em
-07/10/2026: emagrecer o payload muda o contrato com o coletor.
+⚠️ **A Produtividade manda ~6,7 MB de HTML para o navegador** (57.382 OS em
+26/10/2026, uma por dicionário no `window.__PAYLOAD__`). Do BANCO ela baixa
+1,35 MB desde 26/10/2026 (formato `v: 2`, ver adiante), mas o JS continua
+recebendo o formato de registro: emagrecer também o que vai ao navegador
+muda o contrato com o `produtividade.js`.
+
+**O upsert da Produtividade estourava o `statement_timeout` — e era o "erro de
+coleta" de quase todo dia.** O `authenticator` do Supabase tem
+`statement_timeout=8s` (a `service_role` herda; `anon` 3 s, `authenticated`
+8 s — lido em `pg_roles` em 26/10/2026). Gravar o payload de registro, 6,8 MB
+de jsonb, levava 15–20 s: de 21 a 26/10/2026 a Produtividade caiu sete vezes
+com `500 … 57014 canceling statement due to statement timeout` (e um 520 da
+Cloudflare e um `Read timed out` no mesmo POST), com o dado anterior
+preservado e o card em "Erro". De quatro gravações seguidas do mesmo payload,
+duas passavam — por isso parecia intermitente, e piorava sozinho, porque o
+payload cresce a cada OS.
+
+Hoje o coletor grava `v: 2`: uma LISTA por OS, `[d, e, t, ti, f, su, rj, ta,
+mo?]`, com dia, empresa, técnico e id como índice de `dias`/`emp`/`tec`/`tid`
+— 1,35 MB, gravando em 1,7–3,8 s (cinco seguidas, medido). Quem volta ao
+formato de registro é **`dados.expandir_produtividade`**, chamada dentro do
+`get_modulo` — o ÚNICO caminho por onde a rota, o recorte de supervisor e as
+Configurações leem a Produtividade. Provado: payload expandido = payload
+antigo byte a byte (57.382 registros, ordem das chaves inclusive) e HTML de
+`/produtividade` (admin, usuário, supervisor) e `/configuracoes` IGUAL nos
+dois formatos. `mo` mora no fim porque só existe na OS não concluída. Ao
+contrário do `ger_categorias`, as listas podem ser refeitas a cada rodada:
+o payload é regravado inteiro, não há índice velho apontando para elas.
+
+Não se aumentou o `statement_timeout`: ele vale para toda consulta do app
+(que também usa a `service_role`), e uma leitura ruim passaria a prender a
+função por 30 s em vez de falhar em 8.
+
+**`supa_upsert` repete 5xx e timeout (10 s, 30 s) antes de desistir**, e o
+módulo inteiro ganha UMA segunda tentativa quando a falha é lentidão do WVSA
+(`enviar.falha_passageira`: extrator/`fetch_wvsa.py` morrendo, `Read timed
+out` do WVSA). Erro do Supabase não refaz o módulo — o upsert já repetiu — e,
+com o WVSA inalcançável na hora de repetir, não se repete: somaria um
+timeout por módulo e a rodada passaria dos 30 min com que o watcher a mata.
+
+**O `enviar.py` dormia junto com o Mac no meio da rodada.** Em 22/10/2026 a
+rodada disparada às 21:47 parou nas Massivas e só "terminou" às 04:18, com
+seis módulos marcados como erro por `connect timeout` de madrugada. O watcher
+agora o roda sob `/usr/bin/caffeinate -ims`, como o `coletar_celesc.sh`.
+Tampa fechada na bateria continua dormindo.
+
+**Celesc em manutenção não é defeito nosso — e a tela agora diz.** De
+21/10/2026 em diante `avisodesligamento.celesc.com.br` responde **503 com a
+página "AVISO DE MANUTENÇÃO"** e `Retry-After: 3600`, em GET e POST, para
+qualquer cidade (conferido com `curl` em 26/10/2026; a página oficial
+`celesc.com.br/avisos-de-desligamentos` continua apontando para o mesmo
+endereço — não há fonte nova). Antes o log dizia só "HTTP 503" e "a Celesc
+não respondeu", e `troca_poste.coletas.erro` ficava NULL com as 11 cidades
+falhando. Hoje o `CelescClient` (monorepo) lê o corpo do erro e escreve
+"HTTP 503 — site da Celesc em manutenção", o `gravarColeta` grava em
+`coletas.erro` o resumo ("11 de 11 cidades falharam: …", agrupado por
+mensagem) — que o `/monitoramento` já exibia embaixo do selo — e o
+`coletar_celesc.sh` troca a frase da rodada vazia. Nada a fazer até o site
+voltar: o agendador de 15 em 15 min coleta sozinho no primeiro tique depois.
 
 ---
 
@@ -2776,6 +2831,37 @@ a.run(port=5001, use_reloader=False)"
   **Ainda não exercitado:** o `vercel.json` novo (região e build estático) só
   se prova no deploy — conferir `x-vercel-id: …::pdx1::…` e, no CSS,
   `cache-control: …immutable`.
+
+- **Erros de coleta diários** (26/10/2026, sem migration). Quatro causas
+  independentes nos logs de 21 a 26/10, o porquê de cada uma no §6:
+  Produtividade estourando o `statement_timeout` no upsert (payload `v: 2`),
+  lentidão passageira do WVSA (segunda tentativa), rodada dormindo com o Mac
+  (`caffeinate` no watcher) e a Celesc em manutenção (motivo gravado e
+  exibido — não há o que consertar do nosso lado).
+
+  Provado: payload novo expandido = antigo (57.382 registros, JSON inteiro
+  igual, de uma cópia congelada do `dados.db`); HTML de `/produtividade` e
+  `/configuracoes` igual nos dois formatos pelo `test_client` (admin, usuário,
+  dois recortes de supervisor; escrita recusada); cinco upserts reais do `v:
+  2` numa linha descartável (`zz_teste_upsert`, apagada depois) em 1,7–3,8 s,
+  contra 2 de 4 do formato antigo; retentativa do upsert, `falha_passageira`
+  e a segunda tentativa do módulo com respostas simuladas (16 casos); a
+  detecção de manutenção do `coletar_celesc.sh` sobre dois logs de teste;
+  `CelescClient` contra o site real em
+  manutenção e `gravarColeta` com pool falso (todas falham, mista, tudo ok).
+
+  ⚠️ **Ordem de deploy (§6): app ANTES do coletor.** O app velho leria
+  `registros` vazio do payload `v: 2` e a Produtividade apareceria sem
+  nenhuma OS. Mergear → Vercel publicar → só então copiar `enviar.py` e
+  `watcher.py` para `~/unetvale-coletor` e reiniciar o
+  `com.unetvale.coletor` (o watcher é residente: sem reiniciar, o
+  `caffeinate` não entra). O `coletar_celesc.sh` não depende do app e pode
+  ser copiado a qualquer hora.
+
+  **Ainda não exercitado:** a primeira rodada do coletor novo em produção, e
+  a Celesc voltando do ar com o cliente novo. As duas mudanças do monorepo
+  (`client.ts`, `repository-coletas.ts`) estão no working tree dele, sem
+  commit, ao lado das de 29/09 que já estavam lá.
 
 - **Backup do Supabase não foi confirmado.** Ações e Troca de Poste não têm de
   onde ser recoletados. Confirme antes de qualquer operação destrutiva.
