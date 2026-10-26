@@ -2858,8 +2858,20 @@ a.run(port=5001, use_reloader=False)"
   `caffeinate` não entra). O `coletar_celesc.sh` não depende do app e pode
   ser copiado a qualquer hora.
 
-  **Ainda não exercitado:** a primeira rodada do coletor novo em produção, e
-  a Celesc voltando do ar com o cliente novo. As duas mudanças do monorepo
+  **Instalado em 26/10/2026**, nessa ordem: #56 mergeado, Vercel servindo
+  `?v=c0e49fe7` às 09:10:46, os três arquivos copiados para
+  `~/unetvale-coletor` (backup em `bak-20261026-coleta/`) e o agente
+  reiniciado com `launchctl kickstart -k`. A primeira rodada, por pedido
+  manual às 09:11, saiu **9/9 em 5 min**, sem nenhuma retentativa: a
+  Produtividade gravou 1,3 MB (`v: 2`, 57.385 OS); o `enviar.py` rodou como
+  filho do `caffeinate -ims`, com a asserção de pé durante a rodada e **zero**
+  depois. O código de produção, lendo o payload real do banco pelo
+  `test_client`, serviu `/produtividade` com as 57.385 OS como registro (sem
+  `linhas` cruas no HTML), para admin e para usuário comum.
+
+  **Ainda não exercitado:** a retentativa do upsert e do módulo numa falha
+  de verdade (só com respostas simuladas), e a Celesc voltando do ar com o
+  cliente novo. As duas mudanças do monorepo
   (`client.ts`, `repository-coletas.ts`) estão no working tree dele, sem
   commit, ao lado das de 29/09 que já estavam lá.
 
