@@ -522,7 +522,10 @@ def falha_passageira(e):
     if isinstance(e, subprocess.TimeoutExpired):
         return False  # 30 min sem terminar não é lentidão passageira
     if isinstance(e, subprocess.CalledProcessError):
-        return True
+        # Código 2 é o extrator recusando de propósito (coleta degradada ou
+        # cabeçalho do relatório sem coluna obrigatória): a segunda tentativa
+        # receberia a mesma resposta.
+        return e.returncode != 2
     if isinstance(e, (requests.Timeout, requests.ConnectionError)):
         url = getattr(getattr(e, "request", None), "url", "") or ""
         return "supabase" not in url
