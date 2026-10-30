@@ -17,6 +17,7 @@ import re
 import sqlite3
 import sys
 import time
+import unicodedata
 from datetime import date, datetime, timedelta
 
 import requests
@@ -27,12 +28,43 @@ CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 DB_PATH = os.path.join(BASE_DIR, "dados.db")
 RAW_DIR = os.path.join(BASE_DIR, "raw")
 
-# Colunas da tabela de OS, na ordem em que aparecem no HTML
-COLUNAS = [
-    "data", "finalidade", "condominio", "sucesso", "massiva", "tipo_atendimento",
-    "trocado_drop", "sub_aereo", "agregada", "rejeitada", "qtd_tecnicos",
-    "validada", "os", "valor",
-]
+# Colunas da tabela de OS: texto do <th> (normalizado por `_chave_th`) -> campo.
+#
+# A tabela se lê pelo CABEÇALHO, nunca por posição. Até 30/10/2026 o extrator
+# lia por índice, e o WVSA passou a mandar "Pagamento Manual" entre "Validada"
+# e "OS": em set e out/2026, `os` recebeu o "Sim"/"Não" do pagamento manual e
+# `valor` o número da OS (soma de R$ 3,4 bi num mês de ~R$ 500 mil), sem erro
+# nenhum. E o WVSA devolve a coluna nova também para datas antigas — um
+# `--full` com o extrator velho entortaria o histórico inteiro.
+#
+# No template do WVSA, "Finalidade" e "Pagamento Manual" vêm de blocos
+# condicionais (a indentação do HTML denuncia): a lista de colunas pode mudar
+# de novo sem aviso.
+COLUNAS_TH = {
+    "data": "data",
+    "finalidade": "finalidade",
+    "condominio": "condominio",
+    "sucesso": "sucesso",
+    "massiva": "massiva",
+    "tipo de atendimento": "tipo_atendimento",
+    "trocado drop": "trocado_drop",
+    "sub/aereo": "sub_aereo",
+    "agregada": "agregada",
+    "rejeitada": "rejeitada",
+    "tecnicos": "qtd_tecnicos",
+    "validada": "validada",
+    "pagamento manual": "pagamento_manual",
+    "os": "os",
+    "valor": "valor",
+}
+
+# Sem estas, gravar é pior que falhar. Data/Finalidade/Sucesso/Rejeitada/Tipo
+# de atendimento são o que o payload da Produtividade leva para a tela
+# (`enviar.coletar_produtividade`); OS e Valor são o que se cruza depois no
+# `dados.db` — e foram exatamente os dois que o deslocamento estragou calado.
+# As demais faltando viram NULL e um aviso no log.
+COLUNAS_OBRIGATORIAS = ("data", "finalidade", "sucesso", "rejeitada",
+                        "tipo_atendimento", "os", "valor")
 
 
 def log(msg):
@@ -154,10 +186,49 @@ def extrair_html(resposta_texto):
     return resposta_texto
 
 
+class LayoutInesperado(RuntimeError):
+    pass
+
+
+def _chave_th(txt):
+    """'Condomínio' -> 'condominio'. Sem acento e sem caixa: um acento a menos
+    no cabeçalho não pode virar "coluna obrigatória faltando"."""
+    txt = unicodedata.normalize("NFKD", _limpa(txt))
+    return "".join(c for c in txt if not unicodedata.combining(c)).casefold()
+
+
+def mapear_colunas(tabela):
+    """Devolve {posição: campo} a partir do <thead> da tabela.
+
+    Coluna que o extrator não conhece é ignorada (devolvida à parte para o
+    log); obrigatória faltando levanta `LayoutInesperado`, ANTES de qualquer
+    `limpar_intervalo` — nada é apagado.
+    """
+    linha_th = tabela.find("thead")
+    ths = linha_th.find_all("th") if linha_th else []
+    if not ths:
+        raise LayoutInesperado("tabela de OS sem <thead>: não há como saber qual coluna é qual")
+    mapa, desconhecidas = {}, []
+    for i, th in enumerate(ths):
+        texto = _limpa(th.get_text(" ", strip=True))
+        campo = COLUNAS_TH.get(_chave_th(texto))
+        if campo:
+            mapa[i] = campo
+        else:
+            desconhecidas.append(texto)
+    faltando = [c for c in COLUNAS_OBRIGATORIAS if c not in mapa.values()]
+    if faltando:
+        cab = [_limpa(th.get_text(" ", strip=True)) for th in ths]
+        raise LayoutInesperado(
+            f"cabeçalho da tabela de OS sem {', '.join(faltando)}. Cabeçalho recebido: {cab}")
+    return mapa, len(ths), desconhecidas
+
+
 def parse_html(resposta_texto):
     """Retorna lista de dicts, uma OS por linha, com técnico/empresa associados."""
     html = extrair_html(resposta_texto)
     soup = BeautifulSoup(html, "lxml")
+    avisos = set()
 
     # Mapa tecnico_id -> "EMPRESA - Nome" a partir das abas (nav-tabs)
     rotulos = {}
@@ -178,17 +249,24 @@ def parse_html(resposta_texto):
         tabela = pane.find("table")
         if not tabela:
             continue
+        # Cada técnico tem a própria tabela, com o próprio <thead>: o mapa é
+        # por tabela, não um só para a página.
+        mapa, n_colunas, desconhecidas = mapear_colunas(tabela)
+        avisos.update(desconhecidas)
         tbody = tabela.find("tbody") or tabela
         for tr in tbody.find_all("tr"):
             tds = tr.find_all("td")
-            if len(tds) < len(COLUNAS):
-                continue
-            valores = [_limpa(td.get_text(" ", strip=True)) for td in tds[: len(COLUNAS)]]
-            reg = dict(zip(COLUNAS, valores))
+            if len(tds) < n_colunas:
+                continue  # "nenhum registro" com colspan e afins
+            reg = {campo: None for campo in COLUNAS_TH.values()}
+            for i, campo in mapa.items():
+                reg[campo] = _limpa(tds[i].get_text(" ", strip=True))
             reg["tecnico_id"] = tecnico_id
             reg["empresa"] = empresa
             reg["tecnico"] = tecnico
             registros.append(reg)
+    if avisos:
+        log(f"  colunas desconhecidas ignoradas: {', '.join(sorted(avisos))}")
     return registros
 
 
@@ -237,6 +315,14 @@ def init_db(conn):
         )
         """
     )
+    # Coluna nascida em 30/10/2026 (o WVSA passou a publicá-la). ALTER porque o
+    # `dados.db` em produção já existe e o CREATE acima não o alcança. Fica só
+    # no SQLite: o payload da Produtividade não a leva, então o app não precisa
+    # mudar e não há ordem de deploy a seguir. Linhas gravadas antes ficam NULL
+    # ("não coletada") até o mês ser recoletado.
+    colunas = {c[1] for c in conn.execute("PRAGMA table_info(os)")}
+    if "pagamento_manual" not in colunas:
+        conn.execute("ALTER TABLE os ADD COLUMN pagamento_manual TEXT")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_os_dia ON os(dia)")
     conn.execute(
         "CREATE TABLE IF NOT EXISTS meta (chave TEXT PRIMARY KEY, valor TEXT)"
@@ -330,15 +416,15 @@ def salvar(conn, registros):
             INSERT INTO os
             (os, data_hora, dia, tecnico_id, empresa, tecnico, finalidade, condominio,
              sucesso, massiva, tipo_atendimento, trocado_drop, sub_aereo, agregada,
-             rejeitada, qtd_tecnicos, validada, valor)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             rejeitada, qtd_tecnicos, validada, pagamento_manual, valor)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 r.get("os"), dh, dia, r.get("tecnico_id"), r.get("empresa"), r.get("tecnico"),
                 r.get("finalidade"), r.get("condominio"), r.get("sucesso"), r.get("massiva"),
                 r.get("tipo_atendimento"), r.get("trocado_drop"), r.get("sub_aereo"),
                 r.get("agregada"), r.get("rejeitada"), r.get("qtd_tecnicos"), r.get("validada"),
-                parse_valor(r.get("valor")),
+                r.get("pagamento_manual"), parse_valor(r.get("valor")),
             ),
         )
         n += 1
@@ -443,7 +529,7 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except ColetaDegradada as e:
+    except (ColetaDegradada, LayoutInesperado) as e:
         # Mensagem legível em vez de traceback: quem lê isso é o coletor.log às
         # 8 da manhã. Código 2 distingue "recusei de propósito" de erro geral.
         log(f"ABORTADO: {e}")

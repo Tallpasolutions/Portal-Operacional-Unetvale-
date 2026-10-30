@@ -1315,6 +1315,27 @@ apagou 70% dos dados por dois meses sem ninguém notar. Está documentado em
 `coletor/extrator.py:buscar_intervalo`. `infra=S` é armadilha: **restringe** a
 infra, não inclui.
 
+**A Produtividade também se lê pelo CABEÇALHO — e lia por posição até
+30/10/2026.** O WVSA passou a mandar "Pagamento Manual" entre "Validada" e
+"OS" no `operacional8`, e o `parse_html` lia os 14 campos por índice: em set e
+out/2026, `os` gravou o "Sim"/"Não" do pagamento manual e `valor` o número da
+OS — `count(distinct os)` = 2 e 1, soma de R$ 3,4 bi num mês de ~R$ 500 mil.
+Nenhum erro, e **nenhuma tela mostrou**: o payload da Produtividade leva só
+dia, empresa, técnico, finalidade, sucesso, rejeitada e tipo de atendimento,
+todos ANTES da coluna nova (conferido em produção: set/out com as mesmas
+5.959 e 5.444 OS do SQLite). Quem pegou foi uma análise que cruzava OS no
+`dados.db`. Hoje cada tabela de técnico é mapeada pelo próprio `<thead>`
+(`extrator.mapear_colunas`, sem caixa e sem acento): coluna desconhecida é
+ignorada com aviso no log; faltando Data, Finalidade, Sucesso, Rejeitada,
+Tipo de atendimento, OS ou Valor, o extrator sai com código 2
+(`LayoutInesperado`) **antes** de apagar o intervalo, e o `enviar.py` não
+repete o módulo (código 2 é recusa, não lentidão). ⚠️ O WVSA devolve a coluna
+nova **também para datas antigas** (conferido em 10/07 e 15/08/2026): um
+`--full` com o extrator velho entortaria o histórico inteiro. No HTML,
+"Finalidade" e "Pagamento Manual" vêm de blocos condicionais do template — a
+lista de colunas pode mudar de novo. `pagamento_manual` fica só no SQLite
+(NULL = "não coletada"), fora do payload, então o app não muda.
+
 **O coletor apaga antes de gravar.** `limpar_intervalo()` deleta o intervalo e
 regrava. Existe uma trava (`conferir_encolhimento`) que aborta com código 2 se a
 resposta vier com menos da metade das empresas. **Nunca rode `--full` sem
@@ -2874,6 +2895,23 @@ a.run(port=5001, use_reloader=False)"
   cliente novo. As duas mudanças do monorepo
   (`client.ts`, `repository-coletas.ts`) estão no working tree dele, sem
   commit, ao lado das de 29/09 que já estavam lá.
+
+- **Produtividade lida pelo cabeçalho** (30/10/2026, sem migration; o porquê
+  no §6). Provado por script com o HTML real de 29/10, 15/09, 15/08 e
+  10/07/2026 (43 conferências): mesmas linhas e Data..Validada idênticos ao
+  extrator velho, todo `os` numérico, soma do dia plausível (29/10: 222 OS,
+  R$ 17.972,71, contra R$ 136 mi do velho); 15/08 com as MESMAS OS gravadas em
+  agosto (4 de 153 valores reavaliados no WVSA depois); layout antigo de 14
+  colunas, coluna estranha no início, OS e Valor trocados de lugar e cabeçalho
+  sem acento dando o mesmo resultado; cinco obrigatórias faltando e tabela sem
+  `<thead>` recusadas; `main()` com cabeçalho quebrado saindo sem apagar as
+  5.444 linhas de outubro; `init_db` acrescentando `pagamento_manual` numa
+  cópia do `dados.db` de produção.
+
+  **Ainda não feito:** copiar o `extrator.py` e o `enviar.py` para
+  `~/unetvale-coletor` e recoletar set e out/2026 com backup do `dados.db`
+  (`extrator.py --inicio 01/09/2026 --fim 31/10/2026`). Não depende do deploy
+  do app: o payload não muda.
 
 - **Backup do Supabase não foi confirmado.** Ações e Troca de Poste não têm de
   onde ser recoletados. Confirme antes de qualquer operação destrutiva.
