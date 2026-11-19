@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% block title %}War Room · Unetvale{% endblock %}
+{% block page_title %}War Room — zerando a esteira{% endblock %}
+{% block content %}
+
+{# UM filtro, no topo. O dia muda os números e a rotina (recarrega: os
+   números vêm do servidor); o resto filtra os desvios no navegador. #}
+<div class="toolbar" id="wr-filtros">
+  <label>Dia <input type="date" id="wr-dia" value="{{ pacote.dia }}" max="{{ pacote.hoje }}"></label>
+  <button class="btn-ghost" id="wr-hoje" type="button" {% if pacote.dia == pacote.hoje %}hidden{% endif %}>Hoje</button>
+  <span class="toggle toggle-mini" id="wr-periodo" title="Quais desvios entram nos rankings e na lista">
+    <button data-p="dia" class="active">Desvios do dia</button><button data-p="tudo">Desde {{ pacote.inicio[8:10] }}/{{ pacote.inicio[5:7] }}</button>
+  </span>
+  <label>Status
+    <select id="wr-status">
+      <option value="">Todos</option>
+      <option value="pendente">Pendentes</option>
+      <option value="resolvido">Resolvidos</option>
+      <option value="anulado">Anulados</option>
+    </select>
+  </label>
+  <label>Busca <input type="search" id="wr-busca" placeholder="Técnico, OS, solução…"></label>
+  <button class="btn-ghost" id="wr-limpar" type="button">Limpar filtros</button>
+  <button class="btn" id="wr-novo" type="button" style="margin-left:auto" {% if not pacote.tem_tabela %}disabled{% endif %}>+ Registrar desvio</button>
+</div>
+<p class="subnote" id="wr-fontes"></p>
+
+<div class="par-mes wr-numeros" id="wr-numeros" style="margin-bottom:16px"></div>
+
+<div class="grid charts-2" style="margin-bottom:16px;">
+  <div class="card"><div class="card-h"><span>Executadas com sucesso × entraram na esteira</span>
+      <span class="subnote" style="margin:0">por dia</span></div>
+    <div class="card-b"><div class="chart-box"><canvas id="wr-ch-fluxo"></canvas></div>
+      <p class="subnote" style="margin:10px 0 0" id="wr-fluxo-nota"></p></div></div>
+  <div class="card"><div class="card-h"><span>Backlog da esteira</span>
+      <span class="subnote" style="margin:0">foto da última coleta de cada dia</span></div>
+    <div class="card-b"><div class="chart-box"><canvas id="wr-ch-backlog"></canvas></div>
+      <p class="subnote" style="margin:10px 0 0">Fila sem retirada e sem infra. A linha tracejada são as OS ainda não agendadas — fora das retiradas, quase toda OS na fila está sem agendamento.</p></div></div>
+</div>
+
+{# Os mesmos números em tabela: o verde dos gráficos tem contraste baixo
+   contra o fundo, e o número exato do dia é o que se lê em voz alta na daily. #}
+<div class="card recolhido" style="margin-bottom:16px" id="wr-tab-card">
+  <div class="card-h"><span>Dia a dia, em tabela</span>
+    <button class="btn-ghost" type="button" data-alternar="wr-tab-card">Mostrar</button></div>
+  <div class="card-b tabela-wrap" hidden><table class="tbl" id="wr-tab-dias"></table></div>
+</div>
+
+<div class="card" style="margin-bottom:16px">
+  <div class="card-h"><span>Rotina do dia</span>
+    <span class="subnote" style="margin:0">marque a rodada quando terminar de conferir o seu time</span></div>
+  <div class="card-b"><div class="wr-rotina" id="wr-rotina"></div></div>
+</div>
+
+{% if not pacote.tem_tabela %}
+  <div class="vazio" style="margin-bottom:16px">O registro de desvios ainda não tem as tabelas no banco
+    (migration <code>0021_war_room.sql</code>). Os números acima já valem.</div>
+{% else %}
+<div class="kpis" id="wr-kpis"></div>
+
+<div class="grid charts-2" style="margin-bottom:16px;">
+  <div class="card"><div class="card-h"><span>Por tipo de desvio</span>
+      <span class="subnote" style="margin:0">clique para filtrar</span></div>
+    <div class="card-b"><div class="rank" id="wr-rank-tipo"></div></div></div>
+  <div class="card"><div class="card-h"><span>Por causa</span>
+      <span class="subnote" style="margin:0">clique para filtrar</span></div>
+    <div class="card-b"><div class="rank" id="wr-rank-causa"></div></div></div>
+  <div class="card"><div class="card-h"><span>Por responsável</span>
+      <span class="subnote" style="margin:0">clique para filtrar</span></div>
+    <div class="card-b"><div class="rank" id="wr-rank-resp"></div></div></div>
+  <div class="card"><div class="card-h"><span>Por técnico</span>
+      <span class="subnote" style="margin:0">clique para filtrar</span></div>
+    <div class="card-b"><div class="rank" id="wr-rank-tec"></div></div></div>
+</div>
+
+<div class="card" style="margin-bottom:16px">
+  <div class="card-h"><span>Desvios <span class="subnote" style="margin:0" id="wr-contagem"></span></span>
+    <button class="btn-ghost" id="wr-csv" type="button">⬇ CSV</button></div>
+  <div class="card-b tabela-wrap"><table class="tbl wr-tabela" id="wr-tabela"></table></div>
+</div>
+{% endif %}
+
+<div class="card" style="margin-bottom:16px">
+  <div class="card-h"><span>Encerradas sem sucesso no dia <span class="subnote" style="margin:0" id="wr-ss-contagem"></span></span>
+    <span class="subnote" style="margin:0">da Produtividade — cada uma deveria ter passado pelo supervisor</span></div>
+  <div class="card-b tabela-wrap"><table class="tbl" id="wr-ss"></table></div>
+</div>
+
+{# Registrar: `.modal.modal-largo`, as DUAS classes (§5). #}
+<dialog class="modal modal-largo" id="wr-dlg">
+  <form id="wr-form" method="dialog" novalidate>
+    <h3>Registrar desvio</h3>
+    <p class="subnote" style="margin:0 0 12px" id="wr-form-dia"></p>
+    <div class="wr-form-grade">
+      <div class="field"><label for="wr-f-momento">Momento da rotina</label>
+        <select id="wr-f-momento" name="momento" required></select></div>
+      <div class="field"><label for="wr-f-tipo">O que aconteceu</label>
+        <select id="wr-f-tipo" name="tipo" required></select></div>
+      <div class="field wr-larga" id="wr-f-horario-campo" hidden><label for="wr-f-horario">Horário em que saiu</label>
+        <input type="time" id="wr-f-horario" name="horario" style="max-width:160px"></div>
+      <div class="field"><label for="wr-f-tecnico">Técnico <span class="wr-opc">(opcional)</span></label>
+        <input type="text" id="wr-f-tecnico" name="tecnico" list="wr-tecnicos" autocomplete="off"
+               placeholder="Comece a digitar o nome">
+        <datalist id="wr-tecnicos"></datalist>
+        <span class="subnote wr-empresa" id="wr-f-empresa"></span></div>
+      <div class="field"><label for="wr-f-os">OS <span class="wr-opc">(opcional, uma ou mais)</span></label>
+        <input type="text" id="wr-f-os" name="os" inputmode="numeric" placeholder="586420, 586421"></div>
+      <div class="field"><label for="wr-f-causa">Causa</label>
+        <select id="wr-f-causa" name="causa" required></select></div>
+      <div class="field"><label for="wr-f-detalhe">Detalhe da causa <span class="wr-opc" id="wr-f-detalhe-opc">(opcional)</span></label>
+        <input type="text" id="wr-f-detalhe" name="detalhe" maxlength="500"></div>
+      <div class="field"><label for="wr-f-resp">Responsável</label>
+        <select id="wr-f-resp" name="responsavel" required></select></div>
+      <div class="field"><label for="wr-f-resp-nome">Nome do responsável <span class="wr-opc">(opcional)</span></label>
+        <input type="text" id="wr-f-resp-nome" name="responsavel_nome" maxlength="120"></div>
+      <div class="field wr-larga"><label for="wr-f-solucao">Solução — o que foi feito ou o que será feito</label>
+        <textarea id="wr-f-solucao" name="solucao" rows="3" maxlength="1000" required></textarea></div>
+      <div class="field wr-larga"><label>Situação</label>
+        <span class="toggle toggle-mini" id="wr-f-status">
+          <button type="button" data-s="resolvido" class="active">Resolvido</button><button type="button" data-s="pendente">Pendente</button>
+        </span></div>
+    </div>
+    <p class="wr-erro" id="wr-form-erro" hidden></p>
+    <div class="modal-acoes">
+      <button class="btn sec" type="button" data-fechar>Cancelar</button>
+      <button class="btn sec" type="submit" value="novo" title="Grava e deixa o formulário aberto com o mesmo momento">Registrar e outro</button>
+      <button class="btn" type="submit" value="fechar">Registrar</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="modal modal-largo" id="wr-dlg-edit">
+  <form id="wr-form-edit" method="dialog" novalidate>
+    <h3>Atualizar desvio</h3>
+    <p class="subnote" style="margin:0 0 12px" id="wr-edit-resumo"></p>
+    <div class="field"><label for="wr-e-solucao">Solução</label>
+      <textarea id="wr-e-solucao" rows="3" maxlength="1000"></textarea></div>
+    <div class="field"><label>Situação</label>
+      <span class="toggle toggle-mini" id="wr-e-status">
+        <button type="button" data-s="resolvido">Resolvido</button><button type="button" data-s="pendente">Pendente</button>
+      </span></div>
+    <p class="wr-erro" id="wr-edit-erro" hidden></p>
+    <div class="modal-acoes">
+      <button class="btn sec" type="button" data-anular style="margin-right:auto">Anular…</button>
+      <button class="btn sec" type="button" data-fechar>Cancelar</button>
+      <button class="btn" type="submit">Salvar</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="modal modal-largo" id="wr-dlg-anular">
+  <form id="wr-form-anular" method="dialog" novalidate>
+    <h3>Anular desvio</h3>
+    <p>O desvio continua guardado, marcado como anulado, e sai das contagens. Só quem registrou pode anular.</p>
+    <div class="field" style="margin-top:12px"><label for="wr-a-motivo">Por que anular?</label>
+      <input type="text" id="wr-a-motivo" maxlength="300" placeholder="Registrado em duplicidade, técnico errado…"></div>
+    <p class="wr-erro" id="wr-anular-erro" hidden></p>
+    <div class="modal-acoes">
+      <button class="btn sec" type="button" data-fechar>Voltar</button>
+      <button class="btn" type="submit" style="background:var(--danger)">Anular</button>
+    </div>
+  </form>
+</dialog>
+
+{% endblock %}
+
+{% block scripts %}
+<script>window.__WR__ = {{ pacote|tojson }}; window.__WR_EU__ = {{ usuario.id|tojson }}; window.__WR_ADMIN__ = {{ usuario.is_admin|tojson }};</script>
+<script src="{{ url_for('static', filename='js/dashboard_rank.js') }}"></script>
+<script src="{{ url_for('static', filename='js/war_room.js') }}"></script>
+{% endblock %}

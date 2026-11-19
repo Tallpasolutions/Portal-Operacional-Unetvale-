@@ -77,6 +77,7 @@ def create_app():
     # só por tamanho). Precisa ser importado ANTES do registro do blueprint.
     from . import routes_processos  # noqa: F401
     from . import routes_esteira  # noqa: F401
+    from . import routes_war_room  # noqa: F401
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(routes_bp)

@@ -73,7 +73,8 @@ def injeta_status():
 # Endpoint de cada módulo, na ordem da sidebar. Serve para a raiz saber para
 # onde mandar quem não tem o Dashboard liberado.
 _ENDPOINT_MODULO = {
-    "dashboard": "dash.dashboard", "produtividade": "dash.produtividade",
+    "dashboard": "dash.dashboard", "war-room": "dash.war_room_view",
+    "produtividade": "dash.produtividade",
     "iqi": "dash.iqi", "massivas": "dash.massivas", "esteira": "dash.esteira_view",
     "troca-poste": "dash.troca_poste", "acoes": "dash.acoes_view",
     "processos": "dash.processos_view",
