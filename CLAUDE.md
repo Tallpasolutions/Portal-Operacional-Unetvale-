@@ -2345,6 +2345,12 @@ a.run(port=5001, use_reloader=False)"
   copiar `coletor/gerencial.py` para `~/unetvale-coletor`, e a rodada
   seguinte já grava.
 
+  **Instalado em 19/11/2026**: #63 mergeado, Vercel servindo `?v=8c9e59b6`,
+  `gerencial.py` copiado (backup em `bak-20261119-idf/`; o coletor inteiro
+  ficou igual à `main`) e `enviar.py --so ger_idf` às 18:37: `ok`, 833 de 834
+  chats de 11/2026, corte em 17/11 11:36:47, nota 4,44 / 4,59 gravada, e o
+  `/dashboard` de produção servindo o aviso.
+
 - **War Room — encerradas OS a OS, capacidade e Minhas equipes** em
   19/11/2026, migration `0022` (`warroom_validacoes`) e coletor novo
   (`enviar.py`). O porquê está no §4.
