@@ -2330,6 +2330,21 @@ a.run(port=5001, use_reloader=False)"
   pelo cabeçalho — sem ele não há número de OS). O `enviar.py` roda como
   filho do watcher a cada rodada; não precisa reiniciar o agente.
 
+  **Instalado em 19/11/2026**, nessa ordem: #61 mergeado, Vercel servindo
+  `?v=6eb81140` às 17:00:25, `enviar.py` e `extrator.py` copiados para
+  `~/unetvale-coletor` (backup em `bak-20261119-warroom/`, com o
+  `dados.db`) — o coletor inteiro ficou igual à `main`, e com isso o
+  extrator do #58 entrou junto. Coleta manual da Produtividade às 17:01:
+  3.764 OS de novembro gravadas, **todas com número** (antes, 0), payload de
+  1,5 MB; o `/war-room` de produção serviu as 46 encerradas do dia com
+  número, hora e link.
+
+  ⚠️ **Outubro/2026 continua com "Sim"/"Não" no campo `os` do `dados.db`**
+  (5.820 linhas): a rodada normal refaz só o mês corrente. Não afeta tela
+  nenhuma hoje (o payload não leva a OS de outubro como número); quem
+  precisar da OS de setembro/outubro no SQLite tem de recoletar aquele
+  intervalo — com backup do `dados.db` antes (§6).
+
 - **War Room** entrou em 19/11/2026, migration `0021` (`warroom_desvios`,
   `warroom_rodadas`), **ainda não aplicada em produção** — sem ela a página
   mostra os números e diz o que falta, e as escritas respondem 503. O porquê
