@@ -23,6 +23,47 @@
   </div>
 </div>
 
+{% if usuario.is_supervisor %}
+{# O supervisor cuida das PRÓPRIAS equipes: são elas que recortam o que ele
+   vê na Produtividade e no IQI e que a War Room usa no filtro "Supervisor". #}
+<h3 class="secao">Minhas equipes</h3>
+<p class="subnote">
+  As equipes pelas quais você responde. Elas definem o que você vê na Produtividade e no IQI, e quais
+  OS aparecem para você na War Room. Técnicos avulsos são vinculados pelo administrador.
+</p>
+<div class="card" style="max-width:760px;margin-bottom:18px;">
+  <div class="card-b">
+    {% if minhas_equipes %}
+    <div class="wr-equipes">
+      {% for e in minhas_equipes %}
+      <form method="post" action="{{ url_for('dash.minhas_equipes') }}" class="chip">
+        <input type="hidden" name="equipe" value="{{ e }}"><input type="hidden" name="acao" value="desvincular">
+        {{ e }} <button type="submit" title="Remover {{ e }} das minhas equipes" aria-label="Remover {{ e }}">×</button>
+      </form>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="subnote" style="margin:0 0 12px">Nenhuma equipe vinculada a você ainda.</p>
+    {% endif %}
+    {% if meus_avulsos %}
+    <p class="subnote" style="margin:12px 0 0">Técnicos avulsos: {{ meus_avulsos|join(', ') }}.</p>
+    {% endif %}
+    {% if equipes_para_mim %}
+    <form method="post" action="{{ url_for('dash.minhas_equipes') }}" class="toolbar" style="margin:14px 0 0">
+      <input type="hidden" name="acao" value="vincular">
+      <label>Adicionar equipe
+        <select name="equipe" required>
+          <option value="">Escolha…</option>
+          {% for e in equipes_para_mim %}<option value="{{ e }}">{{ e }}</option>{% endfor %}
+        </select>
+      </label>
+      <button class="btn" type="submit">Adicionar</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
 {% if usuario.is_admin %}
 <h3 class="secao">Supervisores</h3>
 <p class="subnote">

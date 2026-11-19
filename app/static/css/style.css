@@ -1358,3 +1358,20 @@ body.fluxo-foco .fluxo-editor{ height:100vh; border-radius:0; border:none; }
   padding:10px 16px; border-radius:8px; font-size:13.5px; box-shadow:var(--sombra); transition:transform .2s; z-index:50;
   max-width:calc(100vw - 32px); }
 .wr-aviso.on{ transform:translate(-50%, 0); }
+.wr-equipes{ display:flex; flex-wrap:wrap; gap:8px; }
+.wr-equipes form.chip{ display:inline-flex; align-items:center; gap:6px; margin:0; }
+/* Encerradas sem sucesso: filtro de supervisor no cabeçalho do cartão e a
+   resposta Sim/Não. "Não" marcado fica vermelho — é a recusa que não passou
+   pelo supervisor, o que a regra nº 1 do plano quer ver. */
+.wr-ss-filtro{ font-size:12.5px; font-weight:600; color:var(--muted); display:flex; align-items:center; gap:6px; }
+.wr-ss-filtro select{ font-weight:500; }
+.wr-ss td{ vertical-align:top; }
+.wr-ss .wr-valida{ vertical-align:middle; }
+.toggle.wr-valida button.active.wr-nao{ background:var(--danger); color:#fff; }
+.wr-ss .wr-quem{ display:block; margin:3px 0 0; }
+.wr-ss .wr-emp{ display:block; margin:0; }
+.wr-ss .btn-ghost{ white-space:nowrap; font-size:12px; padding:4px 9px; }
+.wr-ss .btn-ghost.wr-reg-feito{ color:var(--success); border-color:#bfe6d5; }
+.wr-ss td:nth-child(3){ min-width:170px; }
+.wr-ss td:nth-child(5){ min-width:220px; }
+.wr-ss a{ color:var(--brand-d); font-weight:600; }

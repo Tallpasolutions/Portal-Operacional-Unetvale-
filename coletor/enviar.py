@@ -28,7 +28,7 @@ import sqlite3
 import subprocess
 import sys
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -57,6 +57,10 @@ def log(msg):
 # inteira do módulo (o extrator da Produtividade leva ~1 min) até a rodada
 # seguinte, 2 h depois.
 UPSERT_ESPERAS = (10, 30)
+
+# Quantos dias de OS não concluída levam número e hora no payload da
+# Produtividade (a War Room mostra o dia e permite voltar uma semana).
+DIAS_OS_PRODUTIVIDADE = 45
 
 
 def supa_upsert(modulo, payload, status="ok"):
@@ -217,8 +221,8 @@ def coletar_produtividade(full=False):
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
-        "SELECT dia, empresa, tecnico, tecnico_id, finalidade, sucesso, rejeitada, tipo_atendimento "
-        "FROM os WHERE dia != ''"
+        "SELECT dia, empresa, tecnico, tecnico_id, finalidade, sucesso, rejeitada, tipo_atendimento, "
+        "os, data_hora FROM os WHERE dia != ''"
     ).fetchall()
 
     # Campos do cross-filter (d,e,t,ti) + análises novas em formato COMPACTO:
@@ -244,7 +248,7 @@ def coletar_produtividade(full=False):
         return False, (m or "Não informado")
 
     # Formato `v: 2` — uma LINHA por OS, na ordem
-    #   [d, e, t, ti, f, su, rj, ta, mo?]
+    #   [d, e, t, ti, f, su, rj, ta, mo?, os?, hora?]
     # com dia, empresa, técnico e id do técnico como índice nas listas `dias`,
     # `emp`, `tec` e `tid`. O registro com chaves (`v: 1`) chegou a 6,8 MB em
     # 26/10/2026, e o upsert passou a estourar o statement timeout de 8 s do
@@ -259,6 +263,16 @@ def coletar_produtividade(full=False):
     tec_list, tec_idx = [], {}
     tid_list, tid_idx = [], {}
     linhas = []
+    # A OS não concluída dos últimos dias leva também o NÚMERO e a HORA do
+    # fechamento (posições 9 e 10, depois do `mo`): é o que a War Room usa
+    # para linkar a OS no WVSA e para o supervisor validar a recusa. Só a não
+    # concluída e só a recente porque é só isso que a tela pede — no ano
+    # inteiro seriam ~18 mil números a mais num payload que já estourou o
+    # statement timeout uma vez (§6). O app velho ignora as posições extras
+    # (`zip` com 9 campos em `dados.expandir_produtividade`). O número só vai
+    # se for número: o extrator antigo, que lia por posição, gravou ali o
+    # "Sim"/"Não" do pagamento manual de set a nov/2026.
+    corte_os = (date.today() - timedelta(days=DIAS_OS_PRODUTIVIDADE)).isoformat()
     for r in rows:
         su, mot = sucesso_motivo(r["sucesso"])
         linha = [
@@ -273,6 +287,10 @@ def coletar_produtividade(full=False):
         ]
         if not su:
             linha.append(idx_of(mot, mot_idx, mot_list))
+            if r["dia"] >= corte_os:
+                n = (r["os"] or "").strip()
+                linha.append(int(n) if n.isdigit() else None)
+                linha.append((r["data_hora"] or "")[11:16] or None)
         linhas.append(linha)
 
     meta = {m["chave"]: m["valor"] for m in conn.execute("SELECT chave, valor FROM meta")}

@@ -27,6 +27,7 @@ from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta, timezone
 
 from . import dados, esteira, supa
+from . import supervisores as sup
 
 BR_TZ = timezone(timedelta(hours=-3))
 
@@ -37,6 +38,16 @@ BASE_DE, BASE_ATE = date(2026, 9, 22), date(2026, 11, 16)
 DIAS_GRAFICO = 28          # o gráfico mostra o antes e o depois do início
 DIAS_TECNICOS = 30         # técnico que não fechou OS em 30 dias sai da lista
 DIAS_RETROATIVO = 7        # registrar desvio de até uma semana atrás
+
+# Capacidade diária (decisão de 19/11/2026): 4 OS por dia para o técnico que
+# faz atendimento EXTERNO e 6 para o que faz INTERNO (o "Tipo de atendimento"
+# do WVSA, `ta` na Produtividade). O perfil é a MAIORIA das OS de cliente dele
+# nos últimos 30 dias — muitos fazem os dois (3 ELLO: 140 externas e 70
+# internas de 20/10 a 19/11), e decidir dia a dia faria a capacidade de quem
+# fechou uma OS só oscilar de 4 para 6. Conta quem fechou ao menos uma OS de
+# cliente no dia: é a equipe que de fato foi a campo, não a escalada.
+CAP_EXTERNA, CAP_INTERNA = 4, 6
+DIAS_PERFIL = 30
 
 # ---------------------------------------------------------------------
 # Escopo dos números: sem retirada e sem infra
@@ -124,6 +135,7 @@ CAUSAS = [
     {"id": "os_incorreta", "rotulo": "OS aberta incorreta ou duplicada"},
     {"id": "falta_material", "rotulo": "Falta de material ou equipamento"},
     {"id": "falta_viabilidade", "rotulo": "Falta de viabilidade ou infraestrutura"},
+    {"id": "outra_equipe", "rotulo": "Precisa de outra equipe (externa ou infra)"},
     {"id": "sem_tempo", "rotulo": "Sem tempo / agenda estourada"},
     {"id": "rota_mal_montada", "rotulo": "Rota mal montada / deslocamento"},
     {"id": "atraso_tecnico", "rotulo": "Atraso ou ausência do técnico"},
@@ -132,6 +144,30 @@ CAUSAS = [
     {"id": "clima", "rotulo": "Clima ou condição externa"},
     {"id": "outro", "rotulo": "Outra causa (descrever no detalhe)", "pede_detalhe": True},
 ]
+
+# Palpite da causa a partir do motivo que o técnico escreveu no fechamento,
+# só para PREENCHER o formulário que nasce da lista de encerradas sem
+# sucesso — o supervisor confere e troca. Trechos sem acento e sem caixa;
+# o primeiro que casar vale. Motivo que não casa deixa a causa em branco, em
+# vez de chutar.
+MOTIVO_CAUSA = [
+    ("nao estava em casa", "cliente_ausente"), ("sem contato", "cliente_ausente"),
+    ("ausente", "cliente_ausente"),
+    ("sem tempo", "sem_tempo"),
+    ("incorret", "os_incorreta"), ("duplicad", "os_incorreta"),
+    ("conexao esta ok", "normalizou"), ("normalizou", "normalizou"),
+    ("desistiu", "cliente_recusou"), ("nao quis", "cliente_recusou"),
+    ("quer reagendar", "cliente_recusou"), ("recusou", "cliente_recusou"),
+    ("equipe externa", "outra_equipe"), ("outra equipe", "outra_equipe"),
+    ("chovendo", "clima"), ("chuva", "clima"), ("apr impedida", "clima"),
+    ("material", "falta_material"), ("viabilidade", "falta_viabilidade"),
+]
+
+
+def causa_do_motivo(motivo):
+    m = _norma(motivo)
+    return next((c for trecho, c in MOTIVO_CAUSA if trecho in m), None)
+
 
 # QUEM responde pela causa — o papel, e o nome quando fizer sentido.
 RESPONSAVEIS = [
@@ -217,16 +253,19 @@ def _ler_produtividade():
 
         def iterar():
             for l in row.get("linhas") or []:
-                # [d, e, t, ti, f, su, rj, ta, mo?]
+                # [d, e, t, ti, f, su, rj, ta, mo?, os?, hora?] — número e
+                # hora só na não concluída recente (coletor/enviar.py).
                 yield (dias[l[0]], emp[l[1]], tec[l[2]], fin[l[4]], l[5],
-                       mot[l[8]] if len(l) > 8 else None)
+                       mot[l[8]] if len(l) > 8 else None, l[7],
+                       l[9] if len(l) > 9 else None, l[10] if len(l) > 10 else None)
         return row.get("atualizado_em"), iterar()
     antigo = dados.get_modulo("produtividade") or {}
     regs = (antigo.get("payload") or {}).get("registros") or []
     mot = (antigo.get("payload") or {}).get("mot") or []
     return antigo.get("atualizado_em"), (
         (r.get("d"), r.get("e"), r.get("t"), r.get("f"), r.get("su"),
-         mot[r["mo"]] if isinstance(r.get("mo"), int) and r["mo"] < len(mot) else r.get("mo"))
+         mot[r["mo"]] if isinstance(r.get("mo"), int) and r["mo"] < len(mot) else r.get("mo"),
+         r.get("ta"), None, None)
         for r in regs)
 
 
@@ -240,16 +279,29 @@ def _produtividade(dia_foco):
     por_dia = defaultdict(lambda: [0, 0])          # dia -> [sucesso, sem sucesso]
     tecnicos = {}                                    # nome -> (dia mais recente, empresa)
     sem_sucesso = []
-    for d, e, t, f, su, mo in linhas:
+    desde = _desde_grafico()
+    corte_perfil = (hoje() - timedelta(days=DIAS_PERFIL)).isoformat()
+    em_campo = defaultdict(set)                      # dia -> técnicos com OS de cliente
+    perfil = defaultdict(lambda: [0, 0, 0, 0])       # técnico -> [ext 30d, int 30d, ext, int]
+    for d, e, t, f, su, mo, ta, os_n, hora in linhas:
         if not d or d < base_de or not eh_cliente(f):
             continue
         por_dia[d][0 if su else 1] += 1
+        if t and t != "—":
+            if d >= desde or d == foco:
+                em_campo[d].add(t)
+            pf = perfil[t]
+            pf[2 if ta else 3] += 1
+            if d >= corte_perfil:
+                pf[0 if ta else 1] += 1
         if d >= corte_tec and t and t != "—":
             if t not in tecnicos or d >= tecnicos[t][0]:
                 tecnicos[t] = (d, e if e and e != "—" else "")
         if d == foco and not su:
-            sem_sucesso.append({"tecnico": t, "empresa": e, "finalidade": f,
-                                "motivo": mo or "Não informado"})
+            motivo = mo or "Não informado"
+            sem_sucesso.append({"tecnico": t, "empresa": e, "finalidade": f, "motivo": motivo,
+                                "os": str(os_n) if os_n else None, "hora": hora,
+                                "causa": causa_do_motivo(motivo)})
     # Régua: média por dia da semana nas 8 semanas, só dias com OS (feriado
     # sem coleta não puxa a média para baixo como se fosse um dia fraco).
     soma, n = defaultdict(lambda: [0, 0]), Counter()
@@ -260,14 +312,26 @@ def _produtividade(dia_foco):
             soma[w][1] += ns
             n[w] += 1
     base = {w: [round(soma[w][0] / n[w]), round(soma[w][1] / n[w])] for w in n}
+    capacidade = {}
+    for d, tecs in em_campo.items():
+        ext = sum(1 for t in tecs if _faz_externa(perfil[t]))
+        capacidade[d] = [ext * CAP_EXTERNA + (len(tecs) - ext) * CAP_INTERNA, ext, len(tecs) - ext]
     return {
         "atualizado_em": atualizado_em,
         "por_dia": {d: v for d, v in por_dia.items() if d >= _desde_grafico() or d == foco},
         "base": base,
         "tecnicos": sorted(([nome, emp] for nome, (_, emp) in tecnicos.items()),
                            key=lambda x: _norma(x[0])),
-        "sem_sucesso": sorted(sem_sucesso, key=lambda x: (_norma(x["tecnico"]), x["finalidade"] or "")),
+        "sem_sucesso": sorted(sem_sucesso, key=lambda x: (_norma(x["tecnico"]), x["hora"] or "")),
+        "capacidade": capacidade,
     }
+
+
+def _faz_externa(pf):
+    """Perfil do técnico pela maioria das OS de cliente: as dos últimos 30
+    dias, ou a janela inteira para quem não trabalhou nesse período."""
+    ext, interno = (pf[0], pf[1]) if pf[0] + pf[1] else (pf[2], pf[3])
+    return ext > interno
 
 
 # ---------------------------------------------------------------------
@@ -379,9 +443,22 @@ def pacote(dia_foco):
                 return []
             raise
 
-    prod, est, (lista, tem_tabela), rod, nomes = supa.paralelo(
+    def validacoes():
+        try:
+            return supa.select("warroom_validacoes", {
+                "select": "os,validado,usuario_id,em", "dia": f"eq.{dia_foco.isoformat()}"})
+        except Exception as e:
+            if supa.tabela_faltando(e):
+                return None
+            raise
+
+    prod, est, (lista, tem_tabela), rod, nomes, alcance, vals = supa.paralelo(
         lambda: _produtividade(dia_foco), lambda: _esteira(dia_foco),
-        desvios, rodadas, _nomes)
+        desvios, rodadas, _nomes, _alcance_supervisores, validacoes)
+    # Cada encerrada sem sucesso leva os supervisores que respondem pelo
+    # técnico: a tela filtra por supervisor sem conhecer a regra do vínculo.
+    for o in prod["sem_sucesso"]:
+        o["sups"] = [a["id"] for a in alcance if _no_alcance(a, o["empresa"], o["tecnico"])]
     return {
         "dia": dia_foco.isoformat(),
         "hoje": hoje().isoformat(),
@@ -396,7 +473,79 @@ def pacote(dia_foco):
         "rodadas": [{"momento": r["momento"], "usuario_id": r["usuario_id"],
                      "nome": nomes.get(r["usuario_id"], "—"), "hora": _hora_local(r["feito_em"])}
                     for r in rod],
+        "supervisores": [{"id": a["id"], "nome": nomes.get(a["id"], "—")} for a in alcance],
+        # None = a migration 0022 ainda não subiu; {} = ninguém validou nada.
+        "validacoes": None if vals is None else {v["os"]: _validacao(v, nomes) for v in vals},
+        "wvsa_os": WVSA_OS,
+        "cap_externa": CAP_EXTERNA,
+        "cap_interna": CAP_INTERNA,
     }
+
+
+# Ficha da OS no WVSA — o mesmo endereço que a Esteira usa. Só abre dentro
+# da rede da Unetvale, que é onde os supervisores estão.
+WVSA_OS = "https://wvsa8.unetvale.com.br/os/"
+
+
+def _alcance_supervisores():
+    """Equipes e técnicos de cada supervisor, em SÉRIE.
+
+    `supervisores.listar()` faz as leituras em `supa.paralelo`, e isto roda
+    dentro do paralelo de `pacote`: paralelo aninhado no mesmo pool pode
+    prender as threads esperando filhas sem onde rodar (§4, Esteira).
+    """
+    ids = [l["usuario_id"] for l in supa.select("supervisores", {"select": "usuario_id"})]
+    if not ids:
+        return []
+    filtro = f"in.({','.join(ids)})"
+    equipes = supa.select("supervisor_equipes", {"select": "usuario_id,equipe", "usuario_id": filtro})
+    try:
+        tecs = supa.select("supervisor_tecnicos", {"select": "usuario_id,tecnico", "usuario_id": filtro})
+    except Exception:
+        tecs = []          # migration 0004 ausente: vale só o vínculo por equipe
+    out = {i: {"id": i, "equipes": set(), "tecnicos": set()} for i in ids}
+    for e in equipes:
+        out[e["usuario_id"]]["equipes"].add(sup.APELIDOS_EMPRESA.get(e["equipe"].upper(), e["equipe"].upper()))
+    for t in tecs:
+        out[t["usuario_id"]]["tecnicos"].add(t["tecnico"])
+    return list(out.values())
+
+
+def _no_alcance(a, empresa, tecnico):
+    """A mesma regra do recorte da Produtividade: equipe inteira OU o técnico
+    vinculado nome a nome (`supervisores`, apelidos resolvidos)."""
+    e = (empresa or "").strip().upper()
+    return (sup.APELIDOS_EMPRESA.get(e, e) in a["equipes"]
+            or sup.chave_tecnico(f"{empresa} - {tecnico}") in a["tecnicos"])
+
+
+def _validacao(v, nomes):
+    return {"validado": v["validado"], "nome": nomes.get(v["usuario_id"], "—"),
+            "usuario_id": v["usuario_id"], "hora": _hora_local(v["em"])}
+
+
+def marcar_validacao(corpo, uid):
+    """O supervisor diz se a recusa (OS encerrada sem sucesso) passou por ele.
+
+    `validado` true/false grava; null apaga (volta a "sem resposta"). Uma
+    linha por (dia, OS): a última resposta vale, com quem e quando.
+    """
+    d = dia_valido(corpo.get("dia"))
+    if d < hoje() - timedelta(days=DIAS_RETROATIVO):
+        raise Recusa(f"Só dá para validar OS dos últimos {DIAS_RETROATIVO} dias.")
+    os_n = str(corpo.get("os") or "").strip()
+    if not os_n.isdigit() or len(os_n) > 9:
+        raise Recusa("Número de OS inválido.")
+    validado = corpo.get("validado")
+    if validado not in (True, False, None):
+        raise Recusa("Resposta inválida.")
+    if validado is None:
+        supa.delete("warroom_validacoes", {"dia": d.isoformat(), "os": os_n})
+        return None
+    linha = supa.upsert("warroom_validacoes", {
+        "dia": d.isoformat(), "os": os_n, "validado": validado, "usuario_id": uid,
+        "em": _agora().isoformat()}, on_conflict="dia,os")
+    return _validacao(linha, _nomes())
 
 
 class Recusa(ValueError):

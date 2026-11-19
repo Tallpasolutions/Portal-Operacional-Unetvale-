@@ -35,7 +35,7 @@
   <div class="card"><div class="card-h"><span>Backlog da esteira</span>
       <span class="subnote" style="margin:0">foto da última coleta de cada dia</span></div>
     <div class="card-b"><div class="chart-box"><canvas id="wr-ch-backlog"></canvas></div>
-      <p class="subnote" style="margin:10px 0 0">Fila sem retirada e sem infra. A linha tracejada são as OS ainda não agendadas — fora das retiradas, quase toda OS na fila está sem agendamento.</p></div></div>
+      <p class="subnote" style="margin:10px 0 0">Fila sem retirada e sem infra. Em amarelo, as OS ainda não agendadas — fora das retiradas, quase toda OS na fila está sem agendamento.</p></div></div>
 </div>
 
 {# Os mesmos números em tabela: o verde dos gráficos tem contraste baixo
@@ -85,10 +85,16 @@
 </div>
 {% endif %}
 
-<div class="card" style="margin-bottom:16px">
+{# OS a OS, da Produtividade. O supervisor responde se a recusa passou por
+   ele (regra nº 1 do plano) e registra o desvio dali mesmo. O filtro por
+   supervisor é DESTE cartão: são as OS do time de cada um. #}
+<div class="card" style="margin-bottom:16px" id="wr-ss-card">
   <div class="card-h"><span>Encerradas sem sucesso no dia <span class="subnote" style="margin:0" id="wr-ss-contagem"></span></span>
-    <span class="subnote" style="margin:0">da Produtividade — cada uma deveria ter passado pelo supervisor</span></div>
-  <div class="card-b tabela-wrap"><table class="tbl" id="wr-ss"></table></div>
+    <label class="wr-ss-filtro">Supervisor <select id="wr-ss-sup"><option value="">Todos</option></select></label></div>
+  <div class="card-b">
+    <p class="subnote" style="margin:0 0 10px" id="wr-ss-nota"></p>
+    <div class="tabela-wrap"><table class="tbl wr-ss" id="wr-ss"></table></div>
+  </div>
 </div>
 
 {# Registrar: `.modal.modal-largo`, as DUAS classes (§5). #}
@@ -170,7 +176,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>window.__WR__ = {{ pacote|tojson }}; window.__WR_EU__ = {{ usuario.id|tojson }}; window.__WR_ADMIN__ = {{ usuario.is_admin|tojson }};</script>
+<script>window.__WR__ = {{ pacote|tojson }}; window.__WR_EU__ = {{ usuario.id|tojson }}; window.__WR_ADMIN__ = {{ usuario.is_admin|tojson }}; window.__WR_SUP__ = {{ usuario.is_supervisor|tojson }};</script>
 <script src="{{ url_for('static', filename='js/dashboard_rank.js') }}"></script>
 <script src="{{ url_for('static', filename='js/war_room.js') }}"></script>
 {% endblock %}
