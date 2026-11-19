@@ -120,3 +120,24 @@ def war_room_rodada():
             return _sem_tabela()
         raise
     return jsonify({"rodadas": rodadas})
+
+
+@bp.route("/war-room/validacoes", methods=["POST"])
+@login_obrigatorio
+@modulo_obrigatorio("war-room")
+def war_room_validacao():
+    """Sim/Não do supervisor para uma OS encerrada sem sucesso. Só supervisor
+    responde (regra nº 1 do plano: a recusa passa pelo supervisor)."""
+    u = usuario_atual()
+    if not u["is_supervisor"]:
+        return jsonify({"erro": "Só supervisor informa a validação."}), 403
+    try:
+        v = wr.marcar_validacao(_corpo(), u["id"])
+    except wr.Recusa as e:
+        return jsonify({"erro": str(e)}), 400
+    except Exception as e:
+        if supa.tabela_faltando(e):
+            return jsonify({"erro": "A validação ainda não tem a tabela no banco "
+                                    "(migration 0022_war_room_validacoes.sql)."}), 503
+        raise
+    return jsonify({"validacao": v})

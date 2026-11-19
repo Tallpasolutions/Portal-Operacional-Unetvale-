@@ -1157,14 +1157,57 @@ na tabela. Status e solução qualquer um com o módulo muda — a mesa é uma s
 — e a troca de status é condicional ao status lido. O dia do desvio vem do
 Python (dia de Brasília), não de `now()::date`, que é UTC.
 
-A tabela "Encerradas sem sucesso no dia" lista, da Produtividade, quem fechou
-OS de cliente sem sucesso e com que motivo — é o insumo da regra nº 1 do
-plano ("nenhuma OS encerrada sem sucesso sem o supervisor saber").
+**Encerradas sem sucesso no dia: OS a OS** (regra nº 1 do plano, "nenhuma
+OS encerrada sem sucesso sem o supervisor saber"). Cada linha traz hora, OS
+com link para a ficha no WVSA (`https://wvsa8.unetvale.com.br/os/<n>`, só
+na rede da Unetvale), técnico, finalidade e o motivo do fechamento; o
+supervisor responde **Sim/Não** se a recusa passou por ele
+(`warroom_validacoes`, migration `0022`, uma linha por dia × OS, a última
+resposta vale; clicar de novo desfaz) e **registra o desvio dali**, com o
+formulário preenchido: momento, técnico, OS, tipo pela resposta (Sim →
+`encerr_validado`, Não → `encerr_sem_validacao`) e a causa por palpite do
+motivo (`war_room.MOTIVO_CAUSA`, trechos sem acento; o que não casa fica em
+branco, e o motivo vai para o detalhe). Só supervisor responde (rota 403 ao
+resto, admin incluído); os outros veem a resposta e quem deu.
 
-O que **ainda não** faz: o cruzamento automático "encerradas sem validação"
-(precisa do número da OS no payload da Produtividade, que o coletor tem no
-`dados.db` e não envia — mudança de formato, ordem de deploy do §6) e o
-"virar ação" do desvio para o módulo Ações.
+O cartão tem filtro **Supervisor** próprio, e o supervisor abre já no dele.
+O alcance é a mesma regra do recorte da Produtividade — equipe inteira OU
+técnico avulso, apelidos resolvidos (`_no_alcance`) — e cada linha chega
+com os ids dos supervisores que respondem por ela; o JS não conhece o
+vínculo. ⚠️ `_alcance_supervisores` lê em SÉRIE: `supervisores.listar()`
+usa `supa.paralelo` e rodaria aninhado no paralelo do `pacote`.
+
+**Número e hora da OS vêm do coletor, e só da não concluída recente**
+(`enviar.py`, posições 9 e 10 da linha `v: 2`, depois do `mo`, últimos
+`DIAS_OS_PRODUTIVIDADE` = 45 dias): ~2.700 números a mais, 1,51 MB no total.
+O app velho ignora as posições extras (o `zip` de `expandir_produtividade`
+corta em 9). ⚠️ O número só vai se for número: o extrator que roda em
+`~/unetvale-coletor` até a cópia do #58 ainda lê o `operacional8` por
+posição e grava no campo `os` o "Sim"/"Não" do pagamento manual (set a
+nov/2026, 100% das linhas). Até lá a tela mostra a OS sem número, sem link e
+sem Sim/Não, e diz por quê.
+
+**Capacidade de execução**: barra a mais no gráfico de executadas × entradas
+e na tabela dia a dia. 4 OS por técnico de atendimento EXTERNO e 6 por
+técnico de INTERNO (`CAP_EXTERNA`/`CAP_INTERNA`), pelo "Tipo de atendimento"
+do WVSA (`ta`). O perfil é a MAIORIA das OS de cliente do técnico nos
+últimos 30 dias (muitos fazem os dois: 3 ELLO, 140 externas e 70 internas
+de 20/10 a 19/11), e conta quem fechou ao menos uma OS de cliente no dia —
+a equipe que foi a campo, não a escalada. Medido em 18/11/2026: 6 de
+externa e 29 de interna = 198, contra 164 executadas com sucesso.
+
+O backlog também é em barras, como o de executadas; as não agendadas em
+ouro, não em azul-escuro (os dois azuis da casa ficam a ΔE 9 no validador
+de paleta).
+
+**Minhas equipes, em Configurações**: o supervisor vê as equipes dele e
+adiciona ou remove — só as dele, e só equipe que aparece na Produtividade
+(`/configuracoes/minhas-equipes`). Técnicos avulsos aparecem só para leitura:
+quem reparte a UNETVALE entre supervisores segue sendo o admin. É o mesmo
+vínculo que recorta Produtividade e IQI, então mexer ali muda o que ele vê
+nas duas telas.
+
+O que **ainda não** faz: o "virar ação" do desvio para o módulo Ações.
 
 ### Papéis
 
@@ -1357,6 +1400,8 @@ Os que nasceram na War Room:
 | `.wr-rotina` / `.wr-passo` | grade de conferências do dia; `.feito` quando alguém marcou |
 | `.wr-form-grade` | formulário de modal em duas colunas (`.wr-larga` ocupa a linha), uma no celular |
 | `.wr-aviso` | aviso curto no rodapé depois de gravar, no lugar de `alert()` |
+| `.wr-valida` | `.toggle` Sim/Não por linha; "Não" marcado fica vermelho |
+| `.wr-equipes` | chips com `×` que removem (cada um é um `<form>`) |
 
 **Nada de `confirm()` do navegador.** Ele abre uma caixa do sistema, com o
 domínio no topo, que não pertence à tela — use `.modal` com `<dialog>`. As
@@ -2253,6 +2298,37 @@ a.run(port=5001, use_reloader=False)"
 ---
 
 ## 9. Estado atual e pendências
+
+- **War Room — encerradas OS a OS, capacidade e Minhas equipes** em
+  19/11/2026, migration `0022` (`warroom_validacoes`) e coletor novo
+  (`enviar.py`). O porquê está no §4.
+
+  ⚠️ **A `0022` ficou aplicada em produção pelo TESTE dela**, em
+  19/11/2026: o roteiro aplicava a migration numa transação, conferia 11
+  travas e fazia `rollback`, e a tabela continuou lá (criada na xid 57100,
+  vazia, idêntica ao arquivo). A causa não foi achada — o mesmo roteiro com
+  a `0021` desfez certo. Lição: depois de um "teste com rollback" contra
+  produção, **confira que o objeto sumiu** (`pg_class`), em vez de confiar
+  no rollback.
+
+  Rotas pelo `test_client` no servidor de ensaio (`warroom_*` e uma cópia de
+  `supervisor_equipes` em memória, nenhuma escrita real): 31 casos — Sim,
+  troca por outro supervisor, desfazer, seis entradas ruins 400, Jhoni e
+  admin 403, resposta visível a quem não é supervisor, sem migration 503;
+  Minhas equipes: supervisor vê e edita só as dele, não supervisor 403,
+  equipe inventada e ação inválida recusadas, equipes dos outros intactas,
+  equipe nova entrando no filtro. Suítes anteriores: 75 e 12, todas passam.
+  Coletor numa cópia do `dados.db` (sem extrator, sem Supabase): 2.674 OS
+  com número e hora; com o extrator antigo, 0 com número; o app atual
+  expande o payload novo sem notar. Navegador, como Davi, com o mouse:
+  filtro abrindo no time dele (17 de 45), Sim/Não, desvio pré-preenchido e
+  a linha virando "✓ Desvio registrado", adicionar e remover equipe; 375 px
+  sem rolar de lado; console limpo.
+
+  **Ordem de deploy (§6)**: app → Vercel → só então copiar para
+  `~/unetvale-coletor` o `enviar.py` E o `extrator.py` (o do #58, que lê
+  pelo cabeçalho — sem ele não há número de OS). O `enviar.py` roda como
+  filho do watcher a cada rodada; não precisa reiniciar o agente.
 
 - **War Room** entrou em 19/11/2026, migration `0021` (`warroom_desvios`,
   `warroom_rodadas`), **ainda não aplicada em produção** — sem ela a página

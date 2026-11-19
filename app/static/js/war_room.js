@@ -48,6 +48,7 @@
   function numeros() {
     var dia = D.dia, w = diaSemana(dia), emAndamento = dia === D.hoje;
     var p = D.produtividade.por_dia[dia] || [0, 0];
+    var cap = (D.produtividade.capacidade || {})[dia];
     var bp = D.produtividade.base[w];
     var ent = D.esteira.entradas[dia] || 0;
     var be = D.esteira.base[w];
@@ -63,7 +64,8 @@
     var cel = [
       { q: "Executadas com sucesso", n: p[0],
         d: bp && !emAndamento ? delta(p[0], bp[0], true) : "",
-        b: bp ? "média de " + SEMANA[w] + ": " + num(bp[0]) + andamento : "sem régua" + andamento },
+        b: (bp ? "média de " + SEMANA[w] + ": " + num(bp[0]) : "sem régua") +
+           (cap ? " · capacidade: " + num(cap[0]) : "") + andamento },
       { q: "Encerradas sem sucesso", n: p[1],
         d: bp && !emAndamento ? delta(p[1], bp[1], false) : "",
         b: bp ? "média de " + SEMANA[w] + ": " + num(bp[1]) + andamento : "" },
@@ -100,47 +102,69 @@
     // contexto, o "depois" é o que se acompanha.
     function cor(c) { return dias.map(function (d) { return d < D.inicio ? c + "59" : c; }); }
     var suc = dias.map(function (d) { return (D.produtividade.por_dia[d] || [null])[0]; });
+    var CAP = D.produtividade.capacidade || {};
+    var cap = dias.map(function (d) { return CAP[d] ? CAP[d][0] : null; });
+    var cinza = css("--muted-l");
     var ent = dias.map(function (d) { return D.esteira.entradas[d] === undefined ? null : D.esteira.entradas[d]; });
     var rotulos = dias.map(function (d) { return rotDia(d) + (d === D.inicio ? " ★" : ""); });
     new Chart($("wr-ch-fluxo"), {
       type: "bar",
       data: { labels: rotulos, datasets: [
+        { label: "Capacidade de execução", data: cap, backgroundColor: cor(cinza) },
         { label: "Executadas com sucesso", data: suc, backgroundColor: cor(verde) },
         { label: "Entraram na esteira", data: ent, backgroundColor: cor(azul) },
       ] },
       options: {
         interaction: { mode: "index", intersect: false },
         scales: { x: { grid: { display: false } }, y: { beginAtZero: true } },
-        plugins: { tooltip: { callbacks: { title: function (it) {
-          var d = dias[it[0].dataIndex];
-          return rotDia(d) + " (" + SEMANA[diaSemana(d)] + ")" + (d < D.inicio ? " — antes da War Room" : "");
-        } } } },
+        plugins: { tooltip: { callbacks: {
+          title: function (it) {
+            var d = dias[it[0].dataIndex];
+            return rotDia(d) + " (" + SEMANA[diaSemana(d)] + ")" + (d < D.inicio ? " — antes da War Room" : "");
+          },
+          afterBody: function (it) {
+            var c = CAP[dias[it[0].dataIndex]];
+            return c ? "Capacidade: " + c[1] + " técnicos de externa × " + D.cap_externa + " + " + c[2] +
+              " de interna × " + D.cap_interna : "";
+          },
+        } } },
       },
     });
     $("wr-fluxo-nota").innerHTML = "★ " + rotDia(D.inicio) + ", início da War Room; as barras anteriores ficam mais claras. " +
+      "Capacidade: " + D.cap_externa + " OS por técnico de atendimento externo e " + D.cap_interna +
+      " por técnico de interno (maioria das OS dele em 30 dias), contando quem fechou OS de cliente no dia. " +
       "Executadas por dia civil (Produtividade); entradas por dia operacional, das 21h às 21h (esteira).";
 
+    // Em barras, como o gráfico ao lado (pedido de 19/11/2026): mesma leitura
+    // de dia a dia, mesmo esmaecido antes do início.
     var bdias = Object.keys(D.esteira.backlog).sort();
+    function corB(c) { return bdias.map(function (d) { return d < D.inicio ? c + "59" : c; }); }
+    // Ouro e não azul-escuro: os dois azuis da casa ficam a ΔE 9 um do outro
+    // (validador de paleta), difíceis de separar até com visão normal.
+    var escuro = css("--ouro");
     new Chart($("wr-ch-backlog"), {
-      type: "line",
+      type: "bar",
       data: { labels: bdias.map(function (d) { return rotDia(d) + (d === D.inicio ? " ★" : ""); }), datasets: [
-        { label: "Na fila", data: bdias.map(function (d) { return D.esteira.backlog[d][0]; }),
-          borderColor: azul, backgroundColor: azul + "22", fill: true, tension: 0.25 },
-        { label: "Não agendadas", data: bdias.map(function (d) { return D.esteira.backlog[d][1]; }),
-          borderColor: css("--ink"), backgroundColor: "transparent", borderDash: [5, 4], tension: 0.25 },
+        { label: "Na fila", data: bdias.map(function (d) { return D.esteira.backlog[d][0]; }), backgroundColor: corB(azul) },
+        { label: "Não agendadas", data: bdias.map(function (d) { return D.esteira.backlog[d][1]; }), backgroundColor: corB(escuro) },
       ] },
       options: { interaction: { mode: "index", intersect: false },
-        scales: { x: { grid: { display: false } }, y: { beginAtZero: true } } },
+        scales: { x: { grid: { display: false } }, y: { beginAtZero: true } },
+        plugins: { tooltip: { callbacks: { title: function (it) {
+          var d = bdias[it[0].dataIndex];
+          return rotDia(d) + " (" + SEMANA[diaSemana(d)] + ")" + (d < D.inicio ? " — antes da War Room" : "");
+        } } } } },
     });
 
     var linhas = dias.slice().reverse().map(function (d) {
       var p = D.produtividade.por_dia[d], bk = D.esteira.backlog[d];
       return "<tr" + (d < D.inicio ? ' class="wr-antes"' : "") + "><td>" + rotDia(d) + " · " + SEMANA[diaSemana(d)].slice(0, 3) +
+        "</td><td class='num'>" + (CAP[d] ? num(CAP[d][0]) : "—") +
         "</td><td class='num'>" + (p ? num(p[0]) : "—") + "</td><td class='num'>" + (p ? num(p[1]) : "—") +
         "</td><td class='num'>" + (D.esteira.entradas[d] === undefined ? "—" : num(D.esteira.entradas[d])) +
         "</td><td class='num'>" + (bk ? num(bk[0]) : "—") + "</td><td class='num'>" + (bk ? num(bk[1]) : "—") + "</td></tr>";
     }).join("");
-    $("wr-tab-dias").innerHTML = "<thead><tr><th>Dia</th><th>Executadas com sucesso</th><th>Encerradas sem sucesso</th>" +
+    $("wr-tab-dias").innerHTML = "<thead><tr><th>Dia</th><th>Capacidade</th><th>Executadas com sucesso</th><th>Encerradas sem sucesso</th>" +
       "<th>Entraram na esteira</th><th>Backlog</th><th>Não agendadas</th></tr></thead><tbody>" + linhas + "</tbody>";
   }
 
@@ -380,29 +404,98 @@
   // ---------------------------------------------------------------------
   // Encerradas sem sucesso no dia (Produtividade)
   // ---------------------------------------------------------------------
+  // OS a OS. O supervisor diz se a recusa passou por ele (Sim/Não) e
+  // registra o desvio dali mesmo, com o formulário já preenchido.
+  var SUP = !!window.__WR_SUP__;
+  var ssSup = $("wr-ss-sup");
+  ssSup.innerHTML = '<option value="">Todos</option>' + (D.supervisores || []).map(function (s) {
+    return '<option value="' + s.id + '">' + esc(s.nome) + "</option>"; }).join("");
+  // O supervisor abre a tela já no próprio time: são as OS dele que ele valida.
+  if (SUP && (D.supervisores || []).some(function (s) { return s.id === EU; })) ssSup.value = EU;
+  ssSup.addEventListener("change", semSucesso);
+
+  function temDesvio(os) {
+    return D.desvios.some(function (d) { return !d.anulado && d.dia === D.dia && (d.os || []).indexOf(os) >= 0; });
+  }
+
   function semSucesso() {
-    var porTec = {};
-    D.produtividade.sem_sucesso.forEach(function (o) {
-      var k = o.tecnico || "—";
-      var t = porTec[k] = porTec[k] || { empresa: o.empresa, n: 0, motivos: {} };
-      t.n++;
-      t.motivos[o.motivo] = (t.motivos[o.motivo] || 0) + 1;
+    var filtro = ssSup.value;
+    var lista = D.produtividade.sem_sucesso.filter(function (o) { return !filtro || (o.sups || []).indexOf(filtro) >= 0; });
+    var V = D.validacoes || {};
+    var sim = 0, nao = 0, semNum = 0;
+    lista.forEach(function (o) {
+      if (!o.os) { semNum++; return; }
+      var v = V[o.os];
+      if (v && v.validado) sim++; else if (v) nao++;
     });
-    var nomes = Object.keys(porTec).sort(function (a, b) { return porTec[b].n - porTec[a].n || a.localeCompare(b); });
-    $("wr-ss-contagem").textContent = "· " + num(D.produtividade.sem_sucesso.length) + " em " + rotDia(D.dia);
-    if (!nomes.length) {
-      $("wr-ss").innerHTML = '<tbody><tr><td class="vazio-celula">Nenhuma OS de cliente encerrada sem sucesso em ' +
-        rotDia(D.dia) + " até a última coleta da Produtividade.</td></tr></tbody>";
+    var aResponder = lista.length - sim - nao - semNum;
+    $("wr-ss-contagem").textContent = "· " + num(lista.length) + " em " + rotDia(D.dia) +
+      (filtro ? " (de " + num(D.produtividade.sem_sucesso.length) + ")" : "");
+    var nota = [];
+    if (D.validacoes === null) nota.push("A validação ainda não tem a tabela no banco (migration 0022).");
+    else nota.push(num(sim) + " validadas com o supervisor · " + num(nao) + " não validadas · " + num(aResponder) + " sem resposta");
+    if (semNum) nota.push(num(semNum) + " sem número de OS (coleta anterior à atualização do coletor) — sem link e sem validação");
+    if (!SUP) nota.push("só supervisor responde a validação");
+    $("wr-ss-nota").textContent = nota.join(" · ") + ".";
+    if (!lista.length) {
+      $("wr-ss").innerHTML = '<tbody><tr><td class="vazio-celula">' + (filtro
+        ? "Nenhuma OS do time deste supervisor encerrada sem sucesso em " + rotDia(D.dia) + "."
+        : "Nenhuma OS de cliente encerrada sem sucesso em " + rotDia(D.dia) + " até a última coleta da Produtividade.") +
+        "</td></tr></tbody>";
       return;
     }
-    $("wr-ss").innerHTML = "<thead><tr><th>Técnico</th><th>Empresa</th><th>OS</th><th>Motivo registrado no fechamento</th></tr></thead><tbody>" +
-      nomes.map(function (t) {
-        var m = porTec[t].motivos;
-        return "<tr><td>" + esc(t) + "</td><td>" + esc(porTec[t].empresa || "") + "</td><td class='num'>" + porTec[t].n + "</td><td>" +
-          Object.keys(m).sort(function (a, b) { return m[b] - m[a]; })
-            .map(function (k) { return esc(k) + (m[k] > 1 ? " (" + m[k] + ")" : ""); }).join(" · ") + "</td></tr>";
+    var podeValidar = SUP && D.validacoes !== null;
+    $("wr-ss").innerHTML = "<thead><tr><th>Hora</th><th>OS</th><th>Técnico</th><th>Finalidade</th>" +
+      "<th>Motivo registrado no fechamento</th><th>Validada com o supervisor?</th><th></th></tr></thead><tbody>" +
+      lista.map(function (o, i) {
+        var idx = D.produtividade.sem_sucesso.indexOf(o);
+        var v = o.os ? V[o.os] : null;
+        var celV;
+        if (!o.os) celV = '<span class="subnote" style="margin:0">—</span>';
+        else if (podeValidar) {
+          var est = v ? (v.validado ? "sim" : "nao") : "";
+          celV = '<span class="toggle toggle-mini wr-valida" data-os="' + esc(o.os) + '">' +
+            '<button type="button" data-v="sim" class="' + (est === "sim" ? "active" : "") + '">Sim</button>' +
+            '<button type="button" data-v="nao" class="' + (est === "nao" ? "active wr-nao" : "") + '">Não</button></span>' +
+            (v ? '<span class="subnote wr-quem">' + esc(v.nome.split(" ")[0]) + " " + esc(v.hora || "") + "</span>" : "");
+        } else {
+          celV = v ? '<span class="badge ' + (v.validado ? "badge-verde" : "badge-vermelho") + '">' + (v.validado ? "sim" : "não") +
+            "</span> <span class='subnote wr-quem'>" + esc(v.nome.split(" ")[0]) + " " + esc(v.hora || "") + "</span>"
+            : '<span class="badge badge-cinza">sem resposta</span>';
+        }
+        var feito = o.os && temDesvio(o.os);
+        return "<tr>" +
+          "<td>" + esc(o.hora || "—") + "</td>" +
+          "<td>" + (o.os ? '<a href="' + D.wvsa_os + encodeURIComponent(o.os) + '" target="_blank" rel="noopener" title="Abrir a OS no WVSA">#' + esc(o.os) + "</a>" : "—") + "</td>" +
+          "<td>" + esc(o.tecnico || "—") + (o.empresa ? ' <span class="subnote wr-emp">' + esc(o.empresa) + "</span>" : "") + "</td>" +
+          "<td>" + esc(o.finalidade || "") + "</td>" +
+          "<td>" + esc(o.motivo || "") + "</td>" +
+          "<td>" + celV + "</td>" +
+          "<td>" + (D.tem_tabela ? '<button type="button" class="btn-ghost wr-reg' + (feito ? " wr-reg-feito" : "") + '" data-idx="' + idx + '">' +
+            (feito ? "✓ Desvio registrado" : "Registrar desvio") + "</button>" : "") + "</td></tr>";
       }).join("") + "</tbody>";
   }
+
+  $("wr-ss").addEventListener("click", async function (e) {
+    var reg = e.target.closest("button.wr-reg");
+    if (reg) { abrirRegistro(false, D.produtividade.sem_sucesso[+reg.getAttribute("data-idx")]); return; }
+    var b = e.target.closest(".wr-valida button[data-v]");
+    if (!b || b.disabled) return;
+    var os = b.parentNode.getAttribute("data-os");
+    var atual = (D.validacoes || {})[os];
+    var quer = b.getAttribute("data-v") === "sim";
+    // Clicar de novo na resposta já marcada desfaz (volta a "sem resposta").
+    var valor = atual && atual.validado === quer ? null : quer;
+    b.parentNode.querySelectorAll("button").forEach(function (x) { x.disabled = true; });
+    try {
+      var r = await postJSON("/war-room/validacoes", { dia: D.dia, os: os, validado: valor });
+      if (r.validacao) D.validacoes[os] = r.validacao; else delete D.validacoes[os];
+      semSucesso();
+    } catch (err) {
+      b.parentNode.querySelectorAll("button").forEach(function (x) { x.disabled = false; });
+      alertar(err.message);
+    }
+  });
 
   // ---------------------------------------------------------------------
   // Registrar
@@ -465,16 +558,28 @@
 
   function erro(id, msg) { var el = $(id); el.textContent = msg || ""; el.hidden = !msg; }
 
-  function abrirRegistro(manterMomento) {
-    var mom = manterMomento ? $("wr-f-momento").value : "";
+  // `pre`: uma encerrada sem sucesso da lista — o formulário já nasce com o
+  // momento, o técnico, a OS, o tipo pela validação e a causa pelo motivo
+  // (palpite do servidor, `war_room.causa_do_motivo`). O supervisor confere.
+  function abrirRegistro(manterMomento, pre) {
+    var mom = pre ? "encerramento" : (manterMomento ? $("wr-f-momento").value : "");
     form.reset();
     $("wr-f-momento").value = mom;
     toggleStatus("wr-f-status", "resolvido");
     tiposDoMomento();
+    if (pre) {
+      var v = pre.os ? (D.validacoes || {})[pre.os] : null;
+      $("wr-f-tipo").value = v ? (v.validado ? "encerr_validado" : "encerr_sem_validacao") : "";
+      $("wr-f-tecnico").value = pre.tecnico || "";
+      $("wr-f-os").value = pre.os || "";
+      $("wr-f-causa").value = pre.causa || "";
+      $("wr-f-detalhe").value = pre.causa ? "" : (pre.motivo || "").slice(0, 500);
+      camposCondicionais();
+    }
     erro("wr-form-erro");
     $("wr-form-dia").textContent = "Desvio de " + rotDia(D.dia) + (D.dia === D.hoje ? " (hoje)" : "") + ".";
     if (!dlg.open) dlg.showModal();
-    (mom ? $("wr-f-tipo") : $("wr-f-momento")).focus();
+    (pre ? ($("wr-f-tipo").value ? $("wr-f-resp") : $("wr-f-tipo")) : (mom ? $("wr-f-tipo") : $("wr-f-momento"))).focus();
   }
   var novo = $("wr-novo");
   if (novo) novo.addEventListener("click", function () { abrirRegistro(false); });
@@ -500,6 +605,7 @@
       var r = await postJSON("/war-room/desvios", corpo);
       D.desvios.unshift(r.desvio);
       desvios();
+      semSucesso();
       alertar("Desvio registrado.");
       if (outro) abrirRegistro(true); else dlg.close();
     } catch (err) {
@@ -516,6 +622,7 @@
   function substituir(novoD) {
     for (var i = 0; i < D.desvios.length; i++) if (D.desvios[i].id === novoD.id) D.desvios[i] = novoD;
     desvios();
+    semSucesso();
   }
 
   var tab = $("wr-tabela");

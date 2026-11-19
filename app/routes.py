@@ -561,6 +561,18 @@ def configuracoes():
     """
     u = usuario_atual()
     contexto = {"ativo": "configuracoes", "usuario": u}
+    if u["is_supervisor"]:
+        # "Minhas equipes": o supervisor vê e mexe nas PRÓPRIAS equipes
+        # (decisão de 19/11/2026, com a War Room filtrando por supervisor).
+        # Os técnicos avulsos aparecem só para leitura — quem reparte a
+        # UNETVALE entre supervisores continua sendo o admin.
+        minhas, avulsos, disponiveis = supa.paralelo(
+            lambda: supervisores.equipes_de(u["id"]),
+            lambda: _avulsos_de(u["id"]),
+            supervisores.equipes_disponiveis)
+        contexto["minhas_equipes"] = minhas
+        contexto["meus_avulsos"] = avulsos
+        contexto["equipes_para_mim"] = [e for e in disponiveis if e not in minhas]
     if u["is_admin"]:
         contexto["supervisores"] = supervisores.listar()
         contexto["equipes"] = supervisores.equipes_disponiveis()
@@ -739,6 +751,45 @@ def supervisor_equipe():
         flash(f"{len(equipes)} equipe(s) {verbo}(s): {', '.join(equipes)}.", "ok")
     except Exception as e:
         flash(f"Erro ao alterar o vínculo: {e}", "erro")
+    return redirect(url_for("dash.configuracoes"))
+
+
+def _avulsos_de(uid):
+    try:
+        return [l["rotulo"] for l in supa.select("supervisor_tecnicos", {
+            "select": "rotulo", "usuario_id": f"eq.{uid}", "order": "rotulo.asc"})]
+    except Exception:
+        return []
+
+
+@bp.route("/configuracoes/minhas-equipes", methods=["POST"])
+@login_obrigatorio
+def minhas_equipes():
+    """O supervisor liga ou desliga uma equipe DELE — nunca de outro.
+
+    A equipe nova precisa existir na Produtividade: digitar o nome livre
+    criaria um vínculo que não casa com nenhum técnico ("MAYRA " com espaço,
+    "Mayra"), e o filtro perderia gente sem erro na tela.
+    """
+    u = usuario_atual()
+    if not u["is_supervisor"]:
+        abort(403)
+    equipe = (request.form.get("equipe") or "").strip()
+    acao = request.form.get("acao") or "vincular"
+    if not equipe or acao not in ("vincular", "desvincular"):
+        flash("Escolha uma equipe.", "erro")
+        return redirect(url_for("dash.configuracoes"))
+    try:
+        if acao == "desvincular":
+            supervisores.desvincular(u["id"], equipe)
+            flash(f"Equipe {equipe} removida das suas.", "ok")
+        elif equipe not in supervisores.equipes_disponiveis():
+            flash("Essa equipe não aparece na Produtividade.", "erro")
+        else:
+            supervisores.vincular(u["id"], equipe)
+            flash(f"Equipe {equipe} adicionada às suas.", "ok")
+    except Exception as e:
+        flash(f"Erro ao alterar suas equipes: {e}", "erro")
     return redirect(url_for("dash.configuracoes"))
 
 
