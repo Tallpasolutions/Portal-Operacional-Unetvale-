@@ -1698,6 +1698,36 @@ credencial errada gravaria zeros e reportaria sucesso.
 `gerencial.conferir_idf_vazio` recusa gravar zero por cima de número bom.
 (`operacional15`, esse, dá 403 limpo.)
 
+**Um feedback com defeito derruba a lista do IDF do período INTEIRO.** De
+17/11/2026 13:39 a 19/11/2026 o `ger_idf` falhou em toda rodada com `500 …
+/relatorios/indicadores9/lista/chats`: um único chat de 17/11, entre 11:36:46
+e 11:36:47, faz o WVSA responder `{"message": "Server Error"}` a qualquer
+janela que o inclua — mês, dia, hora — inclusive na tela dele. O painel do mês
+respondia normal. Hoje `gerencial.lista_resiliente` lê em volta: mês inteiro;
+se der 500, dia a dia; dia que falha é cercado por bisseção ao segundo. O
+segundo do corte vai para `payload["idf_cortes"]` e a rodada seguinte já pede
+o mês em dois pedaços (com a busca, ~40 s a mais; sem, nada). Os dois pedaços
+[.., 11:36:46] e [11:36:47, ..] deixam de fora SÓ o registro (ele mora na
+fração entre os dois segundos). A tela diz o que faltou (`lista_falhas`, com
+`faltam` = painel − lista: 827 − 826 em 11/2026). Corte cuja costura
+[corte − 1 s, corte] volta a responder sai sozinho: o WVSA consertou.
+
+⚠️ **500 no IDF também quer dizer período VAZIO.** "00:00:00 a 00:00:00" dá
+500, madrugada dá 500. Bisseção ingênua acusa o vazio de registro quebrado —
+foi o que a primeira tentativa fez. A busca é ANCORADA num dia vizinho que
+responde ("[âncora, X]" nunca é vazio). Sem âncora à esquerda o trecho antes do
+corte fica "não lido" até o painel provar que só faltou o quebrado. Canal com
+`n = 0` no painel nem pede a lista.
+
+**A nota do painel do IDF é o `.fs-3` do bloco, não o último número.** O WVSA
+pôs embaixo da média "Faltam 12 notas 5 para a meta de 4,5" ou "Meta de 4,5
+atingida", e o `parse_idf` (que pegava o último número do texto) passou a gravar
+a META — 4,5 cravado em ligação e chat — e 0 em OS, que acendia alerta com
+"0,00". Pego em 19/11/2026; setembro estava 0/0/0 (real 4,74/4,54/4,64).
+Conferido: a nota lida = a média recontada da lista nos três canais de 10 e
+11/2026. Os meses que a rodada não refaz (antes de 10/2026) seguem errados até
+um `enviar.py --so ger_idf --full`.
+
 **Cat 4 tem rótulos duplicados no cadastro do WVSA.** Convivem
 `OS de Suporte em aberto` (38) e `OS de suporte em aberto` (27), e
 `Cancelou visita` aparece duas vezes. Sem juntar, a mesma causa vira duas
@@ -2298,6 +2328,22 @@ a.run(port=5001, use_reloader=False)"
 ---
 
 ## 9. Estado atual e pendências
+
+- **IDF: registro quebrado no WVSA e nota do painel** em 19/11/2026, sem
+  migration (§6). O `ger_idf` estava em "Erro" desde 17/11 13:39 por um chat
+  com defeito no WVSA; e a nota do painel gravava a meta (4,5) ou 0 desde que o
+  WVSA mudou o bloco. Provado: WVSA simulado por script (11 casos de
+  `lista_resiliente`, 6 de `idf_detalhado` com HTML de verdade, incluindo
+  registro consertado e canal vazio); contra o WVSA real gravando só em
+  arquivo, 10/2026 idêntico (244/1572/684) e 11/2026 com 826 de 827 chats,
+  corte em 17/11 11:36:47, segunda rodada com os mesmos feedbacks; nota =
+  média da lista nos seis casos; Dashboard com esse payload no desktop e em
+  375 px, aviso só em novembro, console limpo.
+
+  **Ordem**: o payload novo só ACRESCENTA chaves (`lista_falhas`,
+  `idf_cortes`) — o app velho as ignora, e o novo vive sem elas. Mergear,
+  copiar `coletor/gerencial.py` para `~/unetvale-coletor`, e a rodada
+  seguinte já grava.
 
 - **War Room — encerradas OS a OS, capacidade e Minhas equipes** em
   19/11/2026, migration `0022` (`warroom_validacoes`) e coletor novo
