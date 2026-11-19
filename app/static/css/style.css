@@ -1323,3 +1323,38 @@ body.fluxo-foco .fluxo-editor{ height:100vh; border-radius:0; border:none; }
   .es-rot-lista .card-b{ max-height:360px; }
   #es-mapa{ height:380px; }
 }
+
+/* ===== War Room ===== */
+/* Rotina do dia: um passo por conferência. Verde-claro quando alguém já
+   marcou; o botão do próprio supervisor fica azul quando a rodada é dele. */
+.wr-rotina{ display:grid; grid-template-columns:repeat(auto-fill,minmax(min(200px,100%),1fr)); gap:10px; }
+.wr-passo{ border:1px solid var(--borda-2); border-radius:10px; padding:11px 12px; display:flex; flex-direction:column; gap:7px; }
+.wr-passo.feito{ background:#f1faf6; border-color:#bfe6d5; }
+.wr-passo-t{ display:flex; justify-content:space-between; gap:8px; font-size:13.5px; color:var(--ink-d); }
+.wr-passo-t span{ font-size:12px; color:var(--muted); white-space:nowrap; }
+.wr-passo-q{ font-size:12.5px; color:var(--muted); min-height:17px; }
+.wr-passo-r{ display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; }
+.wr-passo-r .btn-ghost{ font-size:12px; padding:4px 9px; }
+.wr-passo-r .btn-ghost.wr-minha{ background:var(--brand); border-color:var(--brand); color:#fff; }
+/* O formulário de registro em duas colunas; texto longo ocupa a linha. */
+.wr-form-grade{ display:grid; grid-template-columns:1fr 1fr; column-gap:14px; }
+.wr-form-grade .wr-larga{ grid-column:1 / -1; }
+@media (max-width:620px){ .wr-form-grade{ grid-template-columns:1fr; } }
+.modal-largo .field .wr-opc{ font-weight:400; color:var(--muted-l); }
+.wr-empresa{ display:block; margin:4px 0 0; min-height:16px; }
+/* `.modal .wr-erro` e não a classe solta: o `.modal p` (cinza) venceria. */
+.modal .wr-erro{ color:var(--danger); font-size:13px; margin:4px 0 0; }
+.wr-tabela td{ vertical-align:top; min-width:110px; }
+.wr-tabela td:first-child, .wr-tabela td:nth-last-child(-n+2){ min-width:0; }
+.wr-tabela .wr-sol{ min-width:220px; max-width:360px; white-space:normal; }
+.wr-tabela .wr-emp{ display:block; margin:0; }
+.wr-tabela .wr-det{ margin:2px 0 0; }
+.wr-tabela tr.wr-anulado td{ color:var(--muted-l); text-decoration:line-through; }
+.wr-tabela tr.wr-anulado td:nth-last-child(2){ text-decoration:none; }
+.tbl tr.wr-antes td{ color:var(--muted); }
+.tbl td.vazio-celula{ text-align:center; color:var(--muted); padding:22px; }
+.wr-numeros .d{ margin-left:4px; vertical-align:middle; }
+.wr-aviso{ position:fixed; left:50%; bottom:22px; transform:translate(-50%, 140%); background:var(--ink-d); color:#fff;
+  padding:10px 16px; border-radius:8px; font-size:13.5px; box-shadow:var(--sombra); transition:transform .2s; z-index:50;
+  max-width:calc(100vw - 32px); }
+.wr-aviso.on{ transform:translate(-50%, 0); }

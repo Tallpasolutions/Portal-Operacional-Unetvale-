@@ -80,7 +80,7 @@ data mais próxima primeiro (§6). A varredura do passado segue manual:
 | Tipo | Módulos | Se o dado sumir |
 |---|---|---|
 | **Espelho** do WVSA | Produtividade, IQI/IQM, Massivas | recoleta-se |
-| **Dado nasce aqui** | **Ações**, **Processos**, Troca de Poste (OS/revisão), **Esteira** (entrou/saiu — `esteira_movimentos`) | **não há de onde recoletar** |
+| **Dado nasce aqui** | **Ações**, **Processos**, Troca de Poste (OS/revisão), **Esteira** (entrou/saiu — `esteira_movimentos`), **War Room** (desvios e rodadas) | **não há de onde recoletar** |
 
 Nos módulos do segundo tipo: histórico append-only, recorte de permissão no
 servidor, e cuidado redobrado com migration destrutiva.
@@ -114,11 +114,12 @@ servidor, e cuidado redobrado com migration destrutiva.
 
 ---
 
-## 4. Os oito módulos
+## 4. Os nove módulos
 
 | Rota | Módulo | Origem do dado | Quem vê |
 |---|---|---|---|
 | `/dashboard` | **Dashboard** | `dados_modulo` (6 coletas `ger_*`) | todos |
+| `/war-room` | **War Room** de operações | lê Produtividade e Esteira; grava `warroom_*` (migration `0021`) | todos (pela matriz de Configurações); todos registram |
 | `/produtividade` | Produtividade | `dados_modulo` (coletor) | todos; supervisor só o time dele |
 | `/iqi` | IQI / IQM | `dados_modulo` (coletor) | todos |
 | `/massivas` | Massivas | `dados_modulo` (coletor) | todos |
@@ -1096,6 +1097,71 @@ instalação/mudança não agendada e o resumo das 18h) — fase seguinte, no me
 coletor; "baixar imagem do quadro" (html2canvas por CDN); a projeção do
 próximo mês, que era pendência do próprio Esteira-OS.
 
+### War Room: números do dia, rotina dos supervisores e desvios
+
+Nasceu em 19/11/2026 com a sala de guerra "Zerando a esteira" (resumo de 8
+semanas: 9.675 OS abertas × 7.811 encerradas com sucesso de 22/09 a 16/11,
+saldo −1.864). Os supervisores passam o dia na mesa, junto do agendamento:
+saída do almoxarifado até 08:15, daily, validação de rotas, agenda às
+10h/12h/15h/18h e validação das OS de suporte — registrando todo desvio com
+causa, responsável e solução. Página única (`/war-room`), um filtro no topo.
+
+**Os números são só lidos, e todos SEM retirada e SEM infra** (decisão de
+19/11/2026: a War Room é do agendamento de cliente). Executadas com sucesso
+e encerradas sem sucesso vêm da Produtividade (`sucesso`, dia CIVIL);
+entradas e backlog vêm da Esteira (dia OPERACIONAL, 21h→21h). Retirada é
+`esteira.eh_retirada`, uma definição para as duas telas. **Infra é por
+FINALIDADE, não por empresa** (`war_room.eh_infra`): a INFRASEG faz suporte
+de cliente e estava no ranking de ofensores do resumo de 8 semanas, que
+também tirava "retirada e infra".
+
+⚠️ "Executada com sucesso" sai da Produtividade, NUNCA da saída da esteira:
+a OS sai da fila ao ser agendada e volta se a visita falha (ver Esteira).
+
+A Produtividade é lida SEM expandir (`_ler_produtividade` seleciona as
+listas do `v: 2` pelo caminho do JSON): só se conta, e virar as 57 mil OS
+em dicionários seria trabalho jogado fora. Payload `v: 1` cai em
+`dados.get_modulo`.
+
+**Régua**: média do mesmo dia da semana na janela do resumo (22/09 a
+16/11), só dias com dado — dia sem coleta não puxa a média como se fosse dia
+fraco. Medido em 19/11/2026: quinta = 144 com sucesso. O backlog compara com
+a véspera do início (18/11: 490). **Com o dia em andamento a tela não mostra
+diferença**: às 14h, "−77" contra a média do dia inteiro assusta e não diz
+nada sobre o ritmo.
+
+**Registro com lista fechada.** No resumo, 52% dos encerramentos sem sucesso
+ficaram "sem motivo claro" porque o motivo era texto livre. Momento, tipo,
+causa e responsável são listas; o único texto obrigatório é a solução, e
+"Outra causa" exige detalhe. As causas começam pelas categorias da página 3
+do resumo, para o antes e o depois se compararem pela mesma régua.
+
+**O catálogo mora em `app/war_room.py`, não em `check` do banco**: ele vai
+ser acertado com os supervisores nos primeiros dias, e cada ajuste viraria
+migration. Grava-se o slug; tirar uma chave do catálogo não quebra o
+histórico (a tela mostra a chave crua). O tipo é oferecido primeiro pelo
+momento, mas a lista inteira continua ao alcance — desvio de rota aparece no
+check das 12h.
+
+**Rodadas** (`warroom_rodadas`, uma por dia × momento × pessoa): sem elas, um
+dia sem desvio e um dia em que ninguém conferiu têm a mesma cara. Desmarcar
+apaga a linha (é caixa de seleção, não fato).
+
+**Nada se apaga no desvio**: anular é UPDATE com motivo obrigatório (trava
+no banco), só de quem registrou ou do admin; a `service_role` nem tem DELETE
+na tabela. Status e solução qualquer um com o módulo muda — a mesa é uma só
+— e a troca de status é condicional ao status lido. O dia do desvio vem do
+Python (dia de Brasília), não de `now()::date`, que é UTC.
+
+A tabela "Encerradas sem sucesso no dia" lista, da Produtividade, quem fechou
+OS de cliente sem sucesso e com que motivo — é o insumo da regra nº 1 do
+plano ("nenhuma OS encerrada sem sucesso sem o supervisor saber").
+
+O que **ainda não** faz: o cruzamento automático "encerradas sem validação"
+(precisa do número da OS no payload da Produtividade, que o coletor tem no
+`dados.db` e não envia — mudança de formato, ordem de deploy do §6) e o
+"virar ação" do desvio para o módulo Ações.
+
 ### Papéis
 
 Três, independentes — a pessoa pode ser um, vários ou nenhum:
@@ -1110,7 +1176,7 @@ Três, independentes — a pessoa pode ser um, vários ou nenhum:
 
 Configuração, não código, desde 04/09/2026 (migration `0014`). O admin marca em
 *Configurações → Acesso aos módulos* o que cada pessoa vê; `auth.MODULOS` lista
-os oito configuráveis.
+os nove configuráveis.
 
 ⚠️ A tabela `usuario_modulos_bloqueados` guarda o que foi **TIRADO**, não o que
 foi liberado. Sem linha = vê — que é como o portal sempre funcionou, e por isso
@@ -1279,6 +1345,14 @@ Os que nasceram na Esteira:
 | `.kpi.es-kpi-clicavel` / `.es-kpi-on` | KPI que liga um filtro ao clique; clicar de novo desliga |
 | `.es-rot` / `.es-card` / `.es-rota` | roteirizador: lista com altura limitada, cartão da OS, lista numerada da rota |
 | `tr.es-vista` | OS que a pessoa já abriu no WVSA a partir da tabela (guardado no navegador) |
+
+Os que nasceram na War Room:
+
+| Classe | O que é |
+|---|---|
+| `.wr-rotina` / `.wr-passo` | grade de conferências do dia; `.feito` quando alguém marcou |
+| `.wr-form-grade` | formulário de modal em duas colunas (`.wr-larga` ocupa a linha), uma no celular |
+| `.wr-aviso` | aviso curto no rodapé depois de gravar, no lugar de `alert()` |
 
 **Nada de `confirm()` do navegador.** Ele abre uma caixa do sistema, com o
 domínio no topo, que não pertence à tela — use `.modal` com `<dialog>`. As
@@ -2175,6 +2249,48 @@ a.run(port=5001, use_reloader=False)"
 ---
 
 ## 9. Estado atual e pendências
+
+- **War Room** entrou em 19/11/2026, migration `0021` (`warroom_desvios`,
+  `warroom_rodadas`), **ainda não aplicada em produção** — sem ela a página
+  mostra os números e diz o que falta, e as escritas respondem 503. O porquê
+  está no §4.
+
+  Rotas pelo `test_client` num servidor de ensaio (`warroom_*` em memória, o
+  resto lendo produção, toda outra escrita, RPC de escrita e Storage
+  recusados): 75 casos — sem login 302, `?dia=` ruim cai em hoje, 17
+  entradas ruins todas 400 com frase, corpo não JSON 400, OS deduplicada,
+  empresa só com técnico, reabrir limpa o `resolvido_em`, "nada mudou" 400,
+  id ruim/nulo/inexistente 404, anular de outro 403 e do admin 200, anular
+  sem motivo e duas vezes 400, editar anulado 400, rodada idempotente e
+  desmarcar só a própria, módulo bloqueado 404 nas cinco rotas e fora do
+  menu, coluna na matriz, sem migration 200/503, nenhuma escrita real.
+  Quem tem o Dashboard bloqueado passa a cair na War Room ao entrar (era a
+  Esteira): é o primeiro módulo visível na ordem da sidebar.
+
+  No navegador, com o mouse: registrar incompleto (erro em vermelho no
+  modal), saída tardia com horário, "Registrar e outro" mantendo o momento,
+  pendente → resolvido pelo clique na linha, cross-filter, rodada marcada,
+  375 px sem rolar de lado (formulário em uma coluna); console só com o 400
+  esperado.
+
+  Migration contra produção em transação com `rollback`: aplicada e
+  reaplicada sem erro, 20 travas — status, solução vazia e longa, OS não
+  numérica, 21 OS, autor inexistente, anular sem motivo recusados; rodada
+  duplicada recusada e a de outra pessoa aceita; RLS ligado; `anon` e
+  `authenticated` sem acesso; `service_role` lê, grava, anula e faz upsert
+  da rodada, mas **não apaga desvio**. Depois do rollback, zero tabelas
+  `warroom_*`.
+
+  **Ainda não exercitado:** a gravação real pelo PostgREST e o
+  `Server-Timing` na Vercel (localmente
+  ~1,8 s, 9 idas em paralelo; a Produtividade inteira, 1,35 MB, é lida a cada
+  abertura).
+
+  ⚠️ Em aberto, visto no gráfico: em 02/11/2026 a fila da esteira caiu de
+  1.238 para 635 OS (as de cliente, de 455 para 99) de uma coleta para a
+  outra — 51%, logo acima da trava de "encolheu para menos da metade". Pode
+  ser limpeza em massa no WVSA; conferir antes de usar esse trecho do backlog
+  como evidência.
 
 - **Esteira de agendamento** entrou em 22/10/2026, migration `0020` (tabelas
   `esteira_*` e as funções `esteira_aplicar_coleta`, `_status`, `_backlog`,
