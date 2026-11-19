@@ -671,8 +671,36 @@
         '<span class="rd">' + Dash.num(Math.round((d.n || 0) * nao / 100)) + " não resolvidos</span></div>";
     }).join("");
 
+    notaListaFalhas(blk);
     tabelaPessoas(blk, f, sd, detalhe);
     tabelaAlertas(blk, f, sd, detalhe);
+  }
+
+  // O painel (cartões) segue completo; quem fica sem o feedback quebrado é a
+  // lista — atendente, alertas e todo número recontado por recorte.
+  function notaListaFalhas(blk) {
+    var el = $("idf-lista-nota"), falhas = blk.lista_falhas || {};
+    var partes = CANAIS.filter(function (p) { return falhas[p[0]]; }).map(function (p) {
+      var x = falhas[p[0]], quando = (x.cortes || []).map(function (c) {
+        return c.slice(8, 10) + "/" + c.slice(5, 7) + " por volta de " + c.slice(11, 16);
+      });
+      var txt = (p[0] === "os" ? "OS" : p[1].toLowerCase()) + ": " +
+        (x.faltam > 0 ? Dash.num(x.faltam) + (x.faltam === 1 ? " avaliação ficou" : " avaliações ficaram") + " de fora"
+                      : "parte da lista ficou de fora") +
+        (quando.length ? " (registro com erro no WVSA em " + quando.join(", ") + ")" : "");
+      if ((x.perdidos || []).length) {
+        txt += "; trecho não lido: " + x.perdidos.map(function (t) {
+          return t[0].slice(8, 10) + "/" + t[0].slice(5, 7) + " " + t[0].slice(11, 16) + "–" + t[1].slice(11, 16);
+        }).join(", ");
+      }
+      return txt;
+    });
+    el.style.display = partes.length ? "" : "none";
+    el.textContent = partes.length
+      ? "Lista de feedbacks incompleta — " + partes.join(" · ") +
+        ". O WVSA não entrega esse registro nem na tela dele. Os cartões vêm do painel e estão completos; " +
+        "atendentes, alertas e recortes ficam sem ele."
+      : "";
   }
 
   function vazioTabela(el, msg) {

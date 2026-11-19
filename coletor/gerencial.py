@@ -796,6 +796,7 @@ def coletar_idf(sessao, meses, anterior=None, detalhar=True):
     payload = dict(anterior or {})
     blocos = dict(payload.get("meses_dados") or {})
     textos = _Textos(payload.get("textos"))
+    cortes = _cortes_vigentes(payload.get("idf_cortes"))
     for mes in meses:
         ini, fim = _limites_do_mes(mes)
         log(f"  IDF {mes} ({ini} a {fim})…")
@@ -809,7 +810,8 @@ def coletar_idf(sessao, meses, anterior=None, detalhar=True):
         r.raise_for_status()
         antigo = blocos.get(mes) or {}
         blocos[mes] = parse_idf(_html_de_actions(r.text))
-        blocos[mes].update(idf_detalhado(sessao, csrf, ini, fim, textos, mes in detalhar))
+        blocos[mes].update(idf_detalhado(sessao, csrf, ini, fim, textos, mes in detalhar,
+                                         painel=blocos[mes], cortes=cortes))
         if mes not in detalhar:
             # O drill por setor/cidade e o que pesa (~45 chamadas de ~5 s por
             # mes, medido em 29/09/2026: 4 min para 08/2026). Fora da rodada
@@ -822,8 +824,12 @@ def coletar_idf(sessao, meses, anterior=None, detalhar=True):
             f"chats {blocos[mes]['chats']['n']}, OS {blocos[mes]['os']['n']} "
             f"| feedbacks lidos: " + ", ".join(
                 f"{c} {len(v)}" for c, v in blocos[mes]["feedbacks"].items()))
+        for c, falha in (blocos[mes].get("lista_falhas") or {}).items():
+            log(f"    !! lista de {c}: WVSA com erro — cortes {falha['cortes']}, "
+                f"trechos nao lidos {falha['perdidos']}, faltam {falha['faltam']}")
     conferir_idf_vazio(blocos, meses, anterior)
     payload["meses_dados"] = blocos
+    payload["idf_cortes"] = cortes
     payload["textos"] = textos.listas
     payload["campos_feedback"] = list(CAMPOS_FEEDBACK)
     payload["campos_alerta"] = list(CAMPOS_ALERTA)
@@ -841,10 +847,17 @@ def parse_idf(html):
         if not alvo:
             continue
         canal, campo = alvo
-        txt = _limpa(bloco.get_text(" ", strip=True))
-        # "Média das Notas 4.58" / "% Sol. Atendida 88.15%" / "… Sem dados"
-        m = re.search(r"(\d+[.,]?\d*)\s*%?\s*$", txt)
-        saida[canal][campo] = float(m.group(1).replace(",", ".")) if m else 0.0
+        # O numero e o `.fs-3` do bloco. Ler "o ultimo numero do texto" (como
+        # era ate 19/11/2026) quebrou quando o WVSA pos uma linha embaixo da
+        # media: "Média das Notas 4.44 Faltam 12 notas 5 para a meta de 4,5"
+        # virava 4,5 (a META) e "4.59 Meta de 4,5 atingida", 0 — o card de OS
+        # acendia alerta com 0,00. O ultimo numero fica so de recuo.
+        grande = bloco.select_one(".fs-3")
+        m = re.search(r"\d+[.,]?\d*", _limpa(grande.get_text(" ", strip=True))) if grande else None
+        if not m:
+            # "Média das Notas 4.58" / "% Sol. Atendida 88.15%" / "… Sem dados"
+            m = re.search(r"(\d+[.,]?\d*)\s*%?\s*$", _limpa(bloco.get_text(" ", strip=True)))
+        saida[canal][campo] = float(m.group(m.lastindex or 0).replace(",", ".")) if m else 0.0
     for badge in soup.select(".badge"):
         pai = _limpa(badge.parent.get_text(" ", strip=True)) if badge.parent else ""
         for rotulo, canal in _CANAIS_BADGE.items():
@@ -875,7 +888,7 @@ CAMPOS_FEEDBACK = ("dia", "pessoa", "nota", "resolvido")
 CAMPOS_ALERTA = ("canal", "dia", "pessoa", "nota", "obs", "os")
 
 
-def idf_detalhado(sessao, csrf, ini, fim, textos, detalhar=True):
+def idf_detalhado(sessao, csrf, ini, fim, textos, detalhar=True, painel=None, cortes=None):
     """O que o painel do IDF nao mostra agregado: quem, onde e com qual nota.
 
     Tres pecas, porque nenhum endpoint entrega as tres juntas:
@@ -892,15 +905,63 @@ def idf_detalhado(sessao, csrf, ini, fim, textos, detalhar=True):
     Nada de nome ou telefone de cliente: a coluna "Atendimento" da lista e
     ignorada. O numero da OS fica (so no alerta), porque e por ele que se
     abre a OS no WVSA.
+
+    A lista sai por `lista_resiliente`: um feedback com defeito no WVSA
+    derruba a lista do periodo inteiro (ver la). `painel` e o que
+    `parse_idf` leu do mesmo mes — dele sai quantos feedbacks deveriam vir;
+    `cortes` ({canal: [AAAA-MM-DD HH:MM:SS]}) e lido E atualizado aqui.
     """
     saida = {"feedbacks": {}, "alertas": []}
     if detalhar:
         saida.update({"setor_de": {}, "cidade": {}, "detalhado_em": _agora().isoformat()})
     base = {"INICIO": f"{ini} 00:00:00", "FIM": f"{fim} 23:59:59"}
+    cortes = cortes if cortes is not None else {}
     for canal, tipo in _IDF_CANAIS.items():
-        html = _post_idf(sessao, csrf, f"/relatorios/indicadores9/lista/{canal}",
-                         {**base, "AGRUPAR_POR": "setor"})
-        regs, alertas = parse_idf_lista(html, canal, textos)
+        esperado = ((painel or {}).get(canal) or {}).get("n")
+        regs, alertas = [], []
+        if esperado != 0:
+            # Canal sem avaliacao no painel nem se pede: a lista vazia e
+            # justamente o que o WVSA responde com HTTP 500.
+            caminho = f"/relatorios/indicadores9/lista/{canal}"
+
+            def pedir(a, b, caminho=caminho):
+                return _post_idf_ou_none(sessao, csrf, caminho, {
+                    "INICIO": a.strftime(_FMT_IDF), "FIM": b.strftime(_FMT_IDF),
+                    "AGRUPAR_POR": "setor"})
+
+            htmls, achados, perdidos = lista_resiliente(
+                pedir, datetime.fromisoformat(f"{ini} 00:00:00"),
+                datetime.fromisoformat(f"{fim} 23:59:59"),
+                [datetime.strptime(c, _FMT_IDF) for c in cortes.get(canal, [])])
+            for html in htmls:
+                r, a = parse_idf_lista(html, canal, textos)
+                regs += r
+                alertas += a
+            # Os cortes do periodo sao os que a busca devolveu (corte
+            # consertado sai); os de outros meses ficam como estavam.
+            fora = [c for c in cortes.get(canal, []) if not (base["INICIO"] < c <= base["FIM"])]
+            junto = sorted(set(fora) | {c.strftime(_FMT_IDF) for c in achados})
+            if junto:
+                cortes[canal] = junto
+            else:
+                cortes.pop(canal, None)
+            dentro = [c.strftime(_FMT_IDF) for c in achados]
+            # O painel conta o feedback com defeito; a lista nao o traz. A
+            # diferenca e o que a tela diz que faltou. Corte conhecido com
+            # nada faltando = o WVSA consertou o registro: nao ha o que avisar
+            # (o corte fica, custa um pedido a mais e nao perde nada).
+            faltam = (esperado - len(regs)) if isinstance(esperado, int) else None
+            if perdidos and faltam is not None and faltam <= len(dentro):
+                # Cada corte esconde ao menos um feedback. Faltando so isso,
+                # os trechos "nao lidos" eram vazios — o caso em que nao havia
+                # ancora a esquerda (quebrado logo no comeco do mes).
+                perdidos = []
+            if perdidos or (dentro and (faltam is None or faltam > 0)):
+                saida.setdefault("lista_falhas", {})[canal] = {
+                    "cortes": dentro,
+                    "perdidos": [[a.strftime(_FMT_IDF), b.strftime(_FMT_IDF)] for a, b in perdidos],
+                    "faltam": faltam,
+                }
         saida["feedbacks"][canal] = regs
         saida["alertas"] += alertas
         if not detalhar:
@@ -922,6 +983,171 @@ def _post_idf(sessao, csrf, caminho, dados):
                     timeout=300)
     r.raise_for_status()
     return _html_de_actions(r.text)
+
+
+# --------------------------------------------------------------------------
+# Lista do IDF com um feedback quebrado no WVSA
+# --------------------------------------------------------------------------
+# Medido em 19/11/2026: UM feedback de chat de 17/11/2026, entre 11:36:46 e
+# 11:36:47, faz o WVSA responder HTTP 500 (`{"message": "Server Error"}`) a
+# QUALQUER periodo que o inclua — o mes inteiro, o dia, a hora. Do lado de
+# la nao ha o que ler: e defeito do registro, e a propria tela do WVSA quebra
+# do mesmo jeito. Sem contorno, o `ger_idf` inteiro falhou em toda rodada de
+# 17/11 13:39 em diante (o painel do mes respondia normal).
+#
+# ⚠️ O 500 tem DUAS causas com a mesma cara: registro quebrado e periodo
+# VAZIO (madrugada, minuto sem avaliacao). Bissecao ingenua confunde as duas
+# — "00:00:00 a 00:00:00" tambem da 500. Por isso a busca e ANCORADA num
+# pedaco vizinho que sabidamente responde e tem dado: "[ancora, X]" nunca e
+# vazio, entao so falha se X passou do registro quebrado.
+#
+# O filtro do WVSA casa no segundo, com o registro numa fracao entre dois
+# segundos: [.., 11:36:46] e [11:36:47, ..] respondem e juntos so deixam de
+# fora o proprio registro. O corte guardado e o segundo de cima (11:36:47).
+
+_FMT_IDF = "%Y-%m-%d %H:%M:%S"
+_SEG = timedelta(seconds=1)
+# Corte mais velho que isto sai do payload: o mes ja nao e recoletado.
+IDF_CORTE_DIAS = 120
+
+
+def _post_idf_ou_none(sessao, csrf, caminho, dados):
+    """Como `_post_idf`, mas 5xx vira None (vazio OU registro quebrado)."""
+    r = sessao.post(sessao.base + caminho, data={"_token": csrf, **dados},
+                    headers=_cabecalhos(csrf, sessao.base + "/relatorios/indicadores9"),
+                    timeout=300)
+    if r.status_code >= 500:
+        time.sleep(0.4)  # e o WVSA apertado; a busca faz dezenas destes
+        return None
+    r.raise_for_status()
+    return _html_de_actions(r.text)
+
+
+def _cortes_vigentes(cortes):
+    limite = (datetime.now() - timedelta(days=IDF_CORTE_DIAS)).strftime(_FMT_IDF)
+    return {c: sorted(x for x in v if x >= limite)
+            for c, v in (cortes or {}).items() if any(x >= limite for x in v)}
+
+
+def _dias(a, b):
+    """[a, b] em pedacos que nao atravessam meia-noite."""
+    while a <= b:
+        fim_dia = datetime.combine(a.date(), datetime.max.time()).replace(microsecond=0)
+        yield a, min(b, fim_dia)
+        a = fim_dia + _SEG
+
+
+def _meio(lo, hi, cima=False):
+    s = int((hi - lo).total_seconds())
+    return lo + timedelta(seconds=(s + 1) // 2 if cima else s // 2)
+
+
+def lista_resiliente(pedir, ini, fim, cortes=()):
+    """Le [ini, fim] em pedacos que o WVSA aceita. -> (htmls, cortes, perdidos).
+
+    `pedir(a, b)` devolve o HTML ou None no 5xx. `cortes` sao os segundos ja
+    conhecidos (rodadas anteriores): com eles, o mes sai em 2-3 pedidos em vez
+    da busca inteira (~50 pedidos, ~40 s). Devolve os cortes que caem no
+    periodo (conhecidos e novos) e os trechos que nao deu para ler — esses
+    vao para a tela, nunca somem calados.
+    """
+    # Corte guardado cuja costura [corte - 1 s, corte] ja responde: o WVSA
+    # consertou o registro. Sem esta conferencia o corte continuaria
+    # pulando o feedback (ele mora na fracao entre os dois pedacos) ate
+    # vencer, e a tela diria para sempre que faltou um.
+    cs = sorted(c for c in cortes if ini < c <= fim and pedir(c - _SEG, c) is None)
+    inicios = [ini] + cs
+    segs = [(a, (inicios[i + 1] - _SEG) if i + 1 < len(inicios) else fim)
+            for i, a in enumerate(inicios)]
+    pedacos = []
+    for a, b in segs:
+        h = pedir(a, b)
+        if h is not None:
+            pedacos.append((a, b, h))
+            continue
+        # Falhou: pedaco por dia. Dia que responde serve de ancora ao vizinho.
+        pedacos += [(da, db, pedir(da, db)) for da, db in _dias(a, b)]
+    htmls = [(a, h) for a, _, h in pedacos if h is not None]
+    achados, perdidos = list(cs), []
+    for i, (a, b, h) in enumerate(pedacos):
+        if h is not None:
+            continue
+        esq = pedacos[i - 1] if i > 0 else None
+        dir_ = pedacos[i + 1] if i + 1 < len(pedacos) else None
+        esq = esq if esq and esq[2] is not None and esq[1] + _SEG == a else None
+        dir_ = dir_ if dir_ and dir_[2] is not None and dir_[0] == b + _SEG else None
+        hs, cs_novos, ps = _resolver_pedaco(pedir, a, b, esq, dir_)
+        htmls += hs
+        achados += cs_novos
+        perdidos += ps
+    # Em ordem de tempo, como viria num pedido so: os pedacos achados na
+    # busca entram no fim da lista, e a ordem dos feedbacks mudaria.
+    htmls.sort(key=lambda x: x[0])
+    return [h for _, h in htmls], sorted(set(achados)), perdidos
+
+
+def _resolver_pedaco(pedir, s, e, esq, dir_):
+    """[s, e] respondeu 500 sozinho: vazio, ou ha registro quebrado dentro.
+
+    -> ([(inicio, html)], cortes, perdidos)."""
+    htmls, cortes, perdidos = [], [], []
+
+    def ler(a, b, vazio_ok):
+        """Pedaco provadamente sem registro quebrado: 500 ali e vazio."""
+        if a > b:
+            return
+        h = pedir(a, b)
+        if h is not None:
+            htmls.append((a, h))
+        elif not vazio_ok:
+            perdidos.append((a, b))
+
+    def corte_pela_direita(a, ancora_fim):
+        """Maior Y em [a, e] com [Y, ancora_fim] falhando -> corte em Y+1."""
+        lo, hi = a, e
+        while lo < hi:
+            mid = _meio(lo, hi, cima=True)
+            if pedir(mid, ancora_fim) is None:
+                lo = mid
+            else:
+                hi = mid - _SEG
+        return lo + _SEG
+
+    if esq:
+        if pedir(esq[0], e) is not None:
+            return htmls, cortes, perdidos  # com a ancora passa: era vazio
+        lo, hi = s, e  # menor X com [ancora, X] falhando; X = s - 1 passa
+        while lo < hi:
+            mid = _meio(lo, hi)
+            if pedir(esq[0], mid) is None:
+                hi = mid
+            else:
+                lo = mid + _SEG
+        b_ = lo
+        cortes.append(b_)
+        ler(s, b_ - _SEG, vazio_ok=True)
+        h = pedir(b_, e)
+        if h is not None:
+            htmls.append((b_, h))
+        elif not dir_:
+            perdidos.append((b_, e))
+        elif pedir(b_, dir_[1]) is None:
+            # Um SEGUNDO registro quebrado depois do primeiro.
+            c_ = corte_pela_direita(b_, dir_[1])
+            cortes.append(c_)
+            ler(c_, e, vazio_ok=True)
+            ler(b_, c_ - _SEG, vazio_ok=False)  # um terceiro? nao da para saber
+        return htmls, cortes, perdidos
+    if dir_:
+        if pedir(s, dir_[1]) is not None:
+            return htmls, cortes, perdidos
+        c_ = corte_pela_direita(s, dir_[1])
+        cortes.append(c_)
+        ler(c_, e, vazio_ok=True)
+        ler(s, c_ - _SEG, vazio_ok=False)
+        return htmls, cortes, perdidos
+    perdidos.append((s, e))  # sem vizinho que responda, nao ha ancora
+    return htmls, cortes, perdidos
 
 
 def _idf_por_grupo(sessao, csrf, base, tipo, agrupar):
