@@ -106,8 +106,13 @@ def war_room_anular(desvio_id):
 @login_obrigatorio
 @modulo_obrigatorio("war-room")
 def war_room_rodada():
+    # A rodada é do supervisor: é ele quem confere o próprio time. A tela só
+    # mostra o cartão para ele, e a rota recusa o resto (decisão de 19/11/2026).
+    u = usuario_atual()
+    if not u["is_supervisor"]:
+        return jsonify({"erro": "Só supervisor marca a rodada."}), 403
     try:
-        rodadas = wr.marcar_rodada(_corpo(), usuario_atual()["id"])
+        rodadas = wr.marcar_rodada(_corpo(), u["id"])
     except wr.Recusa as e:
         return jsonify({"erro": str(e)}), 400
     except Exception as e:

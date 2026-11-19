@@ -1145,7 +1145,11 @@ check das 12h.
 
 **Rodadas** (`warroom_rodadas`, uma por dia × momento × pessoa): sem elas, um
 dia sem desvio e um dia em que ninguém conferiu têm a mesma cara. Desmarcar
-apaga a linha (é caixa de seleção, não fato).
+apaga a linha (é caixa de seleção, não fato). **Só supervisor** (linha em
+`supervisores`) vê o cartão "Rotina do dia" e marca; a rota responde 403 ao
+resto, admin incluído (decisão de 19/11/2026: coordenação e gestão leem os
+desvios, quem confere o time é o supervisor). Em 19/11/2026 eram quatro:
+Adolar, Guilherme, Hygor e Davi.
 
 **Nada se apaga no desvio**: anular é UPDATE com motivo obrigatório (trava
 no banco), só de quem registrou ou do admin; a `service_role` nem tem DELETE

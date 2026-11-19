@@ -184,6 +184,7 @@
   // Rotina do dia
   // ---------------------------------------------------------------------
   function rotina() {
+    if (!$("wr-rotina")) return;          // só supervisor recebe o cartão
     var porMom = {};
     D.rodadas.forEach(function (r) { (porMom[r.momento] = porMom[r.momento] || []).push(r); });
     var desviosDia = {};
@@ -209,7 +210,7 @@
     }).join("");
   }
 
-  $("wr-rotina").addEventListener("click", async function (e) {
+  if ($("wr-rotina")) $("wr-rotina").addEventListener("click", async function (e) {
     var b = e.target.closest("[data-rodada]");
     if (!b || b.disabled) return;
     var feito = !b.classList.contains("wr-minha");
