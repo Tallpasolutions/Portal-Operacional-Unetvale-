@@ -46,11 +46,16 @@
   <div class="card-b tabela-wrap" hidden><table class="tbl" id="wr-tab-dias"></table></div>
 </div>
 
+{# A rotina é de quem confere o time: só supervisor (linha em `supervisores`)
+   vê e marca. Coordenação e gestão leem os desvios, não marcam rodada
+   (decisão de 19/11/2026). A rota recusa também — esconder não é permissão. #}
+{% if usuario.is_supervisor %}
 <div class="card" style="margin-bottom:16px">
   <div class="card-h"><span>Rotina do dia</span>
     <span class="subnote" style="margin:0">marque a rodada quando terminar de conferir o seu time</span></div>
   <div class="card-b"><div class="wr-rotina" id="wr-rotina"></div></div>
 </div>
+{% endif %}
 
 {% if not pacote.tem_tabela %}
   <div class="vazio" style="margin-bottom:16px">O registro de desvios ainda não tem as tabelas no banco
