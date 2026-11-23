@@ -343,7 +343,12 @@ def _produtividade(dia_foco):
         "base": base,
         "tecnicos": sorted(([nome, emp] for nome, (_, emp) in tecnicos.items()),
                            key=lambda x: _norma(x[0])),
-        "sem_sucesso": sorted(sem_sucesso, key=lambda x: (_norma(x["tecnico"]), x["hora"] or "")),
+        # Em ordem ao longo do dia, que é como a mesa lê a lista. A hora é a
+        # do relatório da Produtividade, conferida contra a ficha em
+        # 23/11/2026: 52 de 63 iguais à "fechada sem sucesso pelo técnico",
+        # as outras 1–5 min depois. Sem hora (coleta antiga) vai para o fim.
+        "sem_sucesso": sorted(sem_sucesso, key=lambda x: (x["hora"] is None, x["hora"] or "",
+                                                          _norma(x["tecnico"]))),
         "capacidade": capacidade,
     }
 

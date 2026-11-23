@@ -471,9 +471,9 @@ tr.clicavel{ cursor:pointer; }
 .ck-prazo.semprazo{ color:var(--muted-l); font-weight:600; }
 
 /* ---------- Lista ---------- */
-.ac-tabela th[data-ord]{ cursor:pointer; }
-.ac-tabela th.ord-asc::after{ content:" ▲"; font-size:9px; }
-.ac-tabela th.ord-desc::after{ content:" ▼"; font-size:9px; }
+.ac-tabela th[data-ord], .wr-ss th[data-ord]{ cursor:pointer; white-space:nowrap; }
+.ac-tabela th.ord-asc::after, .wr-ss th.ord-asc::after{ content:" ▲"; font-size:9px; }
+.ac-tabela th.ord-desc::after, .wr-ss th.ord-desc::after{ content:" ▼"; font-size:9px; }
 .ac-tabela td .etiqueta{ margin-left:4px; }
 .ac-tabela .pessoa{ display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
 
