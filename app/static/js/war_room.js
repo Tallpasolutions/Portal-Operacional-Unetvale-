@@ -1,9 +1,12 @@
 // War Room de Operações: números do dia, rotina dos supervisores e desvios.
 //
 // Tudo sai de window.__WR__ (montado por app/war_room.py). O DIA muda os
-// números e recarrega a página — eles vêm do servidor. O resto (período,
-// status, busca, cross-filter dos rankings) filtra os desvios aqui, sem ir
-// ao servidor. As gravações voltam JSON e a tela se redesenha no lugar.
+// números — eles vêm do servidor, por `/war-room/pacote`, e a tela se
+// redesenha sem recarregar (clique num dia do gráfico, na tabela dia a dia
+// ou no campo Dia). A mesma rota traz a ATUALIZAÇÃO AUTOMÁTICA: de 2 em 2 min
+// a tela pergunta os carimbos das fontes e, se mudaram, pede o pacote de
+// novo. O resto (período, status, busca, cross-filter dos rankings) filtra
+// os desvios aqui. As gravações voltam JSON e a tela se redesenha no lugar.
 (function () {
   "use strict";
 
@@ -29,10 +32,15 @@
   // ---------------------------------------------------------------------
   // Fontes
   // ---------------------------------------------------------------------
-  $("wr-fontes").innerHTML =
-    "Sem retirada e sem infra. Produtividade atualizada em <b>" + esc(D.produtividade.atualizado || "—") +
-    "</b> (de 2 em 2 h); esteira em <b>" + esc(D.esteira.atualizado || "—") + "</b> (de 10 em 10 min)." +
-    " Régua: média do mesmo dia da semana de " + rotDia(D.base_de) + " a " + rotDia(D.base_ate) + ".";
+  // A cadência da Produtividade é do coletor (coleta rápida de 10 em 10 min
+  // na semana de 23/11/2026, de 2 em 2 h fora dela) e o app não a conhece:
+  // a tela diz QUANDO atualizou, não promete de quanto em quanto.
+  function fontes() {
+    $("wr-fontes").innerHTML =
+      "Sem retirada e sem infra. Produtividade atualizada em <b>" + esc(D.produtividade.atualizado || "—") +
+      "</b>; esteira em <b>" + esc(D.esteira.atualizado || "—") + "</b>. A página busca os dados novos sozinha." +
+      " Régua: média do mesmo dia da semana de " + rotDia(D.base_de) + " a " + rotDia(D.base_ate) + ".";
+  }
 
   // ---------------------------------------------------------------------
   // Números do dia
@@ -95,45 +103,125 @@
     return Object.keys(set).filter(function (d) { return d <= D.hoje; }).sort();
   }
 
+  // Cross-filter dos gráficos (pedido de 23/11/2026):
+  // * clicar num DIA (qualquer barra da coluna, nos dois gráficos, ou a linha
+  //   da tabela dia a dia) põe a tela inteira naquele dia — números, rotina,
+  //   encerradas sem sucesso e desvios. Clicar de novo no dia em foco volta
+  //   para hoje;
+  // * clicar na LEGENDA isola a série; clicar de novo mostra todas. O padrão
+  //   do Chart.js (esconder a clicada) faz o contrário do que se quer ao
+  //   procurar um número: com quatro barras por dia, o que se quer é ver UMA.
+  // A série isolada sobrevive à atualização automática e à troca de dia.
+  var CH = {}, ISOLADA = {};
+
+  function legendaIsola(nome) {
+    return function (ev, item, legend) {
+      var ch = legend.chart, i = item.datasetIndex;
+      var so = ISOLADA[nome] === ch.data.datasets[i].label ? null : ch.data.datasets[i].label;
+      ISOLADA[nome] = so;
+      ch.data.datasets.forEach(function (ds, j) { ch.setDatasetVisibility(j, !so || ds.label === so); });
+      ch.update();
+    };
+  }
+
+  function aplicarIsolada(nome) {
+    var ch = CH[nome], so = ISOLADA[nome];
+    if (!ch || !so) return;
+    if (!ch.data.datasets.some(function (ds) { return ds.label === so; })) { ISOLADA[nome] = null; return; }
+    ch.data.datasets.forEach(function (ds, j) { ch.setDatasetVisibility(j, ds.label === so); });
+    ch.update("none");
+  }
+
+  function cliqueDia(lista) {
+    return {
+      onClick: function (ev, els, chart) {
+        var el = chart.getElementsAtEventForMode(ev, "index", { intersect: false }, false)[0];
+        if (el) trocarDia(lista[el.index] === D.dia && D.dia !== D.hoje ? D.hoje : lista[el.index]);
+      },
+      onHover: function (ev, els) { ev.native.target.style.cursor = els.length ? "pointer" : "default"; },
+    };
+  }
+
+  // O dia em foco ganha uma faixa azul-clara atrás das barras e o rótulo em
+  // negrito: com 30 dias no eixo, sem isso não se sabe qual dia a tela abaixo
+  // está mostrando. Faixa e não contorno: a barra tem ~3 px, e um contorno
+  // de 2 px pintava a coluna inteira de escuro — o vermelho sumia.
+  var faixaFoco = {
+    id: "wrFaixa",
+    beforeDatasetsDraw: function (ch, args, o) {
+      var i = o.indice, x = ch.scales.x, n = ch.data.labels.length;
+      if (i === undefined || i < 0 || !n) return;
+      var w = x.width / n, cx = x.getPixelForValue(i), a = ch.chartArea;
+      ch.ctx.save();
+      ch.ctx.fillStyle = "rgba(44,123,229,.13)";
+      ch.ctx.fillRect(cx - w / 2, a.top, w, a.bottom - a.top);
+      ch.ctx.restore();
+    },
+  };
+  function eixoX(lista) {
+    return { grid: { display: false }, ticks: {
+      font: function (c) { return lista[c.index] === D.dia ? { weight: "bold" } : {}; },
+      color: function (c) { return lista[c.index] === D.dia ? css("--ink-d") : css("--muted"); },
+    } };
+  }
+
   function graficos() {
     var dias = diasGrafico();
-    var verde = css("--success"), azul = css("--brand");
+    var verde = css("--success"), azul = css("--brand"), vermelho = css("--danger");
     // Antes do início da War Room as barras ficam esmaecidas: o "antes" é
     // contexto, o "depois" é o que se acompanha.
     function cor(c) { return dias.map(function (d) { return d < D.inicio ? c + "59" : c; }); }
     var suc = dias.map(function (d) { return (D.produtividade.por_dia[d] || [null])[0]; });
+    // Recusa = OS de cliente encerrada sem sucesso, a mesma da lista "OS a OS"
+    // e do número "Encerradas sem sucesso" (é a palavra da mesa: "a recusa
+    // passou pelo supervisor?"). Não é o "Rejeitada" do WVSA, que é a
+    // validação do fechamento.
+    var rec = dias.map(function (d) { var p = D.produtividade.por_dia[d]; return p ? p[1] : null; });
     var CAP = D.produtividade.capacidade || {};
     var cap = dias.map(function (d) { return CAP[d] ? CAP[d][0] : null; });
     var cinza = css("--muted-l");
     var ent = dias.map(function (d) { return D.esteira.entradas[d] === undefined ? null : D.esteira.entradas[d]; });
     var rotulos = dias.map(function (d) { return rotDia(d) + (d === D.inicio ? " ★" : ""); });
-    new Chart($("wr-ch-fluxo"), {
+    if (CH.fluxo) CH.fluxo.destroy();
+    CH.fluxo = new Chart($("wr-ch-fluxo"), {
       type: "bar",
       data: { labels: rotulos, datasets: [
         { label: "Capacidade de execução", data: cap, backgroundColor: cor(cinza) },
         { label: "Executadas com sucesso", data: suc, backgroundColor: cor(verde) },
+        { label: "Recusas (encerradas sem sucesso)", data: rec, backgroundColor: cor(vermelho) },
         { label: "Entraram na esteira", data: ent, backgroundColor: cor(azul) },
       ] },
-      options: {
+      plugins: [faixaFoco],
+      options: Object.assign({
         interaction: { mode: "index", intersect: false },
-        scales: { x: { grid: { display: false } }, y: { beginAtZero: true } },
-        plugins: { tooltip: { callbacks: {
-          title: function (it) {
-            var d = dias[it[0].dataIndex];
-            return rotDia(d) + " (" + SEMANA[diaSemana(d)] + ")" + (d < D.inicio ? " — antes da War Room" : "");
-          },
-          afterBody: function (it) {
-            var c = CAP[dias[it[0].dataIndex]];
-            return c ? "Capacidade: " + c[1] + " técnicos de externa × " + D.cap_externa + " + " + c[2] +
-              " de interna × " + D.cap_interna : "";
-          },
-        } } },
-      },
+        scales: { x: eixoX(dias), y: { beginAtZero: true } },
+        plugins: {
+          wrFaixa: { indice: dias.indexOf(D.dia) },
+          legend: { onClick: legendaIsola("fluxo") },
+          tooltip: { callbacks: {
+            title: function (it) {
+              var d = dias[it[0].dataIndex];
+              return rotDia(d) + " (" + SEMANA[diaSemana(d)] + ")" + (d < D.inicio ? " — antes da War Room" : "");
+            },
+            afterBody: function (it) {
+              var c = CAP[dias[it[0].dataIndex]];
+              return c ? "Capacidade: " + c[1] + " técnicos de externa × " + D.cap_externa + " + " + c[2] +
+                " de interna × " + D.cap_interna : "";
+            },
+            footer: function (it) {
+              return dias[it[0].dataIndex] === D.dia ? "Dia em foco na tela" : "Clique para ver este dia";
+            },
+          } },
+        },
+      }, cliqueDia(dias)),
     });
+    aplicarIsolada("fluxo");
     $("wr-fluxo-nota").innerHTML = "★ " + rotDia(D.inicio) + ", início da War Room; as barras anteriores ficam mais claras. " +
+      "Clique num dia para ver a tela daquele dia, ou na legenda para isolar uma série. " +
+      "Recusas: OS de cliente encerradas sem sucesso. " +
       "Capacidade: " + D.cap_externa + " OS por técnico de atendimento externo e " + D.cap_interna +
       " por técnico de interno (maioria das OS dele em 30 dias), contando quem fechou OS de cliente no dia. " +
-      "Executadas por dia civil (Produtividade); entradas por dia operacional, das 21h às 21h (esteira).";
+      "Executadas e recusas por dia civil (Produtividade); entradas por dia operacional, das 21h às 21h (esteira).";
 
     // Em barras, como o gráfico ao lado (pedido de 19/11/2026): mesma leitura
     // de dia a dia, mesmo esmaecido antes do início.
@@ -142,31 +230,116 @@
     // Ouro e não azul-escuro: os dois azuis da casa ficam a ΔE 9 um do outro
     // (validador de paleta), difíceis de separar até com visão normal.
     var escuro = css("--ouro");
-    new Chart($("wr-ch-backlog"), {
+    if (CH.backlog) CH.backlog.destroy();
+    CH.backlog = new Chart($("wr-ch-backlog"), {
       type: "bar",
       data: { labels: bdias.map(function (d) { return rotDia(d) + (d === D.inicio ? " ★" : ""); }), datasets: [
         { label: "Na fila", data: bdias.map(function (d) { return D.esteira.backlog[d][0]; }), backgroundColor: corB(azul) },
         { label: "Não agendadas", data: bdias.map(function (d) { return D.esteira.backlog[d][1]; }), backgroundColor: corB(escuro) },
       ] },
-      options: { interaction: { mode: "index", intersect: false },
-        scales: { x: { grid: { display: false } }, y: { beginAtZero: true } },
-        plugins: { tooltip: { callbacks: { title: function (it) {
-          var d = bdias[it[0].dataIndex];
-          return rotDia(d) + " (" + SEMANA[diaSemana(d)] + ")" + (d < D.inicio ? " — antes da War Room" : "");
-        } } } } },
+      plugins: [faixaFoco],
+      options: Object.assign({ interaction: { mode: "index", intersect: false },
+        scales: { x: eixoX(bdias), y: { beginAtZero: true } },
+        plugins: { wrFaixa: { indice: bdias.indexOf(D.dia) }, legend: { onClick: legendaIsola("backlog") },
+          tooltip: { callbacks: { title: function (it) {
+            var d = bdias[it[0].dataIndex];
+            return rotDia(d) + " (" + SEMANA[diaSemana(d)] + ")" + (d < D.inicio ? " — antes da War Room" : "");
+          } } } } }, cliqueDia(bdias)),
     });
+    aplicarIsolada("backlog");
 
     var linhas = dias.slice().reverse().map(function (d) {
       var p = D.produtividade.por_dia[d], bk = D.esteira.backlog[d];
-      return "<tr" + (d < D.inicio ? ' class="wr-antes"' : "") + "><td>" + rotDia(d) + " · " + SEMANA[diaSemana(d)].slice(0, 3) +
+      var cls = (d < D.inicio ? "wr-antes " : "") + "clicavel" + (d === D.dia ? " wr-dia-foco" : "");
+      return '<tr class="' + cls + '" data-dia="' + d + '" title="Clique para ver este dia"><td>' + rotDia(d) + " · " + SEMANA[diaSemana(d)].slice(0, 3) +
         "</td><td class='num'>" + (CAP[d] ? num(CAP[d][0]) : "—") +
         "</td><td class='num'>" + (p ? num(p[0]) : "—") + "</td><td class='num'>" + (p ? num(p[1]) : "—") +
         "</td><td class='num'>" + (D.esteira.entradas[d] === undefined ? "—" : num(D.esteira.entradas[d])) +
         "</td><td class='num'>" + (bk ? num(bk[0]) : "—") + "</td><td class='num'>" + (bk ? num(bk[1]) : "—") + "</td></tr>";
     }).join("");
-    $("wr-tab-dias").innerHTML = "<thead><tr><th>Dia</th><th>Capacidade</th><th>Executadas com sucesso</th><th>Encerradas sem sucesso</th>" +
+    $("wr-tab-dias").innerHTML = "<thead><tr><th>Dia</th><th>Capacidade</th><th>Executadas com sucesso</th><th>Recusas (sem sucesso)</th>" +
       "<th>Entraram na esteira</th><th>Backlog</th><th>Não agendadas</th></tr></thead><tbody>" + linhas + "</tbody>";
   }
+
+  $("wr-tab-dias").addEventListener("click", function (e) {
+    var tr = e.target.closest("tr[data-dia]");
+    if (tr) trocarDia(tr.getAttribute("data-dia"));
+  });
+
+  // ---------------------------------------------------------------------
+  // Trocar de dia e atualizar sozinha
+  // ---------------------------------------------------------------------
+  var carregando = false;
+
+  async function buscarPacote(dia) {
+    var r = await fetch("/war-room/pacote?dia=" + encodeURIComponent(dia), {
+      credentials: "same-origin", headers: { "Accept": "application/json" } });
+    var j = null;
+    try { j = await r.json(); } catch (e) { /* sessão expirada devolve HTML */ }
+    if (!r.ok || !j || !j.pacote) throw new Error((j && j.erro) || (!j ? "Sua sessão expirou. Recarregue a página." : "Não foi possível carregar o dia."));
+    return j.pacote;
+  }
+
+  async function trocarDia(dia) {
+    if (!dia || carregando || dia > D.hoje || dia === D.dia) return;
+    carregando = true;
+    document.body.classList.add("wr-carregando");
+    try {
+      aplicar(await buscarPacote(dia));
+      // A URL acompanha (link copiável e F5 no mesmo dia), sem recarregar.
+      history.replaceState(null, "", location.pathname + (D.dia === D.hoje ? "" : "?dia=" + D.dia));
+    } catch (err) {
+      alertar(err.message);
+    } finally {
+      carregando = false;
+      document.body.classList.remove("wr-carregando");
+    }
+  }
+
+  // Redesenha tudo a partir do pacote novo. Filtros dos desvios, supervisor
+  // da lista de encerradas e série isolada ficam como estavam.
+  function aplicar(novo) {
+    D = novo;
+    $("wr-dia").value = D.dia;
+    $("wr-dia").max = D.hoje;
+    $("wr-hoje").hidden = D.dia === D.hoje;
+    var bNovo = $("wr-novo");
+    if (bNovo) bNovo.disabled = !D.tem_tabela;
+    fontes();
+    numeros();
+    graficos();
+    supOpcoes();
+    tecnicosLista();
+    semSucesso();
+    desvios();
+  }
+
+  // De 2 em 2 min, só com a aba visível: pergunta os carimbos (duas linhas
+  // pequenas) e pede o pacote só quando mudaram. Com modal aberto espera —
+  // redesenhar no meio de um registro trocaria a lista sob o formulário.
+  // Na virada do dia, quem estava em "hoje" passa para o dia novo.
+  var POLL_MS = 120000;
+  async function conferirNovidade() {
+    if (document.hidden || carregando || document.querySelector("dialog[open]")) return;
+    var meu = false;
+    try {
+      var r = await fetch("/war-room/versao", { credentials: "same-origin", headers: { "Accept": "application/json" } });
+      var j = await r.json();
+      var emHoje = D.dia === D.hoje;
+      var virou = emHoje && new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10) !== D.hoje;
+      if ((j.versao === D.versao && !virou) || carregando) return;   // trocou de dia enquanto perguntava
+      carregando = meu = true;
+      var novo = await buscarPacote(emHoje ? (virou ? "" : D.dia) : D.dia);
+      if (document.querySelector("dialog[open]")) return;      // abriu um modal enquanto buscava
+      aplicar(novo);
+    } catch (e) {
+      /* rede caiu ou sessão expirou: tenta de novo no próximo ciclo, calado */
+    } finally {
+      if (meu) carregando = false;
+    }
+  }
+  setInterval(conferirNovidade, POLL_MS);
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) conferirNovidade(); });
 
   // Cartão recolhido (§5): o corpo só abre no clique.
   document.addEventListener("click", function (e) {
@@ -361,12 +534,8 @@
   }
 
   // Filtros
-  $("wr-dia").addEventListener("change", function () {
-    var v = this.value;
-    if (!v) return;
-    location.search = v === D.hoje ? "" : "?dia=" + v;
-  });
-  $("wr-hoje").addEventListener("click", function () { location.search = ""; });
+  $("wr-dia").addEventListener("change", function () { if (this.value) trocarDia(this.value); });
+  $("wr-hoje").addEventListener("click", function () { trocarDia(D.hoje); });
   $("wr-periodo").addEventListener("click", function (e) {
     var b = e.target.closest("button[data-p]");
     if (!b) return;
@@ -408,8 +577,14 @@
   // registra o desvio dali mesmo, com o formulário já preenchido.
   var SUP = !!window.__WR_SUP__;
   var ssSup = $("wr-ss-sup");
-  ssSup.innerHTML = '<option value="">Todos</option>' + (D.supervisores || []).map(function (s) {
-    return '<option value="' + s.id + '">' + esc(s.nome) + "</option>"; }).join("");
+  function supOpcoes() {
+    var atual = ssSup.value;
+    ssSup.innerHTML = '<option value="">Todos</option>' + (D.supervisores || []).map(function (s) {
+      return '<option value="' + s.id + '">' + esc(s.nome) + "</option>"; }).join("");
+    ssSup.value = atual;
+    if (ssSup.value !== atual) ssSup.value = "";
+  }
+  supOpcoes();
   // O supervisor abre a tela já no próprio time: são as OS dele que ele valida.
   if (SUP && (D.supervisores || []).some(function (s) { return s.id === EU; })) ssSup.value = EU;
   ssSup.addEventListener("change", semSucesso);
@@ -502,10 +677,14 @@
   // ---------------------------------------------------------------------
   var dlg = $("wr-dlg"), form = $("wr-form");
   var tecEmpresa = {};
-  D.produtividade.tecnicos.forEach(function (t) { tecEmpresa[t[0]] = t[1]; });
-  $("wr-tecnicos").innerHTML = D.produtividade.tecnicos.map(function (t) {
-    return '<option value="' + esc(t[0]) + '">' + esc(t[1]) + "</option>";
-  }).join("");
+  function tecnicosLista() {
+    tecEmpresa = {};
+    D.produtividade.tecnicos.forEach(function (t) { tecEmpresa[t[0]] = t[1]; });
+    $("wr-tecnicos").innerHTML = D.produtividade.tecnicos.map(function (t) {
+      return '<option value="' + esc(t[0]) + '">' + esc(t[1]) + "</option>";
+    }).join("");
+  }
+  tecnicosLista();
 
   function opcoes(sel, lista, vazio) {
     sel.innerHTML = (vazio ? '<option value="">' + vazio + "</option>" : "") +
@@ -679,6 +858,7 @@
   });
 
   // ---------------------------------------------------------------------
+  fontes();
   numeros();
   graficos();
   semSucesso();

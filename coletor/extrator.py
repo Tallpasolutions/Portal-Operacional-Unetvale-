@@ -461,6 +461,11 @@ def main():
     ap.add_argument("--full", action="store_true", help="recria o banco do zero")
     ap.add_argument("--mes-atual", action="store_true",
                     help="atualiza do 1º dia do mês corrente até hoje (usado pelo agendamento)")
+    # Só o dia de hoje: a coleta rápida da War Room (`enviar.py --rapida`, de
+    # 10 em 10 min no horário de trabalho). Um dia pesa uma fração do mês, e é
+    # só o dia corrente que muda de uma coleta para a outra nesse intervalo.
+    ap.add_argument("--hoje", action="store_true",
+                    help="atualiza só o dia de hoje (coleta rápida da War Room)")
     ap.add_argument("--inicio", help="DD/MM/AAAA")
     ap.add_argument("--fim", help="DD/MM/AAAA")
     ap.add_argument("--salvar-raw", action="store_true", help="salva o HTML cru de cada mês em raw/")
@@ -472,7 +477,9 @@ def main():
     cfg = load_config()
     hoje = date.today()
 
-    if args.mes_atual:
+    if args.hoje:
+        inicio = hoje
+    elif args.mes_atual:
         inicio = date(hoje.year, hoje.month, 1)
     elif args.inicio:
         inicio = datetime.strptime(args.inicio, "%d/%m/%Y").date()
@@ -515,10 +522,14 @@ def main():
         "INSERT OR REPLACE INTO meta (chave, valor) VALUES ('ultima_atualizacao', ?)",
         (datetime.now().isoformat(timespec="seconds"),),
     )
-    conn.execute(
-        "INSERT OR REPLACE INTO meta (chave, valor) VALUES ('intervalo', ?)",
-        (f"{br(inicio)} a {br(fim)}",),
-    )
+    # O `intervalo` é o "período" que a tela da Produtividade mostra. A
+    # coleta rápida refaz só hoje sobre o mês que a rodada já trouxe: gravar
+    # "23/11 a 23/11" ali diria que o banco só tem um dia.
+    if not args.hoje:
+        conn.execute(
+            "INSERT OR REPLACE INTO meta (chave, valor) VALUES ('intervalo', ?)",
+            (f"{br(inicio)} a {br(fim)}",),
+        )
     conn.commit()
 
     cur = conn.execute("SELECT COUNT(*) FROM os")

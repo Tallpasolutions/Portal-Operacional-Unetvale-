@@ -233,6 +233,16 @@ def _desde_grafico():
 # ---------------------------------------------------------------------
 # Números: Produtividade
 # ---------------------------------------------------------------------
+# Última Produtividade lida, por carimbo: (atualizado_em, linha do banco).
+# Com a tela se atualizando sozinha (pedido de 23/11/2026), cada aba aberta
+# relê o pacote a cada coleta — e a Produtividade são 1,35 MB do Supabase.
+# Numa instância quente da Vercel, quem chega depois com o MESMO carimbo
+# reaproveita a leitura e paga só a consulta do carimbo. Trocar a tupla
+# inteira numa atribuição é atômico; o pior caso entre threads é ler duas
+# vezes.
+_CACHE_PROD = (None, None)
+
+
 def _ler_produtividade():
     """Lê a Produtividade SEM expandir para dicionários.
 
@@ -241,10 +251,18 @@ def _ler_produtividade():
     (`v: 2`) bastam. A seleção pelo caminho do JSON traz só as listas que a
     contagem usa. Payload antigo (`v: 1`) cai no caminho de sempre.
     """
-    row = supa.select_one("dados_modulo", {
-        "modulo": "eq.produtividade",
-        "select": "atualizado_em,v:payload->v,linhas:payload->linhas,dias:payload->dias,"
-                  "emp:payload->emp,tec:payload->tec,fin:payload->fin,mot:payload->mot"})
+    global _CACHE_PROD
+    carimbo = (supa.select_one("dados_modulo", {"modulo": "eq.produtividade",
+                                                "select": "atualizado_em"}) or {}).get("atualizado_em")
+    if carimbo and _CACHE_PROD[0] == carimbo:
+        row = _CACHE_PROD[1]
+    else:
+        row = supa.select_one("dados_modulo", {
+            "modulo": "eq.produtividade",
+            "select": "atualizado_em,v:payload->v,linhas:payload->linhas,dias:payload->dias,"
+                      "emp:payload->emp,tec:payload->tec,fin:payload->fin,mot:payload->mot"})
+        if row and row.get("v") == 2:
+            _CACHE_PROD = (row.get("atualizado_em"), row)
     if not row:
         return None, []
     if row.get("v") == 2:
@@ -416,6 +434,17 @@ def _nomes():
     return {u["id"]: u.get("nome") or "—" for u in supa.select("usuarios", {"select": "id,nome"})}
 
 
+def versao():
+    """Carimbos das duas fontes, numa string. A tela pergunta isto de 2 em 2
+    min (duas linhas pequenas) e só pede o pacote quando muda — o pacote lê
+    a Produtividade inteira."""
+    prod, est = supa.paralelo(
+        lambda: supa.select_one("dados_modulo", {"modulo": "eq.produtividade", "select": "atualizado_em"}),
+        lambda: supa.select_one("esteira_coleta", {"id": "eq.1", "select": "ok_em"}),
+    )
+    return f"{(prod or {}).get('atualizado_em') or ''}|{(est or {}).get('ok_em') or ''}"
+
+
 def pacote(dia_foco):
     """Tudo o que a tela precisa, numa ida em paralelo.
 
@@ -460,6 +489,7 @@ def pacote(dia_foco):
     for o in prod["sem_sucesso"]:
         o["sups"] = [a["id"] for a in alcance if _no_alcance(a, o["empresa"], o["tecnico"])]
     return {
+        "versao": f"{prod['atualizado_em'] or ''}|{est['atualizado_em'] or ''}",
         "dia": dia_foco.isoformat(),
         "hoje": hoje().isoformat(),
         "inicio": INICIO.isoformat(),

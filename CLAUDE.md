@@ -47,6 +47,13 @@ A **Esteira** (`/esteira`) tem coleta própria, fora da grade de 2 em 2 h:
 e saiu da fila é diferença entre duas coletas; com 2 h de intervalo, a OS
 agendada na mesma manhã em que entrou nunca apareceria (§4).
 
+A **Produtividade de HOJE** também sai fora da grade, de 10 em 10 min das 7h
+às 20h, **até `PROD_RAPIDA_ATE`** (29/11/2026 por padrão): é a coleta rápida
+da War Room (`enviar.py --rapida`, chamada pelo próprio `watcher.py` entre as
+rodadas). Refaz só o dia corrente no SQLite (5,9 s no WVSA, contra ~65 s do
+mês) e grava o payload inteiro, no formato de sempre — o app não sabe que ela
+existe (§4, War Room).
+
 ### A Troca de Poste tem OUTRO pipeline, em OUTRO repositório
 
 O diagrama acima cobre o WVSA. O schema `troca_poste` é alimentado por um
@@ -1207,6 +1214,46 @@ quem reparte a UNETVALE entre supervisores segue sendo o admin. É o mesmo
 vínculo que recorta Produtividade e IQI, então mexer ali muda o que ele vê
 nas duas telas.
 
+**Recusas no gráfico e cross-filter** (23/11/2026, sem migration). A barra
+vermelha do "Executadas com sucesso × recusas × entraram na esteira" é
+`por_dia[d][1]`: OS de cliente **encerrada sem sucesso**, a mesma do número
+do topo e da lista OS a OS — "recusa" é a palavra da mesa ("a recusa passou
+pelo supervisor?"), não o "Rejeitada" do WVSA, que é a validação do
+fechamento. Clicar num DIA (qualquer barra da coluna, nos dois gráficos, ou
+a linha da tabela dia a dia) põe a tela inteira naquele dia; clicar de novo
+no dia em foco volta para hoje. O dia em foco ganha uma FAIXA azul-clara
+atrás das barras, não contorno: a barra tem ~3 px e um contorno de 2 px
+pintava a coluna de escuro, apagando o vermelho. Clicar na legenda ISOLA a
+série (o padrão do Chart.js esconde a clicada, o contrário do que se quer
+com quatro barras por dia); a série isolada sobrevive à troca de dia.
+
+**Trocar de dia não recarrega a página**: o JS pede `/war-room/pacote?dia=`,
+o MESMO pacote que vai no `__WR__` (conferido igual por `test_client`), e
+redesenha tudo, mantendo filtros dos desvios, supervisor da lista e série
+isolada. A URL acompanha por `replaceState`.
+
+**A tela se atualiza sozinha.** De 2 em 2 min, com a aba visível, pergunta
+`/war-room/versao` (os carimbos da Produtividade e da Esteira, duas linhas
+pequenas) e só pede o pacote quando mudaram. Com um `<dialog>` aberto ela
+espera — redesenhar no meio de um registro trocaria a lista sob o
+formulário. Quem está em "hoje" passa para o dia novo na virada.
+
+⚠️ O pacote lê a Produtividade INTEIRA (1,35 MB do Supabase), e com cada aba
+se atualizando a cada coleta isso viraria ~1 GB por dia. `_ler_produtividade`
+guarda a última leitura por carimbo (`_CACHE_PROD`): numa instância quente da
+Vercel, quem chega com o mesmo carimbo paga só a consulta do carimbo.
+
+**A coleta rápida da Produtividade** (pedido de 23/11/2026, "ao menos essa
+semana", para os supervisores acompanharem as recusas) é do `watcher.py`, não
+de um LaunchAgent novo: as duas coletas escrevem o mesmo `dados.db` e o
+extrator apaga o intervalo antes de regravar, então não podem rodar ao mesmo
+tempo — dentro do watcher elas são sequenciais por construção. Tem data de
+fim de propósito (`PROD_RAPIDA_ATE`; janela `PROD_RAPIDA_HORAS`, intervalo
+`PROD_RAPIDA_MIN`, todos no `.env` do coletor): cadência provisória sem fim
+vira permanente sem ninguém decidir. Sucesso não vai para o `coletor_log`
+(seriam ~80 linhas por dia no histórico); falha vai e marca o card. O
+`intervalo` do SQLite (o "período" da tela da Produtividade) não é tocado.
+
 O que **ainda não** faz: o "virar ação" do desvio para o módulo Ações.
 
 ### Papéis
@@ -1402,6 +1449,7 @@ Os que nasceram na War Room:
 | `.wr-aviso` | aviso curto no rodapé depois de gravar, no lugar de `alert()` |
 | `.wr-valida` | `.toggle` Sim/Não por linha; "Não" marcado fica vermelho |
 | `.wr-equipes` | chips com `×` que removem (cada um é um `<form>`) |
+| `tr.wr-dia-foco` | linha do dia em foco na tabela dia a dia (o mesmo dia da faixa nos gráficos) |
 
 **Nada de `confirm()` do navegador.** Ele abre uma caixa do sistema, com o
 domínio no topo, que não pertence à tela — use `.modal` com `<dialog>`. As
@@ -2175,6 +2223,16 @@ seis módulos marcados como erro por `connect timeout` de madrugada. O watcher
 agora o roda sob `/usr/bin/caffeinate -ims`, como o `coletar_celesc.sh`.
 Tampa fechada na bateria continua dormindo.
 
+**O watcher sabia se a rodada já saiu pelo carimbo mais novo de
+`dados_modulo` — e a coleta rápida teria calado a grade.** Com a
+Produtividade ganhando carimbo de 10 em 10 min, "o carimbo mais novo" nunca
+ficaria mais velho que o horário da grade, e as rodadas das 10h, 12h…
+deixariam de sair sem erro nenhum, levando IQI, Massivas e Dashboard junto.
+Desde 23/11/2026 `watcher.ultima_coleta` lê o `geral`/`inicio` mais recente
+do `coletor_log` — que só a rodada grava (a rápida não, de propósito) e que o
+Monitoramento já usava para "rodada em andamento". Qualquer coleta nova fora
+da grade tem de seguir a mesma regra: não gravar `geral`/`inicio`.
+
 **Celesc em manutenção não é defeito nosso — e a tela agora diz.** De
 21/10/2026 em diante `avisodesligamento.celesc.com.br` responde **503 com a
 página "AVISO DE MANUTENÇÃO"** e `Retry-After: 3600`, em GET e POST, para
@@ -2237,7 +2295,7 @@ São **quatro** LaunchAgents, com propósitos diferentes:
 
 | Agente | Roda | Quando | Log |
 |---|---|---|---|
-| `com.unetvale.coletor` | `watcher.py` → `enviar.py` (WVSA) | contínuo, grade 08–18h | `coletor.log` |
+| `com.unetvale.coletor` | `watcher.py` → `enviar.py` (WVSA) | contínuo, grade 08–18h; Produtividade de hoje de 10 em 10 min das 7h às 20h até `PROD_RAPIDA_ATE` | `coletor.log` |
 | `net.unetvale.troca-poste` | `coletar_celesc.sh` (Celesc) | a cada 15 min; coleta se a rodada de 07h/13h não saiu | `celesc.log` |
 | `net.unetvale.enviar-os` | `enviar_os.py --daemon` (OS no WVSA) | **residente** | `enviar_os.log` |
 | `net.unetvale.esteira` | `esteira.py` (fila de agendamento no WVSA) | a cada 10 min, 06h–22h | `esteira.log` |
@@ -2328,6 +2386,36 @@ a.run(port=5001, use_reloader=False)"
 ---
 
 ## 9. Estado atual e pendências
+
+- **War Room — recusas no gráfico, cross-filter e atualização de 10 em 10
+  min** em 23/11/2026, sem migration (§4, War Room; a armadilha do watcher
+  no §6).
+
+  Provado: `extrator.py --hoje` contra o WVSA real numa cópia do `dados.db`
+  — 5,9 s, 157 OS de 23/11, dias anteriores idênticos (62.901 linhas), o
+  `intervalo` intacto; `enviar.py --rapida` com o Supabase falso: payload
+  `v: 2` com 63.058 OS, falha do extrator marca erro e loga, WVSA fora não
+  grava nada, nenhum `geral`; watcher por relógio falso: janela 7h–20h e
+  data de fim nos limites, configuração torta desliga, rápida falhando não
+  repete antes de 10 min; a consulta nova da última rodada contra o banco
+  achou o `inicio` das 16:00. Rotas pelo `test_client` num servidor de
+  ensaio (lê produção, toda escrita recusada): pacote e versão 200, cinco
+  dias ruins 400 com frase, pacote JSON == `__WR__` da página, recusas de
+  20/11 (66) = lista OS a OS, cache relendo só quando o carimbo muda. No
+  navegador, com o mouse, como Davi: clique em 21/11 e 17/11 trocando
+  números, faixa nos dois gráficos, tabela, lista (17 de 36) e URL sem
+  recarregar; clicar de novo voltando a hoje; legenda isolando as recusas e
+  o isolamento sobrevivendo à troca de dia; atualização automática esperando
+  o modal fechar e baixando o pacote só com versão nova; 375 px sem rolar de
+  lado; console limpo.
+
+  **Ordem de deploy**: o app e o coletor são independentes (o payload não
+  muda). Copiar `extrator.py`, `enviar.py` e `watcher.py` para
+  `~/unetvale-coletor` e reiniciar o `com.unetvale.coletor` (o watcher é
+  residente: sem reiniciar, a rápida não entra).
+
+  **Ainda não exercitado:** a rápida pelo launchd num dia real, e o
+  `Server-Timing` das duas rotas novas na Vercel.
 
 - **IDF: registro quebrado no WVSA e nota do painel** em 19/11/2026, sem
   migration (§6). O `ger_idf` estava em "Erro" desde 17/11 13:39 por um chat

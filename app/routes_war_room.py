@@ -46,6 +46,27 @@ def war_room_view():
     return render_template("war_room.html", ativo="war-room", pacote=wr.pacote(foco))
 
 
+@bp.route("/war-room/pacote")
+@login_obrigatorio
+@modulo_obrigatorio("war-room")
+def war_room_pacote():
+    """O mesmo pacote da página, em JSON: trocar o dia pelo clique no gráfico
+    e a atualização automática redesenham a tela sem recarregar — recarregar
+    fecharia o formulário de quem está registrando e perderia os filtros."""
+    try:
+        foco = wr.dia_valido(request.args.get("dia") or wr.hoje().isoformat())
+    except wr.Recusa as e:
+        return jsonify({"erro": str(e)}), 400
+    return jsonify({"pacote": wr.pacote(foco)})
+
+
+@bp.route("/war-room/versao")
+@login_obrigatorio
+@modulo_obrigatorio("war-room")
+def war_room_versao():
+    return jsonify({"versao": wr.versao()})
+
+
 @bp.route("/war-room/desvios", methods=["POST"])
 @login_obrigatorio
 @modulo_obrigatorio("war-room")
