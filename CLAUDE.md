@@ -2414,8 +2414,17 @@ a.run(port=5001, use_reloader=False)"
   `~/unetvale-coletor` e reiniciar o `com.unetvale.coletor` (o watcher é
   residente: sem reiniciar, a rápida não entra).
 
-  **Ainda não exercitado:** a rápida pelo launchd num dia real, e o
-  `Server-Timing` das duas rotas novas na Vercel.
+  **Instalado em 23/11/2026**: #65 mergeado, Vercel servindo `?v=69d03a37`
+  às 16:16:58, os três arquivos copiados para `~/unetvale-coletor` (backup
+  em `bak-20261123-rapida/`, com o `dados.db`; o coletor inteiro ficou igual
+  à `main`) e o agente reiniciado com `launchctl kickstart -k`. A primeira
+  rápida saiu no mesmo minuto: 160 OS de 23/11 em 6 s, Produtividade `ok` às
+  16:17:19 com 63.061 OS e o `intervalo` intacto, sem linha `geral` no
+  `coletor_log`.
+
+  **Ainda não exercitado:** a rodada da grade saindo com a regra nova do
+  watcher (a primeira é a das 18h de 23/11), a rápida parando sozinha em
+  30/11, e o `Server-Timing` das duas rotas novas na Vercel.
 
 - **IDF: registro quebrado no WVSA e nota do painel** em 19/11/2026, sem
   migration (§6). O `ger_idf` estava em "Erro" desde 17/11 13:39 por um chat
