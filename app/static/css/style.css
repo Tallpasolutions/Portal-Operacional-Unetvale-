@@ -1352,6 +1352,11 @@ body.fluxo-foco .fluxo-editor{ height:100vh; border-radius:0; border:none; }
 .wr-tabela tr.wr-anulado td{ color:var(--muted-l); text-decoration:line-through; }
 .wr-tabela tr.wr-anulado td:nth-last-child(2){ text-decoration:none; }
 .tbl tr.wr-antes td{ color:var(--muted); }
+/* Dia em foco na tabela dia a dia (o mesmo dia que o gráfico contorna). */
+.tbl tr.wr-dia-foco td{ background:var(--brand-l); color:var(--ink-d); font-weight:600; }
+/* Trocando de dia: a tela continua legível, só avisa que vem coisa nova. */
+body.wr-carregando{ cursor:progress; }
+body.wr-carregando .wr-numeros, body.wr-carregando #wr-ss-card{ opacity:.55; transition:opacity .15s; }
 .tbl td.vazio-celula{ text-align:center; color:var(--muted); padding:22px; }
 .wr-numeros .d{ margin-left:4px; vertical-align:middle; }
 .wr-aviso{ position:fixed; left:50%; bottom:22px; transform:translate(-50%, 140%); background:var(--ink-d); color:#fff;

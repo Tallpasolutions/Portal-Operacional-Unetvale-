@@ -15,6 +15,7 @@ Uso:
   python enviar.py                 # todos os módulos (incremental)
   python enviar.py --full          # reconstrói o histórico da Produtividade
   python enviar.py --so iqi        # roda só um módulo (veja MODULOS)
+  python enviar.py --rapida        # só a Produtividade de HOJE (War Room)
 
 Os módulos `ger_*` alimentam o Dashboard. Dois deles (`ger_idf`, `ger_salas`)
 usam a SEGUNDA sessão do WVSA (W8_USER_GESTOR), porque o relatório é recortado
@@ -209,10 +210,12 @@ def garantir_config():
 # --------------------------------------------------------------------------
 # Produtividade
 # --------------------------------------------------------------------------
-def coletar_produtividade(full=False):
+def coletar_produtividade(full=False, so_hoje=False):
     garantir_config()
     if full:
         cmd = [PYTHON, str(DIR / "extrator.py"), "--full"]
+    elif so_hoje:
+        cmd = [PYTHON, str(DIR / "extrator.py"), "--hoje"]
     else:
         cmd = [PYTHON, str(DIR / "extrator.py"), "--mes-atual"]
     log(f"Produtividade: {' '.join(cmd[1:])}")
@@ -550,13 +553,52 @@ def falha_passageira(e):
     return False
 
 
+def coleta_rapida():
+    """Produtividade de HOJE, para a War Room acompanhar as recusas de perto.
+
+    Pedido de 23/11/2026: os supervisores validam cada OS encerrada sem
+    sucesso, e com a rodada de 2 em 2 h a recusa das 10:05 só aparecia ao
+    meio-dia. O watcher chama isto de 10 em 10 min no horário de trabalho
+    (`PROD_RAPIDA_*` no `watcher.py`), entre as rodadas.
+
+    Três diferenças da rodada, todas de propósito:
+    * refaz só o dia de hoje no SQLite (`extrator.py --hoje`), mas grava o
+      payload inteiro, como sempre — o formato não muda, e o app não sabe
+      que existe coleta rápida;
+    * NÃO grava `geral`/`inicio` no `coletor_log`: o Monitoramento leria uma
+      "rodada em andamento" de 1 módulo a cada 10 min, e o watcher usa esse
+      `inicio` para saber se a rodada da grade já saiu;
+    * sucesso não vai para o `coletor_log` (seriam ~80 linhas por dia no
+      histórico do Monitoramento); o carimbo da Produtividade já diz que
+      atualizou. Falha vai, e marca o card — é o que alguém precisa ver.
+    Sem nova tentativa: a próxima é daqui a 10 min.
+    """
+    if not wvsa_alcancavel():
+        log("Coleta rápida: WVSA inalcançável — pulada.")
+        return 0
+    try:
+        coletar_produtividade(so_hoje=True)
+    except Exception as e:  # noqa
+        log(f"FALHA na coleta rápida da Produtividade: {e}")
+        marcar_erro("produtividade", e)
+        log_evento("produtividade", "erro", f"Coleta rápida (só hoje): {e}")
+        return 1
+    log("Coleta rápida concluída.")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--full", action="store_true",
                     help="reconstrói o histórico: Produtividade do zero e os "
                          "13 meses dos módulos ger_* (demorado, ~125 MB)")
     ap.add_argument("--so", choices=list(MODULOS), help="roda apenas um módulo")
+    ap.add_argument("--rapida", action="store_true",
+                    help="só a Produtividade do dia de hoje (coleta rápida da War Room)")
     args = ap.parse_args()
+
+    if args.rapida:
+        sys.exit(coleta_rapida())
 
     # Sem rota até o WVSA (fora da VPN e fora da rede Unetvale): pula a rodada
     # SEM marcar erro e SEM sobrescrever os últimos dados bons.
