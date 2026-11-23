@@ -1177,6 +1177,23 @@ motivo (`war_room.MOTIVO_CAUSA`, trechos sem acento; o que não casa fica em
 branco, e o motivo vai para o detalhe). Só supervisor responde (rota 403 ao
 resto, admin incluído); os outros veem a resposta e quem deu.
 
+**A lista vem em ordem de HORA** e cada cabeçalho ordena (23/11/2026):
+clicar em "Validada com o supervisor?" põe as **sem resposta** no topo,
+depois Não e Sim; empate sempre desempata pela hora. A coluna
+**Supervisor** mostra quem responde pelo técnico (os mesmos `sups` do
+filtro; "sem supervisor" quando ninguém tem a equipe nem o técnico). Antes
+a ordem era por técnico, e as horas pareciam embaralhadas. A ordenação
+mora no JS e sobrevive ao redesenho: validar uma linha não devolve a lista
+à ordem de partida.
+
+⚠️ **A hora é a do fechamento pelo técnico, conferida.** Ela sai da coluna
+"Data" do `operacional8`; contra a ficha da OS ("OS fechada sem sucesso
+pelo técnico…"), as 63 recusas de 23/11/2026 deram 52 iguais ao minuto, 10
+de 1 a 5 min DEPOIS e uma diferente de verdade, a #603151 — e ali a lista
+estava CERTA: o técnico recusou às 12:29 e um supervisor fechou de novo às
+15:39 ("OS Fechada sem sucesso", sem "pelo técnico"). Quem conferir pela
+ficha tem de olhar a linha "pelo técnico", não a última.
+
 O cartão tem filtro **Supervisor** próprio, e o supervisor abre já no dele.
 O alcance é a mesma regra do recorte da Produtividade — equipe inteira OU
 técnico avulso, apelidos resolvidos (`_no_alcance`) — e cada linha chega
@@ -2386,6 +2403,15 @@ a.run(port=5001, use_reloader=False)"
 ---
 
 ## 9. Estado atual e pendências
+
+- **War Room — lista de encerradas por hora, ordenável e com supervisor**
+  em 23/11/2026, sem migration e sem mexer no coletor (§4). Provado: pacote
+  pelo `test_client` em ordem de hora em hoje e 20/11 (48 e 66 OS, todas
+  com supervisor), `?dia=` ruim 400; no navegador, como Davi, com o mouse,
+  "Validada" ▲ trazendo as 6 sem resposta (todas do time do Adolar) e ▼
+  levando-as ao fim, Supervisor agrupando; 375 px sem rolar de lado,
+  console limpo, nenhuma escrita tentada. A hora foi conferida contra a
+  ficha das 63 recusas do dia, lida no WVSA (só leitura).
 
 - **War Room — recusas no gráfico, cross-filter e atualização de 10 em 10
   min** em 23/11/2026, sem migration (§4, War Room; a armadilha do watcher

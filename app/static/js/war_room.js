@@ -589,12 +589,49 @@
   if (SUP && (D.supervisores || []).some(function (s) { return s.id === EU; })) ssSup.value = EU;
   ssSup.addEventListener("change", semSucesso);
 
+  // Ordenação da lista OS a OS. Começa pela hora (a ordem do dia, a mesma
+  // do servidor) e sobrevive a cada redesenho — validar uma linha não pode
+  // devolver a lista à ordem de partida. Empate desempata pela hora.
+  var SS_ORD = { col: "hora", dir: 1 };
+  var SS_COLS = [["hora", "Hora"], ["os", "OS"], ["tecnico", "Técnico"], ["sup", "Supervisor"],
+    ["finalidade", "Finalidade"], ["motivo", "Motivo registrado no fechamento"],
+    ["validada", "Validada com o supervisor?"]];
+  var supNome = {};
+  function nomeCurto(n) { return (n || "—").split(" ")[0]; }
+  function supsDe(o) { return (o.sups || []).map(function (id) { return supNome[id] || "—"; }); }
+  function chaveSS(o, col) {
+    switch (col) {
+      // "Sem resposta" primeiro: é o que falta o supervisor olhar. Sem
+      // número de OS não há como validar, então vai para o fim.
+      case "validada":
+        if (!o.os) return 3;
+        var v = (D.validacoes || {})[o.os];
+        return v ? (v.validado ? 2 : 1) : 0;
+      case "os": return o.os ? +o.os : Infinity;
+      case "hora": return o.hora || "99:99";
+      // Técnico sem supervisor vai para o fim no ▲: é exceção, não começo.
+      case "sup": return supsDe(o).join(", ").toLowerCase() || "\uffff";
+      default: return String(o[col] || "").toLowerCase();
+    }
+  }
+  function ordenarSS(lista) {
+    return lista.slice().sort(function (a, b) {
+      var x = chaveSS(a, SS_ORD.col), y = chaveSS(b, SS_ORD.col);
+      var c = (x < y ? -1 : x > y ? 1 : 0) * SS_ORD.dir;
+      if (c) return c;
+      x = chaveSS(a, "hora"); y = chaveSS(b, "hora");
+      return x < y ? -1 : x > y ? 1 : 0;
+    });
+  }
+
   function temDesvio(os) {
     return D.desvios.some(function (d) { return !d.anulado && d.dia === D.dia && (d.os || []).indexOf(os) >= 0; });
   }
 
   function semSucesso() {
     var filtro = ssSup.value;
+    supNome = {};
+    (D.supervisores || []).forEach(function (x) { supNome[x.id] = x.nome; });
     var lista = D.produtividade.sem_sucesso.filter(function (o) { return !filtro || (o.sups || []).indexOf(filtro) >= 0; });
     var V = D.validacoes || {};
     var sim = 0, nao = 0, semNum = 0;
@@ -620,9 +657,13 @@
       return;
     }
     var podeValidar = SUP && D.validacoes !== null;
-    $("wr-ss").innerHTML = "<thead><tr><th>Hora</th><th>OS</th><th>Técnico</th><th>Finalidade</th>" +
-      "<th>Motivo registrado no fechamento</th><th>Validada com o supervisor?</th><th></th></tr></thead><tbody>" +
-      lista.map(function (o, i) {
+    $("wr-ss").innerHTML = "<thead><tr>" + SS_COLS.map(function (c) {
+        var cls = c[0] === SS_ORD.col ? (SS_ORD.dir > 0 ? "ord-asc" : "ord-desc") : "";
+        var tit = c[0] === "hora" ? "Hora em que o técnico fechou a OS sem sucesso"
+          : c[0] === "validada" ? "Clique para ver primeiro as sem resposta" : "Ordenar";
+        return '<th data-ord="' + c[0] + '" class="' + cls + '" title="' + tit + '">' + c[1] + "</th>";
+      }).join("") + "<th></th></tr></thead><tbody>" +
+      ordenarSS(lista).map(function (o) {
         var idx = D.produtividade.sem_sucesso.indexOf(o);
         var v = o.os ? V[o.os] : null;
         var celV;
@@ -643,6 +684,9 @@
           "<td>" + esc(o.hora || "—") + "</td>" +
           "<td>" + (o.os ? '<a href="' + D.wvsa_os + encodeURIComponent(o.os) + '" target="_blank" rel="noopener" title="Abrir a OS no WVSA">#' + esc(o.os) + "</a>" : "—") + "</td>" +
           "<td>" + esc(o.tecnico || "—") + (o.empresa ? ' <span class="subnote wr-emp">' + esc(o.empresa) + "</span>" : "") + "</td>" +
+          "<td>" + (supsDe(o).length
+            ? supsDe(o).map(function (n) { return '<span title="' + esc(n) + '">' + esc(nomeCurto(n)) + "</span>"; }).join(", ")
+            : '<span class="subnote" style="margin:0" title="Nenhum supervisor tem a equipe ou o técnico em Configurações">sem supervisor</span>') + "</td>" +
           "<td>" + esc(o.finalidade || "") + "</td>" +
           "<td>" + esc(o.motivo || "") + "</td>" +
           "<td>" + celV + "</td>" +
@@ -652,6 +696,13 @@
   }
 
   $("wr-ss").addEventListener("click", async function (e) {
+    var th = e.target.closest("th[data-ord]");
+    if (th) {
+      var col = th.getAttribute("data-ord");
+      if (SS_ORD.col === col) SS_ORD.dir *= -1; else { SS_ORD.col = col; SS_ORD.dir = 1; }
+      semSucesso();
+      return;
+    }
     var reg = e.target.closest("button.wr-reg");
     if (reg) { abrirRegistro(false, D.produtividade.sem_sucesso[+reg.getAttribute("data-idx")]); return; }
     var b = e.target.closest(".wr-valida button[data-v]");
