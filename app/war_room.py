@@ -112,6 +112,9 @@ TIPOS = [
      "momentos": ["rotas", "daily"] + _CHECKS},
     {"id": "os_atrasada", "rotulo": "OS atrasada em relação à agenda", "momentos": _CHECKS},
     {"id": "os_nao_executada", "rotulo": "OS não executada no horário", "momentos": _CHECKS},
+    # Pedido de 23/11/2026: OS na agenda sem a confirmação com o cliente. É
+    # achada ao montar e validar a rota e nas conferências da agenda.
+    {"id": "os_sem_confirmacao", "rotulo": "OS sem confirmação", "momentos": ["rotas", "daily"] + _CHECKS},
     {"id": "sem_retorno", "rotulo": "Técnico sem retorno / sem contato", "momentos": _CHECKS},
     {"id": "suporte_desnecessario", "rotulo": "Suporte não precisava de visita (repassado ao agendamento)",
      "momentos": ["suporte"]},
