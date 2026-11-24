@@ -1432,3 +1432,16 @@ tr.eq-retirada .eq-nome b::after{ content:"retirada"; margin-left:6px; font-size
 .modal-largo .field.eq-marcas input{ width:auto; }
 #eq-busca{ width:240px; }
 @media (max-width:760px){ #eq-busca{ width:100%; } }
+
+/* War Room — recusas por tipo de OS. O tipo vai numa pílula de cor fixa,
+   a mesma no bloco e na coluna da lista: é o que liga uma linha à outra
+   de relance. Mudança em âmbar porque é a de maior taxa de recusa. */
+.wr-tipo-os{ display:inline-block; padding:2px 9px; border-radius:20px; font-size:11.5px; font-weight:700; white-space:nowrap; }
+.wr-t-instalacao{ background:var(--brand-l); color:var(--brand-d); }
+.wr-t-mudanca{ background:#fdeede; color:#b65a16; }
+.wr-t-suporte{ background:#e6eaf2; color:var(--navy-3); }
+.wr-t-servicos{ background:var(--fundo); color:var(--muted); }
+.wr-tipos .rank-linha{ grid-template-columns:minmax(150px,1.4fr) 1fr 84px; }
+.wr-tipos .rank-linha .rl{ overflow:visible; }
+.wr-tipos .rank-linha .rv small{ font-weight:600; color:var(--muted); margin-left:4px; }
+#wr-rec-chips{ align-items:center; margin-top:-6px; }

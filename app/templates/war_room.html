@@ -103,6 +103,21 @@
 {# OS a OS, da Produtividade. O supervisor responde se a recusa passou por
    ele (regra nº 1 do plano) e registra o desvio dali mesmo. O filtro por
    supervisor é DESTE cartão: são as OS do time de cada um. #}
+{# Recusas por tipo de OS e por motivo, com cross-filter (pedido de
+   24/11/2026): clicar num tipo recorta os motivos, a lista OS a OS e as
+   barras de executadas e recusas do gráfico; clicar num motivo recorta os
+   tipos e a lista. Vale o dia em foco e o supervisor da lista abaixo. #}
+<div class="grid charts-2" style="margin-bottom:16px" id="wr-rec">
+  <div class="card"><div class="card-h"><span>Recusas por tipo de OS</span>
+      <span class="subnote" style="margin:0" id="wr-rec-sub"></span></div>
+    <div class="card-b"><div class="rank wr-tipos" id="wr-rank-tipo-os"></div>
+      <p class="subnote" style="margin:10px 0 0" id="wr-rec-nota"></p></div></div>
+  <div class="card"><div class="card-h"><span>Motivo das recusas</span>
+      <span class="subnote" style="margin:0">clique para filtrar</span></div>
+    <div class="card-b"><div class="rank" id="wr-rank-motivo"></div></div></div>
+</div>
+<div class="chips" id="wr-rec-chips" style="display:none"></div>
+
 <div class="card" style="margin-bottom:16px" id="wr-ss-card">
   <div class="card-h"><span>Encerradas sem sucesso no dia <span class="subnote" style="margin:0" id="wr-ss-contagem"></span></span>
     <label class="wr-ss-filtro">Supervisor <select id="wr-ss-sup"><option value="">Todos</option></select></label></div>

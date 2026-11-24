@@ -1304,6 +1304,25 @@ vira permanente sem ninguém decidir. Sucesso não vai para o `coletor_log`
 (seriam ~80 linhas por dia no histórico); falha vai e marca o card. O
 `intervalo` do SQLite (o "período" da tela da Produtividade) não é tocado.
 
+**Recusas por tipo de OS, com cross-filter** (24/11/2026, sem
+migration). Quatro tipos pela finalidade (`war_room.tipo_os`, uma
+definição só; a tela recebe o tipo pronto): **Instalação** (PF, PJ,
+Condomínio), **Mudança de endereço** — separada de propósito: 37% de
+recusa em 381 OS nos 30 dias até 24/11, a maior entre as grandes, e
+sumiria dentro de Instalação —, **Suporte** (Fibra, Condomínio, Suporte,
+Configuração de roteador) e **Serviços** (venda externa, cabeamento, troca
+de equipamento, chip, fiscalização; finalidade nova cai aqui). Dois blocos
+acima da lista de encerradas: tipos (recusas e a TAXA de recusa do tipo no
+dia, `por_tipo`) e motivos. Clicar num tipo recorta os motivos, a lista e
+as barras de executadas e recusas do gráfico (o rótulo da série diz o
+tipo); clicar num motivo recorta os tipos e a lista — o gráfico não tem
+motivo por dia. Cada contagem aplica o filtro do OUTRO campo, não o
+próprio, como no Dashboard. Os dois blocos seguem o supervisor da lista;
+com supervisor escolhido a taxa SOME, porque o total do dia não é
+separado por time (numerador do time sobre denominador da operação). Em
+20/11/2026: Instalação 7 de 12 (58%), Mudança 4 de 7, Suporte 47 de 114,
+Serviços 8 de 30. A lista ganhou a coluna Tipo, ordenável.
+
 **Os desvios têm barra de filtro própria** (24/11/2026, sem migration),
 logo acima dos KPIs: período, Supervisor, Técnico, OS, Momento, Status,
 Registrou e busca. O Dia continua no topo, porque vale para a página inteira;
@@ -1566,6 +1585,7 @@ Os que nasceram na War Room:
 | `.wr-equipes` | chips com `×` que removem (cada um é um `<form>`) |
 | `.wr-dfiltro` | `.toolbar` em moldura de cartão, com rótulo: o filtro que vale só para uma seção, não para a página |
 | `tr.wr-dia-foco` | linha do dia em foco na tabela dia a dia (o mesmo dia da faixa nos gráficos) |
+| `.wr-tipo-os` (`.wr-t-instalacao/mudanca/suporte/servicos`) | pílula do tipo de OS, a mesma cor no bloco e na coluna da lista |
 
 Os que nasceram na Equipe técnica:
 
@@ -2547,8 +2567,15 @@ a.run(port=5001, use_reloader=False)"
   toca no coletor. O pacote da War Room ganha 2
   idas (cadastro e histórico), dentro do paralelo — 13 idas no ensaio.
 
-  **Ainda não feito**: a capacidade ESCALADA (agenda do WVSA por técnico,
-  fonte a descobrir) e as visões gestor × supervisor da War Room, que são
+  No mesmo PR, **recusas por tipo de OS** com cross-filter (§4, War
+  Room), sem migration: pacote pelo `test_client` em 20/11 e 24/11 com
+  toda recusa tipada e soma por tipo = `por_dia` = lista (13 casos); no
+  navegador, com o mouse, como Davi: tipo recortando motivos, lista (12 de
+  66) e gráfico, motivo recontando os tipos, Limpar, taxa só sem
+  supervisor; 375 px sem rolar de lado; console limpo.
+
+  **Ainda não feito**: a capacidade ESCALADA (agenda do WVSA por técnico;
+  fonte achada em 24/11/2026, `docs/descoberta-agenda-wvsa.md`) e as visões gestor × supervisor da War Room, que são
   os próximos passos do plano.
 
 - **War Room — barra de filtro dos desvios** em 24/11/2026, sem migration

@@ -29,6 +29,13 @@
   function rotDia(iso) { return iso.slice(8, 10) + "/" + iso.slice(5, 7); }
   function css(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
 
+  // Cross-filter das recusas: tipo de OS e motivo. Sobrevive à troca de dia
+  // e à atualização automática, como a série isolada do gráfico.
+  var REC = { tipo: null, motivo: null };
+  var TIPO_OS = {};
+  (CAT.tipos_os || []).forEach(function (t) { TIPO_OS[t.id] = t.rotulo; });
+  function rotTipo(id) { return TIPO_OS[id] || id || "—"; }
+
   // ---------------------------------------------------------------------
   // Fontes
   // ---------------------------------------------------------------------
@@ -185,12 +192,23 @@
     // Antes do início da War Room as barras ficam esmaecidas: o "antes" é
     // contexto, o "depois" é o que se acompanha.
     function cor(c) { return dias.map(function (d) { return d < D.inicio ? c + "59" : c; }); }
-    var suc = dias.map(function (d) { return (D.produtividade.por_dia[d] || [null])[0]; });
+    // Com um tipo de OS escolhido no cross-filter das recusas, executadas e
+    // recusas viram as DAQUELE tipo. Capacidade e entradas não se recortam
+    // por tipo (a esteira não chega aqui por finalidade de cliente) — o
+    // rótulo da série diz o recorte.
+    var PT = D.produtividade.por_tipo || {};
+    function doTipo(d, i) {
+      if (!REC.tipo) { var p = D.produtividade.por_dia[d]; return p ? p[i] : null; }
+      var t = PT[d]; if (!t) return D.produtividade.por_dia[d] ? 0 : null;
+      return (t[REC.tipo] || [0, 0])[i];
+    }
+    var sufixo = REC.tipo ? " · " + rotTipo(REC.tipo) : "";
+    var suc = dias.map(function (d) { return doTipo(d, 0); });
     // Recusa = OS de cliente encerrada sem sucesso, a mesma da lista "OS a OS"
     // e do número "Encerradas sem sucesso" (é a palavra da mesa: "a recusa
     // passou pelo supervisor?"). Não é o "Rejeitada" do WVSA, que é a
     // validação do fechamento.
-    var rec = dias.map(function (d) { var p = D.produtividade.por_dia[d]; return p ? p[1] : null; });
+    var rec = dias.map(function (d) { return doTipo(d, 1); });
     var CAP = D.produtividade.capacidade || {};
     var cap = dias.map(function (d) { return CAP[d] ? CAP[d][0] : null; });
     var INST = D.produtividade.instalada || {};
@@ -208,8 +226,8 @@
           borderColor: css("--ink-d"), borderWidth: 1.5, borderDash: [5, 4], pointRadius: 0,
           pointHitRadius: 6, fill: false, hidden: !D.produtividade.tem_cadastro, order: -1 },
         { label: "Capacidade em campo", data: cap, backgroundColor: cor(cinza) },
-        { label: "Executadas com sucesso", data: suc, backgroundColor: cor(verde) },
-        { label: "Recusas (encerradas sem sucesso)", data: rec, backgroundColor: cor(vermelho) },
+        { label: "Executadas com sucesso" + sufixo, data: suc, backgroundColor: cor(verde) },
+        { label: "Recusas (encerradas sem sucesso)" + sufixo, data: rec, backgroundColor: cor(vermelho) },
         { label: "Entraram na esteira", data: ent, backgroundColor: cor(azul) },
       ] },
       plugins: [faixaFoco],
@@ -705,7 +723,7 @@
   // devolver a lista à ordem de partida. Empate desempata pela hora.
   var SS_ORD = { col: "hora", dir: 1 };
   var SS_COLS = [["hora", "Hora"], ["os", "OS"], ["tecnico", "Técnico"], ["sup", "Supervisor"],
-    ["finalidade", "Finalidade"], ["motivo", "Motivo registrado no fechamento"],
+    ["tipo", "Tipo"], ["finalidade", "Finalidade"], ["motivo", "Motivo registrado no fechamento"],
     ["validada", "Validada com o supervisor?"]];
   var supNome = {};
   function nomeCurto(n) { return (n || "—").split(" ")[0]; }
@@ -722,6 +740,7 @@
       case "hora": return o.hora || "99:99";
       // Técnico sem supervisor vai para o fim no ▲: é exceção, não começo.
       case "sup": return supsDe(o).join(", ").toLowerCase() || "\uffff";
+      case "tipo": return rotTipo(o.tipo).toLowerCase();
       default: return String(o[col] || "").toLowerCase();
     }
   }
@@ -739,11 +758,89 @@
     return D.desvios.some(function (d) { return !d.anulado && d.dia === D.dia && (d.os || []).indexOf(os) >= 0; });
   }
 
+  function passaRec(o, exceto) {
+    if (exceto !== "tipo" && REC.tipo && o.tipo !== REC.tipo) return false;
+    if (exceto !== "motivo" && REC.motivo && (o.motivo || "Não informado") !== REC.motivo) return false;
+    return true;
+  }
+
+  // Tipos: recusas e TAXA de recusa (recusas ÷ OS do tipo no dia). A taxa
+  // usa o total do dia inteiro (`por_tipo`), que não conhece supervisor: com
+  // o filtro de supervisor ela sairia com numerador do time e denominador da
+  // operação, então some — e a nota diz por quê. Cada contagem aplica o
+  // filtro do OUTRO campo, não o próprio (o cross-filter do Dashboard).
+  function recusasPorTipo(doSup, filtroSup) {
+    var porTipo = {}, porMotivo = {};
+    doSup.forEach(function (o) {
+      if (passaRec(o, "tipo")) porTipo[o.tipo] = (porTipo[o.tipo] || 0) + 1;
+      if (passaRec(o, "motivo")) { var m = o.motivo || "Não informado"; porMotivo[m] = (porMotivo[m] || 0) + 1; }
+    });
+    var tot = (D.produtividade.por_tipo || {})[D.dia] || {};
+    var comTaxa = !filtroSup;
+    var linhas = (CAT.tipos_os || []).map(function (t) {
+      var n = porTipo[t.id] || 0, os = tot[t.id] ? tot[t.id][0] + tot[t.id][1] : 0;
+      return { id: t.id, rotulo: t.rotulo, n: n, os: os };
+    });
+    var max = Math.max.apply(null, linhas.map(function (l) { return l.n; }).concat([1]));
+    var el = $("wr-rank-tipo-os");
+    el.innerHTML = linhas.map(function (l) {
+      var sel = REC.tipo ? (REC.tipo === l.id ? " selecionado" : " apagado") : "";
+      var taxa = comTaxa && l.os ? Math.round(100 * l.n / l.os) + "%" : "";
+      var tit = l.rotulo + ": " + num(l.n) + (l.n === 1 ? " recusa" : " recusas") +
+        (comTaxa && l.os ? " em " + num(l.os) + " OS do tipo no dia" : "") +
+        (REC.tipo === l.id ? " · clique para desfazer" : " · clique para filtrar");
+      return '<div class="rank-linha wr-tipo-linha clicavel' + sel + '" data-tipo="' + l.id + '" title="' + esc(tit) + '">' +
+        '<span class="rl"><span class="wr-tipo-os wr-t-' + l.id + '">' + esc(l.rotulo) + "</span></span>" +
+        '<span class="rt"><i class="rf" style="width:' + (100 * l.n / max).toFixed(1) + '%"></i></span>' +
+        '<span class="rv">' + num(l.n) + (taxa ? ' <small title="taxa de recusa do tipo no dia">' + taxa + "</small>" : "") + "</span></div>";
+    }).join("");
+    Dash.rank($("wr-rank-motivo"), porMotivo, {
+      limite: 10, selecionado: REC.motivo,
+      vazio: "Nenhuma recusa " + (REC.tipo ? "de " + rotTipo(REC.tipo) + " " : "") + "em " + rotDia(D.dia) + ".",
+      aoClicar: function (rotulo) { REC.motivo = REC.motivo === rotulo ? null : rotulo; recorteRec(); },
+    });
+    $("wr-rec-sub").textContent = rotDia(D.dia) + (filtroSup ? " · time de " + nomeCurto(supNome[filtroSup]) : "");
+    $("wr-rec-nota").textContent = comTaxa
+      ? "Ao lado do número, a taxa de recusa do tipo no dia (recusas ÷ OS de cliente daquele tipo). Clique num tipo para recortar motivos, lista e gráfico."
+      : "Com supervisor escolhido, a taxa de recusa some: o total de OS do dia não é separado por time.";
+    var chips = [];
+    if (REC.tipo) chips.push(["tipo", "Tipo: " + rotTipo(REC.tipo)]);
+    if (REC.motivo) chips.push(["motivo", "Motivo: " + REC.motivo]);
+    var c = $("wr-rec-chips");
+    c.style.display = chips.length ? "" : "none";   // `hidden` perde para o display:flex de .chips (§6)
+    c.innerHTML = chips.map(function (x) {
+      return '<span class="chip">' + esc(x[1]) + ' <button type="button" data-rec="' + x[0] + '" aria-label="Tirar filtro">×</button></span>';
+    }).join("") + (chips.length ? '<button type="button" class="btn-ghost" data-rec="tudo">Limpar recorte das recusas</button>' : "");
+  }
+
+  // Tipo também recorta o gráfico; motivo, só os blocos e a lista (o
+  // gráfico não tem motivo por dia).
+  function recorteRec(mudouTipo) {
+    semSucesso();
+    if (mudouTipo) graficos();
+  }
+  $("wr-rank-tipo-os").addEventListener("click", function (e) {
+    var l = e.target.closest("[data-tipo]");
+    if (!l) return;
+    var t = l.getAttribute("data-tipo");
+    REC.tipo = REC.tipo === t ? null : t;
+    recorteRec(true);
+  });
+  $("wr-rec-chips").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-rec]");
+    if (!b) return;
+    var k = b.getAttribute("data-rec"), tinhaTipo = !!REC.tipo;
+    if (k === "tudo") { REC.tipo = null; REC.motivo = null; } else REC[k] = null;
+    recorteRec(tinhaTipo && !REC.tipo);
+  });
+
   function semSucesso() {
     var filtro = ssSup.value;
     supNome = {};
     (D.supervisores || []).forEach(function (x) { supNome[x.id] = x.nome; });
-    var lista = D.produtividade.sem_sucesso.filter(function (o) { return !filtro || (o.sups || []).indexOf(filtro) >= 0; });
+    var doSup = D.produtividade.sem_sucesso.filter(function (o) { return !filtro || (o.sups || []).indexOf(filtro) >= 0; });
+    recusasPorTipo(doSup, filtro);
+    var lista = doSup.filter(function (o) { return passaRec(o); });
     var V = D.validacoes || {};
     var sim = 0, nao = 0, semNum = 0;
     lista.forEach(function (o) {
@@ -753,7 +850,7 @@
     });
     var aResponder = lista.length - sim - nao - semNum;
     $("wr-ss-contagem").textContent = "· " + num(lista.length) + " em " + rotDia(D.dia) +
-      (filtro ? " (de " + num(D.produtividade.sem_sucesso.length) + ")" : "");
+      (filtro || REC.tipo || REC.motivo ? " (de " + num(D.produtividade.sem_sucesso.length) + ")" : "");
     var nota = [];
     if (D.validacoes === null) nota.push("A validação ainda não tem a tabela no banco (migration 0022).");
     else nota.push(num(sim) + " validadas com o supervisor · " + num(nao) + " não validadas · " + num(aResponder) + " sem resposta");
@@ -761,7 +858,9 @@
     if (!SUP) nota.push("só supervisor responde a validação");
     $("wr-ss-nota").textContent = nota.join(" · ") + ".";
     if (!lista.length) {
-      $("wr-ss").innerHTML = '<tbody><tr><td class="vazio-celula">' + (filtro
+      $("wr-ss").innerHTML = '<tbody><tr><td class="vazio-celula">' + (REC.tipo || REC.motivo
+        ? "Nenhuma recusa neste recorte de tipo e motivo em " + rotDia(D.dia) + "."
+        : filtro
         ? "Nenhuma OS do time deste supervisor encerrada sem sucesso em " + rotDia(D.dia) + "."
         : "Nenhuma OS de cliente encerrada sem sucesso em " + rotDia(D.dia) + " até a última coleta da Produtividade.") +
         "</td></tr></tbody>";
@@ -803,6 +902,7 @@
           "<td>" + (supsDe(o).length
             ? supsDe(o).map(function (n) { return '<span title="' + esc(n) + '">' + esc(nomeCurto(n)) + "</span>"; }).join(", ")
             : '<span class="subnote" style="margin:0" title="Nenhum supervisor tem a equipe ou o técnico em Configurações">sem supervisor</span>') + "</td>" +
+          '<td><span class="wr-tipo-os wr-t-' + esc(o.tipo || "servicos") + '">' + esc(rotTipo(o.tipo)) + "</span></td>" +
           "<td>" + esc(o.finalidade || "") + "</td>" +
           "<td>" + esc(o.motivo || "") + "</td>" +
           "<td>" + celV + "</td>" +

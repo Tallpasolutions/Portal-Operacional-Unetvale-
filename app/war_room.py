@@ -86,6 +86,44 @@ def eh_cliente(finalidade):
 
 
 # ---------------------------------------------------------------------
+# Tipo da OS de cliente (decisão de 24/11/2026)
+# ---------------------------------------------------------------------
+# Para segmentar as recusas pelo que a OS é. Quatro tipos, e Mudança de
+# endereço SEPARADA de Instalação: em 30 dias (25/10 a 24/11/2026) ela teve
+# 37% de recusa em 381 OS, a maior entre as grandes — dentro de Instalação
+# (29,5% em 611 da PF) ela sumiria. As 15 finalidades de cliente do período:
+#
+#   Instalação  — Instalação - Fibra - PF/PJ, Instalação Condomínio
+#   Mudança     — Mudança Endereço Fibra
+#   Suporte     — Suporte Fibra, Suporte Condomínio, Suporte,
+#                 Configuração de Roteador Externo
+#   Serviços    — Venda Produto Externo, Cabeamento/Segundo Ponto,
+#                 Cabeamento Fibra, Troca de Equipamentos (de Local),
+#                 Entrega CHIP Unetvale 5G, Fiscalização - Operacional
+#
+# Finalidade nova cai em Serviços — a lista de finalidades mora no WVSA e
+# muda sem aviso; a tela mostra a finalidade crua ao lado do tipo, e quem
+# estranhar acerta aqui. Uma definição só: a tela recebe o tipo pronto.
+TIPOS_OS = [
+    {"id": "instalacao", "rotulo": "Instalação"},
+    {"id": "mudanca", "rotulo": "Mudança de endereço"},
+    {"id": "suporte", "rotulo": "Suporte"},
+    {"id": "servicos", "rotulo": "Serviços"},
+]
+
+
+def tipo_os(finalidade):
+    f = _norma(finalidade)
+    if "instalacao" in f:
+        return "instalacao"
+    if "mudanca" in f and "endereco" in f:
+        return "mudanca"
+    if f.startswith("suporte") or "configuracao de roteador" in f:
+        return "suporte"
+    return "servicos"
+
+
+# ---------------------------------------------------------------------
 # Catálogo do registro
 # ---------------------------------------------------------------------
 # `rodada`: entra na grade "a rotina de hoje". Encerramento sem sucesso e
@@ -200,7 +238,7 @@ STATUS = ("resolvido", "pendente")
 
 def catalogo():
     return {"momentos": MOMENTOS, "tipos": TIPOS, "causas": CAUSAS,
-            "responsaveis": RESPONSAVEIS}
+            "responsaveis": RESPONSAVEIS, "tipos_os": TIPOS_OS}
 
 
 def _ids(lista):
@@ -321,6 +359,10 @@ def _produtividade(dia_foco):
     base_de, base_ate = BASE_DE.isoformat(), BASE_ATE.isoformat()
     foco = dia_foco.isoformat()
     por_dia = defaultdict(lambda: [0, 0])          # dia -> [sucesso, sem sucesso]
+    # dia -> tipo -> [sucesso, sem sucesso]: o gráfico recorta executadas e
+    # recusas pelo tipo escolhido no cross-filter, e o bloco de tipos tira a
+    # taxa de recusa (recusas ÷ OS do tipo no dia).
+    por_tipo = defaultdict(lambda: defaultdict(lambda: [0, 0]))
     tecnicos = {}                                    # nome -> (dia mais recente, empresa)
     sem_sucesso = []
     desde = _desde_grafico()
@@ -344,6 +386,8 @@ def _produtividade(dia_foco):
         if not d or d < base_de or not eh_cliente(f):
             continue
         por_dia[d][0 if su else 1] += 1
+        tipo = tipo_os(f)
+        por_tipo[d][tipo][0 if su else 1] += 1
         if t and t != "—":
             if d >= desde or d == foco:
                 em_campo[d].add(t)
@@ -356,7 +400,7 @@ def _produtividade(dia_foco):
                 tecnicos[t] = (d, e if e and e != "—" else "")
         if d == foco and not su:
             motivo = mo or "Não informado"
-            sem_sucesso.append({"tecnico": t, "empresa": e, "finalidade": f, "motivo": motivo,
+            sem_sucesso.append({"tecnico": t, "empresa": e, "finalidade": f, "tipo": tipo, "motivo": motivo,
                                 "os": str(os_n) if os_n else None, "hora": hora,
                                 "hora_rel": hora_rel, "causa": causa_do_motivo(motivo)})
     # Régua: média por dia da semana nas 8 semanas, só dias com OS (feriado
@@ -372,6 +416,7 @@ def _produtividade(dia_foco):
     return {
         "atualizado_em": atualizado_em,
         "por_dia": {d: v for d, v in por_dia.items() if d >= _desde_grafico() or d == foco},
+        "por_tipo": {d: dict(v) for d, v in por_tipo.items() if d >= _desde_grafico() or d == foco},
         "base": base,
         "tecnicos": sorted(([nome, emp] for nome, (_, emp) in tecnicos.items()),
                            key=lambda x: _norma(x[0])),
