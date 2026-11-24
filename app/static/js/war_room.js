@@ -439,7 +439,24 @@
   // ---------------------------------------------------------------------
   // Desvios: filtro, rankings e lista
   // ---------------------------------------------------------------------
-  var F = { periodo: "dia", status: "", busca: "", tipo: null, causa: null, resp: null, tec: null };
+  // A barra própria dos desvios (pedido de 24/11/2026): supervisor, técnico,
+  // OS, momento, status, quem registrou e busca. Tipo, causa e responsável
+  // entram pelo clique nos rankings e viram chip; técnico também, e o select
+  // acompanha. Tudo recorta KPIs, rankings, lista e CSV.
+  var F = { periodo: "dia", status: "", busca: "", os: "", sup: "", mom: "", por: "",
+            tipo: null, causa: null, resp: null, tec: null };
+  var SUP = !!window.__WR_SUP__;
+  var temBarra = !!$("wr-d-filtros");
+
+  // Supervisor do desvio = quem responde pelo técnico (`sups`, calculado no
+  // servidor pela mesma regra das encerradas) OU quem o registrou: desvio
+  // sem técnico — daily atrasada, rota — é do supervisor que o anotou.
+  // O desvio recém-registrado volta do POST sem `sups`; vem do mapa.
+  function supsDoDesvio(d) {
+    if (!d.sups) d.sups = (D.tec_sups || {})[d.tecnico] || [];
+    return d.sups;
+  }
+  function doSupervisor(d, id) { return supsDoDesvio(d).indexOf(id) >= 0 || d.registrado_por === id; }
 
   function noPeriodo(d) { return F.periodo === "tudo" || d.dia === D.dia; }
   function passa(d, exceto) {
@@ -447,6 +464,10 @@
     if (F.status === "anulado") { if (!d.anulado) return false; }
     else if (d.anulado) return false;
     else if (F.status && d.status !== F.status) return false;
+    if (F.sup && !doSupervisor(d, F.sup)) return false;
+    if (F.os && !(d.os || []).some(function (o) { return String(o).indexOf(F.os) >= 0; })) return false;
+    if (F.mom && d.momento !== F.mom) return false;
+    if (F.por && d.registrado_por !== F.por) return false;
     if (F.busca) {
       var alvo = [d.tecnico, d.empresa, (d.os || []).join(" "), d.solucao, d.detalhe, d.responsavel_nome, d.por,
                   rot(TIPO, d.tipo), rot(CAUSA, d.causa)].join(" ").toLowerCase();
@@ -459,6 +480,9 @@
     if (exceto !== "tec" && F.tec && (d.tecnico || "(sem técnico)") !== F.tec) return false;
     return true;
   }
+  function filtrando() {
+    return !!(F.status || F.busca || F.os || F.sup || F.mom || F.por || F.tipo || F.causa || F.resp || F.tec);
+  }
 
   function contar(campo, fn) {
     var c = {};
@@ -467,7 +491,8 @@
   }
 
   function rankings() {
-    var vazio = F.periodo === "dia" ? "Nenhum desvio registrado em " + rotDia(D.dia) + "." : "Nenhum desvio registrado.";
+    var vazio = filtrando() ? "Nenhum desvio neste filtro."
+      : F.periodo === "dia" ? "Nenhum desvio registrado em " + rotDia(D.dia) + "." : "Nenhum desvio registrado.";
     [["tipo", "wr-rank-tipo", function (d) { return rot(TIPO, d.tipo); }],
      ["causa", "wr-rank-causa", function (d) { return rot(CAUSA, d.causa); }],
      ["resp", "wr-rank-resp", function (d) { return rot(RESP, d.responsavel); }],
@@ -477,6 +502,48 @@
         aoClicar: function (rotulo) { F[r[0]] = F[r[0]] === rotulo ? null : rotulo; desvios(); },
       });
     });
+  }
+
+  // Opções dos selects da barra. Técnico e "Registrou" são os que aparecem
+  // nos desvios do período (oferecer quem não tem desvio leva a uma lista
+  // vazia sem explicação); o escolhido continua na lista mesmo se sumir.
+  // O HTML só é trocado quando as opções mudam: com o select aberto, trocar
+  // o nó a cada redesenho fecha a lista sob o dedo (§6, chips).
+  function opcoesSelect(sel, pares, atual) {
+    var html = '<option value="">Todos</option>' + pares.map(function (p) {
+      return '<option value="' + esc(p[0]) + '">' + esc(p[1]) + "</option>"; }).join("");
+    if (sel._html !== html) { sel.innerHTML = html; sel._html = html; }
+    sel.value = atual || "";
+  }
+  function barra() {
+    if (!temBarra) return;
+    var tecs = {}, pors = {};
+    D.desvios.forEach(function (d) {
+      if (!noPeriodo(d)) return;
+      tecs[d.tecnico || "(sem técnico)"] = 1;
+      if (d.registrado_por) pors[d.registrado_por] = d.por || "—";
+    });
+    if (F.tec) tecs[F.tec] = 1;
+    var porNome = {};
+    (D.supervisores || []).forEach(function (x) { porNome[x.id] = x.nome; });
+    if (F.por && !pors[F.por]) pors[F.por] = porNome[F.por] || "—";
+    opcoesSelect($("wr-d-sup"), (D.supervisores || []).map(function (x) { return [x.id, x.nome]; })
+      .sort(function (a, b) { return a[1].localeCompare(b[1], "pt-BR"); }), F.sup);
+    opcoesSelect($("wr-d-tec"), Object.keys(tecs).sort(function (a, b) {
+      // "(sem técnico)" por último: é exceção, não nome.
+      return (a[0] === "(") - (b[0] === "(") || a.localeCompare(b, "pt-BR"); })
+      .map(function (t) { return [t, t]; }), F.tec);
+    opcoesSelect($("wr-d-mom"), CAT.momentos.map(function (m) { return [m.id, m.rotulo]; }), F.mom);
+    opcoesSelect($("wr-d-por"), Object.keys(pors).map(function (id) { return [id, pors[id]]; })
+      .sort(function (a, b) { return a[1].localeCompare(b[1], "pt-BR"); }), F.por);
+    // O que veio do clique nos rankings, com × para tirar.
+    var chips = [["tipo", "Tipo"], ["causa", "Causa"], ["resp", "Responsável"]].filter(function (c) { return F[c[0]]; });
+    var el = $("wr-d-chips");
+    el.hidden = !chips.length;
+    el.innerHTML = chips.map(function (c) {
+      return '<span class="chip">' + c[1] + ": " + esc(F[c[0]]) +
+        ' <button type="button" data-tira="' + c[0] + '" aria-label="Tirar o filtro de ' + c[1].toLowerCase() + '">×</button></span>';
+    }).join("");
   }
 
   function kpis(lista) {
@@ -493,7 +560,9 @@
 
   function tabela(lista) {
     var tudo = F.periodo === "tudo";
-    $("wr-contagem").textContent = "· " + num(lista.length) + (tudo ? " desde " + rotDia(D.inicio) : " em " + rotDia(D.dia));
+    var doPeriodo = filtrando() ? D.desvios.filter(function (d) { return noPeriodo(d) && !d.anulado; }).length : null;
+    $("wr-contagem").textContent = "· " + num(lista.length) + (tudo ? " desde " + rotDia(D.inicio) : " em " + rotDia(D.dia)) +
+      (doPeriodo !== null && F.status !== "anulado" && doPeriodo !== lista.length ? " (de " + num(doPeriodo) + ")" : "");
     if (!lista.length) {
       $("wr-tabela").innerHTML = '<tbody><tr><td class="vazio-celula">' +
         (D.desvios.length ? "Nenhum desvio neste filtro." : "Nenhum desvio registrado ainda. Use “+ Registrar desvio”.") +
@@ -525,8 +594,9 @@
   function filtrados() { return D.desvios.filter(function (d) { return passa(d); }); }
 
   function desvios() {
-    if (!D.tem_tabela) { rotina(); return; }
+    if (!D.tem_tabela || !temBarra) { rotina(); return; }
     var lista = filtrados();
+    barra();
     rankings();
     kpis(lista);
     tabela(lista);
@@ -536,20 +606,36 @@
   // Filtros
   $("wr-dia").addEventListener("change", function () { if (this.value) trocarDia(this.value); });
   $("wr-hoje").addEventListener("click", function () { trocarDia(D.hoje); });
-  $("wr-periodo").addEventListener("click", function (e) {
-    var b = e.target.closest("button[data-p]");
-    if (!b) return;
-    F.periodo = b.getAttribute("data-p");
-    this.querySelectorAll("button").forEach(function (x) { x.classList.toggle("active", x === b); });
-    desvios();
-  });
-  $("wr-status").addEventListener("change", function () { F.status = this.value; desvios(); });
-  $("wr-busca").addEventListener("input", function () { F.busca = this.value.trim().toLowerCase(); desvios(); });
-  $("wr-limpar").addEventListener("click", function () {
-    F.status = ""; F.busca = ""; F.tipo = F.causa = F.resp = F.tec = null;
-    $("wr-status").value = ""; $("wr-busca").value = "";
-    desvios();
-  });
+  if (temBarra) {
+    // O supervisor abre a barra já no próprio time, como a lista de
+    // encerradas: é o desvio do time dele que ele acompanha.
+    if (SUP && (D.supervisores || []).some(function (s) { return s.id === EU; })) F.sup = EU;
+    $("wr-periodo").addEventListener("click", function (e) {
+      var b = e.target.closest("button[data-p]");
+      if (!b) return;
+      F.periodo = b.getAttribute("data-p");
+      this.querySelectorAll("button").forEach(function (x) { x.classList.toggle("active", x === b); });
+      desvios();
+    });
+    [["wr-status", "status"], ["wr-d-sup", "sup"], ["wr-d-mom", "mom"], ["wr-d-por", "por"]].forEach(function (c) {
+      $(c[0]).addEventListener("change", function () { F[c[1]] = this.value; desvios(); });
+    });
+    $("wr-d-tec").addEventListener("change", function () { F.tec = this.value || null; desvios(); });
+    // Só dígitos: "#586420" colado da lista vira 586420.
+    $("wr-d-os").addEventListener("input", function () { F.os = this.value.replace(/\D/g, ""); desvios(); });
+    $("wr-busca").addEventListener("input", function () { F.busca = this.value.trim().toLowerCase(); desvios(); });
+    $("wr-d-chips").addEventListener("click", function (e) {
+      var b = e.target.closest("button[data-tira]");
+      if (b) { F[b.getAttribute("data-tira")] = null; desvios(); }
+    });
+    // Limpar devolve o supervisor a "Todos" também: é o "ver tudo" da mesa.
+    $("wr-limpar").addEventListener("click", function () {
+      F.status = F.busca = F.os = F.sup = F.mom = F.por = "";
+      F.tipo = F.causa = F.resp = F.tec = null;
+      $("wr-busca").value = ""; $("wr-d-os").value = ""; $("wr-status").value = "";
+      desvios();
+    });
+  }
 
   // CSV do que está na tela
   var csvBtn = $("wr-csv");
@@ -575,7 +661,6 @@
   // ---------------------------------------------------------------------
   // OS a OS. O supervisor diz se a recusa passou por ele (Sim/Não) e
   // registra o desvio dali mesmo, com o formulário já preenchido.
-  var SUP = !!window.__WR_SUP__;
   var ssSup = $("wr-ss-sup");
   function supOpcoes() {
     var atual = ssSup.value;
@@ -855,7 +940,11 @@
   // ---------------------------------------------------------------------
   var emEdicao = null;
   function substituir(novoD) {
-    for (var i = 0; i < D.desvios.length; i++) if (D.desvios[i].id === novoD.id) D.desvios[i] = novoD;
+    // O POST devolve o desvio sem `sups`: o vínculo calculado no pacote fica.
+    for (var i = 0; i < D.desvios.length; i++) if (D.desvios[i].id === novoD.id) {
+      if (!novoD.sups) novoD.sups = D.desvios[i].sups;
+      D.desvios[i] = novoD;
+    }
     desvios();
     semSucesso();
   }

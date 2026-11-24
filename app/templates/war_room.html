@@ -3,24 +3,13 @@
 {% block page_title %}War Room — zerando a esteira{% endblock %}
 {% block content %}
 
-{# UM filtro, no topo. O dia muda os números e a rotina (recarrega: os
-   números vêm do servidor); o resto filtra os desvios no navegador. #}
+{# O DIA é da página inteira: muda os números, a rotina, as encerradas e os
+   desvios (vem do servidor, sem recarregar). O recorte dos desvios mora na
+   barra própria deles, logo acima dos KPIs — a busca solta aqui em cima não
+   dizia que só valia para a lista lá embaixo (pedido de 24/11/2026). #}
 <div class="toolbar" id="wr-filtros">
   <label>Dia <input type="date" id="wr-dia" value="{{ pacote.dia }}" max="{{ pacote.hoje }}"></label>
   <button class="btn-ghost" id="wr-hoje" type="button" {% if pacote.dia == pacote.hoje %}hidden{% endif %}>Hoje</button>
-  <span class="toggle toggle-mini" id="wr-periodo" title="Quais desvios entram nos rankings e na lista">
-    <button data-p="dia" class="active">Desvios do dia</button><button data-p="tudo">Desde {{ pacote.inicio[8:10] }}/{{ pacote.inicio[5:7] }}</button>
-  </span>
-  <label>Status
-    <select id="wr-status">
-      <option value="">Todos</option>
-      <option value="pendente">Pendentes</option>
-      <option value="resolvido">Resolvidos</option>
-      <option value="anulado">Anulados</option>
-    </select>
-  </label>
-  <label>Busca <input type="search" id="wr-busca" placeholder="Técnico, OS, solução…"></label>
-  <button class="btn-ghost" id="wr-limpar" type="button">Limpar filtros</button>
   <button class="btn" id="wr-novo" type="button" style="margin-left:auto" {% if not pacote.tem_tabela %}disabled{% endif %}>+ Registrar desvio</button>
 </div>
 <p class="subnote" id="wr-fontes"></p>
@@ -61,6 +50,32 @@
   <div class="vazio" style="margin-bottom:16px">O registro de desvios ainda não tem as tabelas no banco
     (migration <code>0021_war_room.sql</code>). Os números acima já valem.</div>
 {% else %}
+{# Filtra KPIs, rankings, lista e CSV dos desvios. Tipo, causa e responsável
+   entram pelo clique nos rankings e aparecem como chip; técnico também, e
+   fica sincronizado com o select. #}
+<div class="toolbar wr-dfiltro" id="wr-d-filtros">
+  <span class="wr-dfiltro-t">Desvios</span>
+  <span class="toggle toggle-mini" id="wr-periodo" title="Quais desvios entram nos rankings e na lista">
+    <button type="button" data-p="dia" class="active">Do dia</button><button type="button" data-p="tudo">Desde {{ pacote.inicio[8:10] }}/{{ pacote.inicio[5:7] }}</button>
+  </span>
+  <label title="Desvios do time do supervisor (equipe ou técnico vinculado em Configurações) e os que ele registrou">Supervisor
+    <select id="wr-d-sup"><option value="">Todos</option></select></label>
+  <label>Técnico <select id="wr-d-tec"><option value="">Todos</option></select></label>
+  <label>OS <input type="search" id="wr-d-os" inputmode="numeric" placeholder="nº da OS" autocomplete="off"></label>
+  <label>Momento <select id="wr-d-mom"><option value="">Todos</option></select></label>
+  <label>Status
+    <select id="wr-status">
+      <option value="">Todos</option>
+      <option value="pendente">Pendentes</option>
+      <option value="resolvido">Resolvidos</option>
+      <option value="anulado">Anulados</option>
+    </select>
+  </label>
+  <label>Registrou <select id="wr-d-por"><option value="">Todos</option></select></label>
+  <label>Busca <input type="search" id="wr-busca" placeholder="Solução, detalhe, empresa…"></label>
+  <button class="btn-ghost" id="wr-limpar" type="button">Limpar filtros</button>
+</div>
+<div class="chips" id="wr-d-chips" hidden></div>
 <div class="kpis" id="wr-kpis"></div>
 
 <div class="grid charts-2" style="margin-bottom:16px;">

@@ -1368,6 +1368,14 @@ body.wr-carregando .wr-numeros, body.wr-carregando #wr-ss-card{ opacity:.55; tra
 /* Encerradas sem sucesso: filtro de supervisor no cabeçalho do cartão e a
    resposta Sim/Não. "Não" marcado fica vermelho — é a recusa que não passou
    pelo supervisor, o que a regra nº 1 do plano quer ver. */
+/* Barra dos desvios: o rótulo diz de quem é o filtro, já que o Dia, no
+   topo, vale para a página inteira. */
+.wr-dfiltro{ padding:10px 12px; border:1px solid var(--borda-2); border-radius:10px; background:var(--branco); box-shadow:var(--sombra); }
+.wr-dfiltro .wr-dfiltro-t{ font-size:13.5px; font-weight:700; color:var(--ink-d); }
+.wr-dfiltro input[type=search]{ width:150px; }
+.wr-dfiltro #wr-d-os{ width:100px; }
+#wr-d-chips{ margin-top:-6px; }
+@media (max-width:760px){ .wr-dfiltro input[type=search], .wr-dfiltro #wr-d-os{ width:100%; } }
 .wr-ss-filtro{ font-size:12.5px; font-weight:600; color:var(--muted); display:flex; align-items:center; gap:6px; }
 .wr-ss-filtro select{ font-weight:500; }
 .wr-ss td{ vertical-align:top; }
