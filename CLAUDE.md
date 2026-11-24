@@ -2442,7 +2442,16 @@ a.run(port=5001, use_reloader=False)"
   rodada: não precisa reiniciar). A primeira coleta lê ~550 fichas (~90 s,
   o resto na seguinte); depois, só as recusas novas.
 
-  **Ainda não exercitado:** a etapa dentro de uma rodada real do watcher.
+  **Instalado em 24/11/2026**: #69 mergeado, Vercel servindo `?v=d228a353`
+  às 09:03:09, `ficha_recusa.py` e `enviar.py` copiados para
+  `~/unetvale-coletor` (backup em `bak-20261124-ficha/`, com o `dados.db`;
+  o coletor inteiro ficou igual à `main`), sem reiniciar o agente. A rápida
+  das 09:12 leu 391 fichas e parou no prazo (61 para a próxima, +1 min 40 s
+  naquela rodada); a das 09:26 leu as 61 em 16 s. Cache com 548 recusas,
+  nenhuma sem casar. O código de produção, lendo o payload real do banco,
+  serve a #601017 às 22:36 e a #602668 às 22:27 de 23/11 com a nota
+  "24/11 00:24", nenhuma das duas em 24/11, e gráfico = lista nos dois dias
+  (53 e 4).
 
 - **War Room — lista de encerradas por hora, ordenável e com supervisor**
   em 23/11/2026, sem migration e sem mexer no coletor (§4). Provado: pacote
