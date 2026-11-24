@@ -87,7 +87,7 @@ data mais próxima primeiro (§6). A varredura do passado segue manual:
 | Tipo | Módulos | Se o dado sumir |
 |---|---|---|
 | **Espelho** do WVSA | Produtividade, IQI/IQM, Massivas | recoleta-se |
-| **Dado nasce aqui** | **Ações**, **Processos**, Troca de Poste (OS/revisão), **Esteira** (entrou/saiu — `esteira_movimentos`), **War Room** (desvios e rodadas) | **não há de onde recoletar** |
+| **Dado nasce aqui** | **Ações**, **Processos**, Troca de Poste (OS/revisão), **Esteira** (entrou/saiu — `esteira_movimentos`), **War Room** (desvios e rodadas), **Equipe técnica** (cadastro e histórico) | **não há de onde recoletar** |
 
 Nos módulos do segundo tipo: histórico append-only, recorte de permissão no
 servidor, e cuidado redobrado com migration destrutiva.
@@ -121,7 +121,7 @@ servidor, e cuidado redobrado com migration destrutiva.
 
 ---
 
-## 4. Os nove módulos
+## 4. Os dez módulos
 
 | Rota | Módulo | Origem do dado | Quem vê |
 |---|---|---|---|
@@ -134,6 +134,7 @@ servidor, e cuidado redobrado com migration destrutiva.
 | `/troca-poste` | Troca de Poste | schema `troca_poste` | todos menos supervisor |
 | `/acoes` | **Ações** | `public.acoes` e cia. | cada um as suas; gestor a área dele |
 | `/processos` | **Processos** | `public.processos` e cia. (migration `0018`) | todos (pela matriz de Configurações); todos editam; gestor da área aprova |
+| `/equipe` | **Equipe técnica** | `equipe_tecnicos` + histórico (migration `0023`) | todos (pela matriz de Configurações); só o admin edita |
 
 Mais `/usuarios`, `/monitoramento` (admin) e `/configuracoes` (todos).
 
@@ -1227,14 +1228,33 @@ posição e grava no campo `os` o "Sim"/"Não" do pagamento manual (set a
 nov/2026, 100% das linhas). Até lá a tela mostra a OS sem número, sem link e
 sem Sim/Não, e diz por quê.
 
-**Capacidade de execução**: barra a mais no gráfico de executadas × entradas
-e na tabela dia a dia. 4 OS por técnico de atendimento EXTERNO e 6 por
-técnico de INTERNO (`CAP_EXTERNA`/`CAP_INTERNA`), pelo "Tipo de atendimento"
-do WVSA (`ta`). O perfil é a MAIORIA das OS de cliente do técnico nos
-últimos 30 dias (muitos fazem os dois: 3 ELLO, 140 externas e 70 internas
-de 20/10 a 19/11), e conta quem fechou ao menos uma OS de cliente no dia —
-a equipe que foi a campo, não a escalada. Medido em 18/11/2026: 6 de
-externa e 29 de interna = 198, contra 164 executadas com sucesso.
+**Capacidade de execução: o CADASTRO manda** (24/11/2026). 4 OS por dia
+para o técnico EXTERNO e 6 para o INTERNO — interno é a equipe que faz
+atividade interna E externa —, e quem diz qual é cada um é a Equipe técnica
+(`app/equipe.py`, ver adiante), não mais o palpite. São dois números no
+gráfico, no número do topo e na tabela dia a dia:
+
+* **instalada** — na tela, **"Capacidade total"** (o rótulo "Instalada"
+  saiu em 24/11/2026: na mesma página há o tipo de OS "Instalação", e as
+  duas palavras se confundiam; no código e no pacote segue `instalada`)
+  (linha tracejada em degrau) — a equipe ativa inteira, SEM
+  retirada, como ela era naquele dia (o histórico do cadastro). Em
+  24/11/2026: 21 externos × 4 + 15 internos × 6 = **174**;
+* **em campo** (barra cinza) — quem fechou ao menos uma OS de cliente no
+  dia, com o 4/6 do cadastro. É a confirmação de quem trabalhou, não a
+  previsão.
+
+O palpite antigo — MAIORIA das OS de cliente em 30 dias pelo "Tipo de
+atendimento" do WVSA (`ta`, `_faz_externa`) — sobrou só para quem fecha
+OS e não está no cadastro; a capacidade em campo traz quantos foram
+(`capacidade[d][3]`) e a nota do gráfico diz quem. Os dois discordam
+muito: dos 10 técnicos da UNETVALE, a planilha marca 2 como internos e o
+palpite, 8. Em 18/11/2026 o palpite dava 198 em campo.
+
+⚠️ Falta o nível do meio, a **escalada** (quem tem OS agendada no dia):
+a Esteira não guarda o técnico do agendamento, e a fonte no WVSA ainda
+está por descobrir. Sem ela, às 9h a capacidade em campo de hoje é quase
+zero — leia a instalada.
 
 O backlog também é em barras, como o de executadas; as não agendadas em
 ouro, não em azul-escuro (os dois azuis da casa ficam a ΔE 9 no validador
@@ -1287,6 +1307,39 @@ vira permanente sem ninguém decidir. Sucesso não vai para o `coletor_log`
 (seriam ~80 linhas por dia no histórico); falha vai e marca o card. O
 `intervalo` do SQLite (o "período" da tela da Produtividade) não é tocado.
 
+**Visual v2** (24/11/2026, pedido de "uma visão melhorada", mesmas cores):
+a página lê como a mesa pensa, em seções com rótulo discreto (`.wr-sec`) —
+Ritmo do dia → Capacidade da equipe → Tendência → Recusas → Rotina →
+Desvios. A barra do dia gruda no topo ao rolar (no celular, não: lá ela
+cobria meia tela) e leva as fontes e a régua. Os quatro números viraram
+cartões com a variação em pílula e um traço SVG de 14 dias até o dia em
+foco ("ao vivo" no dia em andamento). A capacidade virou três réguas na
+mesma escala (instalada, em campo, executadas) com "da equipe em campo" e
+"aproveitamento" em destaque. O gráfico de tendência passou para largura
+cheia e UMA barra por dia — OS fechadas empilhadas em sucesso e recusa —
+com capacidade instalada, em campo e entradas em linha (cada linha com o
+seu `stack`, senão o eixo empilhado as somaria); cinco barras lado a lado
+ficavam com 3 px. As recusas vieram para antes da rotina e dos desvios.
+
+**Recusas por tipo de OS, com cross-filter** (24/11/2026, sem
+migration). Quatro tipos pela finalidade (`war_room.tipo_os`, uma
+definição só; a tela recebe o tipo pronto): **Instalação** (PF, PJ,
+Condomínio), **Mudança de endereço** — separada de propósito: 37% de
+recusa em 381 OS nos 30 dias até 24/11, a maior entre as grandes, e
+sumiria dentro de Instalação —, **Suporte** (Fibra, Condomínio, Suporte,
+Configuração de roteador) e **Serviços** (venda externa, cabeamento, troca
+de equipamento, chip, fiscalização; finalidade nova cai aqui). Dois blocos
+acima da lista de encerradas: tipos (recusas e a TAXA de recusa do tipo no
+dia, `por_tipo`) e motivos. Clicar num tipo recorta os motivos, a lista e
+as barras de executadas e recusas do gráfico (o rótulo da série diz o
+tipo); clicar num motivo recorta os tipos e a lista — o gráfico não tem
+motivo por dia. Cada contagem aplica o filtro do OUTRO campo, não o
+próprio, como no Dashboard. Os dois blocos seguem o supervisor da lista;
+com supervisor escolhido a taxa SOME, porque o total do dia não é
+separado por time (numerador do time sobre denominador da operação). Em
+20/11/2026: Instalação 7 de 12 (58%), Mudança 4 de 7, Suporte 47 de 114,
+Serviços 8 de 30. A lista ganhou a coluna Tipo, ordenável.
+
 **Os desvios têm barra de filtro própria** (24/11/2026, sem migration),
 logo acima dos KPIs: período, Supervisor, Técnico, OS, Momento, Status,
 Registrou e busca. O Dia continua no topo, porque vale para a página inteira;
@@ -1306,6 +1359,54 @@ está certo: as equipes dele são todas INFRA, que a War Room exclui.
 
 O que **ainda não** faz: o "virar ação" do desvio para o módulo Ações.
 
+### Equipe técnica: o cadastro de quem está em campo
+
+Nasceu em 24/11/2026 da planilha "Equipe técnica" (19/11/2026, papel): 40
+linhas, 13 empresas, colunas Agenda automática, Retenção, Interno,
+Supervisor e Cidades. A migration `0023` traz a planilha como carga
+inicial — **39** linhas, porque "Lucas Luiz da Silva Rolla" aparece duas
+vezes na WAVE e entrou uma só (juntando as duas; confirmar com a operação).
+Tela única `/equipe`, com o mesmo desenho da planilha, KPIs no topo e a
+capacidade instalada; "Exportar PDF" sai como `reuniao_pdf.html`, página
+solta que imprime sozinha (`equipe_pdf.html`, 2 folhas A4).
+
+**Só o admin edita** (decisão de 24/11/2026): o cadastro é a régua da
+capacidade. Sim/Não por clique, supervisor no select da linha, o resto no
+modal (clique no nome). Cada campo vai num POST próprio — é o que o
+histórico registra.
+
+**É dado que nasce aqui (§2)**: técnico se DESATIVA (sem DELETE nem para
+a `service_role`), e o trigger grava cada inclusão e alteração em
+`equipe_tecnicos_historico` (append-only), com `antes` e `depois`.
+`equipe.equipe_em(dia)` parte de hoje e desfaz o que mudou depois daquele
+dia — é o que impede que editar um técnico hoje mude a capacidade de
+ontem. A carga da planilha é `importado` (sem `atualizado_por`) e vale
+desde sempre; sem isso, todo dia antes de 24/11/2026 teria equipe vazia.
+
+**Casamento com a Produtividade pela `chave`**: `nome_wvsa` ou `nome`, sem
+acento, sem caixa e com espaço colapsado (`equipe.chave`, a MESMA função
+nos dois lados; a carga da migration grava exatamente o que ela produz).
+"Alex Oliveira" é "Alex de Paula Oliveira" no WVSA (por isso o
+`nome_wvsa`), e "Gabriel André Feliciano" vem como "GABRIEL ANDRE
+FELICIANO" sob a empresa RETIRADA. A empresa segue a grafia do WVSA (MAYRA,
+NODE TECH). A tela mostra o que a Produtividade tem de cada técnico em 30
+dias — "sem OS no WVSA" ao lado de quem não casou — e a lista de quem
+fechou OS de cliente e NÃO está no cadastro, com "Incluir" (o formulário
+não vem com "Interno" marcado: o palpite é justamente o que o cadastro
+substitui). Em 24/11/2026 eram 13, os maiores Cleiton Butiski (JVM, 112
+OS), Mateus Janicio (CLEITON TELECOM, 84), Gabriel Brandão (JVM, 72),
+Daniel Orlando Soares (WAVE, 72) e Joao Revair Dill (26).
+
+**`retirada`** marca quem só faz retirada (Gabriel, Joni e Vanessa — "…
+- Retiradas" na planilha, e só OS de retirada na Produtividade). Eles
+continuam na equipe (192 OS/dia no total) e ficam fora da capacidade da
+War Room (174), que é do agendamento de cliente.
+
+⚠️ O `supervisor_id` do cadastro **não** é o vínculo que recorta
+Produtividade, IQI e War Room (`supervisor_equipes`/`supervisor_tecnicos`,
+`app/supervisores.py`). Unificar os dois muda o que cada supervisor
+enxerga nas outras telas — é decisão à parte.
+
 ### Papéis
 
 Três, independentes — a pessoa pode ser um, vários ou nenhum:
@@ -1320,7 +1421,7 @@ Três, independentes — a pessoa pode ser um, vários ou nenhum:
 
 Configuração, não código, desde 04/09/2026 (migration `0014`). O admin marca em
 *Configurações → Acesso aos módulos* o que cada pessoa vê; `auth.MODULOS` lista
-os nove configuráveis.
+os dez configuráveis.
 
 ⚠️ A tabela `usuario_modulos_bloqueados` guarda o que foi **TIRADO**, não o que
 foi liberado. Sem linha = vê — que é como o portal sempre funcionou, e por isso
@@ -1501,6 +1602,21 @@ Os que nasceram na War Room:
 | `.wr-equipes` | chips com `×` que removem (cada um é um `<form>`) |
 | `.wr-dfiltro` | `.toolbar` em moldura de cartão, com rótulo: o filtro que vale só para uma seção, não para a página |
 | `tr.wr-dia-foco` | linha do dia em foco na tabela dia a dia (o mesmo dia da faixa nos gráficos) |
+| `.wr-tipo-os` (`.wr-t-instalacao/mudanca/suporte/servicos`) | pílula do tipo de OS, a mesma cor no bloco e na coluna da lista |
+| `.wr-barra` | barra do dia grudada sob a topbar, com fundo translúcido (estática no celular) |
+| `.wr-sec` | rótulo de seção em caixa alta com fio até a borda; `em` à direita para o recorte |
+| `.wr-kpi` (`.wr-k-suc/rec/ent/bk`) + `.wr-spark` + `.wr-delta` | cartão de número com faixa de cor, variação em pílula e traço de 14 dias |
+| `.wr-cap-*` | réguas de capacidade na mesma escala e os dois percentuais ao lado |
+| `.wr-tcard` | cartão clicável do tipo de OS (filtro); `.selecionado`/`.apagado` como no `.rank-linha` |
+
+Os que nasceram na Equipe técnica:
+
+| Classe | O que é |
+|---|---|
+| `.eq-tabela` / `tr.eq-grupo` | tabela agrupada por empresa, com a faixa do grupo (contagem e OS/dia) |
+| `.eq-sim` / `.eq-nao` / `.eq-sn` | Sim/Não em círculo, como na planilha; `.eq-sn` é o botão do admin que grava |
+| `.eq-pilula` | supervisor em pílula, com a cor `.av-N` da posição dele na lista |
+| `.eq-mini` | barrinha de 46 px da parte externa das OS (laranja) |
 
 **Nada de `confirm()` do navegador.** Ele abre uma caixa do sistema, com o
 domínio no topo, que não pertence à tela — use `.modal` com `<dialog>`. As
@@ -2437,6 +2553,52 @@ a.run(port=5001, use_reloader=False)"
 ---
 
 ## 9. Estado atual e pendências
+
+- **Equipe técnica e capacidade pelo cadastro** em 24/11/2026, migration
+  `0023` (`equipe_tecnicos`, `equipe_tecnicos_historico`, carga da
+  planilha), **aplicada em produção em 24/11/2026** pelo `psycopg` (numa
+  transação que só confirmava se a carga batesse: 39 técnicos, 192/174 OS
+  por dia, 18 internos, 24 na agenda, 12 em retenção, todos com
+  supervisor, 39 linhas `importado`) e conferida pelo PostgREST. Sem ela
+  a tela diz o que falta, as escritas respondem 503 e a War Room segue com
+  o palpite. O porquê está no §4 (Equipe técnica e War Room).
+
+  Migration no PGlite: aplicada e reaplicada, 15 conferências — 39
+  técnicos, 192 OS/dia (174 sem retirada), 18 internos, 24 na agenda, 12
+  em retenção, todos com supervisor; carga como `importado`, alteração
+  gravando antes/depois uma vez só, salvar sem mudar sem histórico,
+  inclusão como `criado`; histórico recusando UPDATE e DELETE; chave
+  duplicada, nome vazio e ação inventada recusados; `anon` e
+  `authenticated` sem acesso; `service_role` sem DELETE; RLS ligado.
+
+  Rotas pelo `test_client` num servidor de ensaio (cadastro em memória com
+  o trigger imitado, o resto lendo produção, toda outra escrita recusada):
+  100 casos — chave da carga = `equipe.chave` nas 39 linhas, supervisor
+  vê e não edita (403), PDF com 39 linhas, 11 entradas ruins e corpo
+  torto 400, três ids ruins 404, nome no WVSA recalculando a chave,
+  inclusão saindo da lista de fora do cadastro, módulo bloqueado 404 nas
+  três rotas e fora do menu, sem migration explicando/503/404, coluna na
+  matriz; War Room com 174 instalada em 20/11 e a mudança de HOJE sem
+  alterar ontem, `__WR__` = pacote JSON, nenhuma escrita real. No
+  navegador, com o mouse, como admin: marcar retenção, editar pelo modal
+  (192 → 194), incluir da lista de fora (40 técnicos, 200); como Davi, a
+  War Room com a linha da instalada e o tooltip; 375 px sem rolar de lado
+  nas duas telas; console limpo. PDF impresso no Chrome headless.
+
+  **Para valer em produção**: mergear (a `0023` já está no banco). Não
+  toca no coletor. O pacote da War Room ganha 2
+  idas (cadastro e histórico), dentro do paralelo — 13 idas no ensaio.
+
+  No mesmo PR, **recusas por tipo de OS** com cross-filter (§4, War
+  Room), sem migration: pacote pelo `test_client` em 20/11 e 24/11 com
+  toda recusa tipada e soma por tipo = `por_dia` = lista (13 casos); no
+  navegador, com o mouse, como Davi: tipo recortando motivos, lista (12 de
+  66) e gráfico, motivo recontando os tipos, Limpar, taxa só sem
+  supervisor; 375 px sem rolar de lado; console limpo.
+
+  **Ainda não feito**: a capacidade ESCALADA (agenda do WVSA por técnico;
+  fonte achada em 24/11/2026, `docs/descoberta-agenda-wvsa.md`) e as visões gestor × supervisor da War Room, que são
+  os próximos passos do plano.
 
 - **War Room — barra de filtro dos desvios** em 24/11/2026, sem migration
   e sem mexer no coletor (§4). Provado pelo `test_client` num servidor de

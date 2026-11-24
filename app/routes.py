@@ -77,7 +77,7 @@ _ENDPOINT_MODULO = {
     "produtividade": "dash.produtividade",
     "iqi": "dash.iqi", "massivas": "dash.massivas", "esteira": "dash.esteira_view",
     "troca-poste": "dash.troca_poste", "acoes": "dash.acoes_view",
-    "processos": "dash.processos_view",
+    "processos": "dash.processos_view", "equipe": "dash.equipe_view",
 }
 
 

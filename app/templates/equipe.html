@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Equipe técnica · Unetvale{% endblock %}
+{% block page_title %}Equipe técnica{% endblock %}
+{% block content %}
+
+{% if not pacote.tem_tabela %}
+<div class="vazio">O cadastro da equipe ainda não está no banco. Falta aplicar a migration
+  <b>0023_equipe_tecnica.sql</b> no Supabase — ela já traz a planilha de 19/11/2026.
+  Enquanto isso, a War Room calcula a capacidade pelo perfil das OS de cada técnico.</div>
+{% else %}
+
+{# Um filtro só, para a página inteira (KPIs, tabela e a lista de fora do
+   cadastro). O estado mora no JS; nada vai ao servidor. #}
+<div class="toolbar" id="eq-filtros">
+  <input type="search" id="eq-busca" placeholder="Buscar técnico, empresa ou cidade">
+  <label>Supervisor <select id="eq-sup"><option value="">Todos</option>
+    {% for s in pacote.supervisores %}<option value="{{ s.id }}">{{ s.nome }}</option>{% endfor %}
+    <option value="-">Sem supervisor</option></select></label>
+  <label>Empresa <select id="eq-emp"><option value="">Todas</option></select></label>
+  <label><input type="checkbox" id="eq-inativos"> Mostrar inativos</label>
+  <span style="margin-left:auto;display:flex;gap:8px">
+    <a class="btn sec" href="{{ url_for('dash.equipe_pdf') }}" target="_blank" rel="noopener">Exportar PDF</a>
+    {% if usuario.is_admin %}<button class="btn" type="button" id="eq-novo">+ Incluir técnico</button>{% endif %}
+  </span>
+</div>
+
+<div class="kpis eq-kpis" id="eq-kpis"></div>
+
+<div class="card" style="margin-bottom:16px">
+  <div class="card-h"><span>Técnicos de campo por empresa <span class="subnote" style="margin:0" id="eq-contagem"></span></span>
+    <span class="subnote" style="margin:0">{{ pacote.cap_interna }} OS/dia para interno · {{ pacote.cap_externa }} para externo</span></div>
+  <div class="card-b tabela-wrap" style="padding:0"><table class="tbl eq-tabela" id="eq-tabela"></table></div>
+</div>
+
+<div class="card" style="margin-bottom:16px" id="eq-fora-card">
+  <div class="card-h"><span>Fecharam OS de cliente e não estão no cadastro
+      <span class="subnote" style="margin:0" id="eq-fora-contagem"></span></span>
+    <span class="subnote" style="margin:0">últimos {{ pacote.dias_observados }} dias, Produtividade</span></div>
+  <div class="card-b" id="eq-fora"></div>
+</div>
+
+<div class="card recolhido" style="margin-bottom:16px" id="eq-mud-card">
+  <div class="card-h"><span>Últimas mudanças no cadastro</span>
+    <button class="btn-ghost" type="button" data-recolher>Mostrar</button></div>
+  <div class="card-b" hidden id="eq-mudancas"></div>
+</div>
+
+<p class="subnote">Interno = equipe que faz atividade interna e externa ({{ pacote.cap_interna }} OS por dia);
+  externo = só externa ({{ pacote.cap_externa }}). A capacidade da War Room deixa de fora quem só faz retirada.
+  “Últimos {{ pacote.dias_observados }} dias” é o que o WVSA mostra do técnico: técnico do cadastro sem nenhuma OS
+  ali costuma ser nome escrito diferente — preencha o “nome no WVSA”.</p>
+
+{% if usuario.is_admin %}
+<dialog class="modal modal-largo" id="eq-dlg">
+  <form id="eq-form" method="dialog" novalidate>
+    <h3 id="eq-form-t">Incluir técnico</h3>
+    <div class="wr-form-grade">
+      <div class="field"><label for="eq-f-nome">Nome</label>
+        <input type="text" id="eq-f-nome" maxlength="120" required></div>
+      <div class="field"><label for="eq-f-empresa">Empresa (como no WVSA)</label>
+        <input type="text" id="eq-f-empresa" maxlength="80" list="eq-empresas" required>
+        <datalist id="eq-empresas"></datalist></div>
+      <div class="field"><label for="eq-f-wvsa">Nome no WVSA <span class="wr-opc">(se for diferente)</span></label>
+        <input type="text" id="eq-f-wvsa" maxlength="120"></div>
+      <div class="field"><label for="eq-f-sup">Supervisor</label>
+        <select id="eq-f-sup"><option value="">—</option>
+          {% for s in pacote.supervisores %}<option value="{{ s.id }}">{{ s.nome }}</option>{% endfor %}</select></div>
+      <div class="field wr-larga"><label for="eq-f-cidades">Cidades</label>
+        <input type="text" id="eq-f-cidades" maxlength="200" placeholder="Porto Belo/Bombinhas"></div>
+      <div class="field wr-larga eq-marcas">
+        <label><input type="checkbox" id="eq-f-interno"> Interno (faz interna e externa · {{ pacote.cap_interna }} OS/dia)</label>
+        <label><input type="checkbox" id="eq-f-agenda"> Agenda automática</label>
+        <label><input type="checkbox" id="eq-f-retencao"> Retenção</label>
+        <label><input type="checkbox" id="eq-f-retirada"> Só retirada (fora da capacidade da War Room)</label>
+        <label id="eq-f-ativo-l"><input type="checkbox" id="eq-f-ativo" checked> Ativo</label>
+      </div>
+    </div>
+    <p class="wr-erro" id="eq-form-erro" hidden></p>
+    <div class="modal-acoes">
+      <button class="btn sec" type="button" data-fechar>Cancelar</button>
+      <button class="btn" type="submit">Salvar</button>
+    </div>
+  </form>
+</dialog>
+{% endif %}
+<div class="wr-aviso" id="eq-aviso" role="status"></div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if pacote.tem_tabela %}
+<script>window.__EQ__ = {{ pacote|tojson }}; window.__EQ_ADMIN__ = {{ usuario.is_admin|tojson }};</script>
+<script src="{{ url_for('static', filename='js/equipe.js') }}"></script>
+{% endif %}
+{% endblock %}
