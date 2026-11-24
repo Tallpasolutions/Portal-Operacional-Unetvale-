@@ -2514,9 +2514,12 @@ a.run(port=5001, use_reloader=False)"
 
 - **Equipe técnica e capacidade pelo cadastro** em 24/11/2026, migration
   `0023` (`equipe_tecnicos`, `equipe_tecnicos_historico`, carga da
-  planilha), **ainda não aplicada em produção** — sem ela a tela diz o que
-  falta, as escritas respondem 503 e a War Room segue com o palpite. O
-  porquê está no §4 (Equipe técnica e War Room).
+  planilha), **aplicada em produção em 24/11/2026** pelo `psycopg` (numa
+  transação que só confirmava se a carga batesse: 39 técnicos, 192/174 OS
+  por dia, 18 internos, 24 na agenda, 12 em retenção, todos com
+  supervisor, 39 linhas `importado`) e conferida pelo PostgREST. Sem ela
+  a tela diz o que falta, as escritas respondem 503 e a War Room segue com
+  o palpite. O porquê está no §4 (Equipe técnica e War Room).
 
   Migration no PGlite: aplicada e reaplicada, 15 conferências — 39
   técnicos, 192 OS/dia (174 sem retirada), 18 internos, 24 na agenda, 12
@@ -2540,8 +2543,8 @@ a.run(port=5001, use_reloader=False)"
   War Room com a linha da instalada e o tooltip; 375 px sem rolar de lado
   nas duas telas; console limpo. PDF impresso no Chrome headless.
 
-  **Para valer em produção**: aplicar a `0023` (psycopg ou SQL Editor) e
-  conferir 39 linhas. Não toca no coletor. O pacote da War Room ganha 2
+  **Para valer em produção**: mergear (a `0023` já está no banco). Não
+  toca no coletor. O pacote da War Room ganha 2
   idas (cadastro e histórico), dentro do paralelo — 13 idas no ensaio.
 
   **Ainda não feito**: a capacidade ESCALADA (agenda do WVSA por técnico,
