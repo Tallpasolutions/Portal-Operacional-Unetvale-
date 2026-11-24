@@ -57,6 +57,7 @@
     var dia = D.dia, w = diaSemana(dia), emAndamento = dia === D.hoje;
     var p = D.produtividade.por_dia[dia] || [0, 0];
     var cap = (D.produtividade.capacidade || {})[dia];
+    var inst = (D.produtividade.instalada || {})[dia];
     var bp = D.produtividade.base[w];
     var ent = D.esteira.entradas[dia] || 0;
     var be = D.esteira.base[w];
@@ -73,7 +74,8 @@
       { q: "Executadas com sucesso", n: p[0],
         d: bp && !emAndamento ? delta(p[0], bp[0], true) : "",
         b: (bp ? "média de " + SEMANA[w] + ": " + num(bp[0]) : "sem régua") +
-           (cap ? " · capacidade: " + num(cap[0]) : "") + andamento },
+           (inst ? " · capacidade instalada: " + num(inst[0]) : "") +
+           (cap ? " · em campo: " + num(cap[0]) : "") + andamento },
       { q: "Encerradas sem sucesso", n: p[1],
         d: bp && !emAndamento ? delta(p[1], bp[1], false) : "",
         b: bp ? "média de " + SEMANA[w] + ": " + num(bp[1]) + andamento : "" },
@@ -165,6 +167,18 @@
     } };
   }
 
+  // Quem fechou OS de cliente no dia em foco e não está no cadastro entra na
+  // capacidade em campo pelo palpite antigo (maioria das OS em 30 dias). A
+  // nota diz quem, para o admin incluir no cadastro.
+  function foraNota() {
+    if (!D.produtividade.tem_cadastro) return " O cadastro da equipe ainda não está no banco (migration 0023): " +
+      "a capacidade em campo usa o perfil pela maioria das OS em 30 dias.";
+    var f = D.produtividade.fora_cadastro || [];
+    if (!f.length) return "";
+    return " Em " + rotDia(D.dia) + ", " + f.length + (f.length === 1 ? " técnico fora" : " técnicos fora") +
+      " do cadastro entrou pela maioria das OS em 30 dias: " + f.map(esc).join(", ") + ".";
+  }
+
   function graficos() {
     var dias = diasGrafico();
     var verde = css("--success"), azul = css("--brand"), vermelho = css("--danger");
@@ -179,6 +193,8 @@
     var rec = dias.map(function (d) { var p = D.produtividade.por_dia[d]; return p ? p[1] : null; });
     var CAP = D.produtividade.capacidade || {};
     var cap = dias.map(function (d) { return CAP[d] ? CAP[d][0] : null; });
+    var INST = D.produtividade.instalada || {};
+    var inst = dias.map(function (d) { return INST[d] ? INST[d][0] : null; });
     var cinza = css("--muted-l");
     var ent = dias.map(function (d) { return D.esteira.entradas[d] === undefined ? null : D.esteira.entradas[d]; });
     var rotulos = dias.map(function (d) { return rotDia(d) + (d === D.inicio ? " ★" : ""); });
@@ -186,7 +202,12 @@
     CH.fluxo = new Chart($("wr-ch-fluxo"), {
       type: "bar",
       data: { labels: rotulos, datasets: [
-        { label: "Capacidade de execução", data: cap, backgroundColor: cor(cinza) },
+        // Linha em degrau, por cima das barras: é o teto da equipe inteira,
+        // e só muda quando o cadastro muda. Some sem a migration 0023.
+        { type: "line", label: "Capacidade instalada", data: inst, stepped: "middle",
+          borderColor: css("--ink-d"), borderWidth: 1.5, borderDash: [5, 4], pointRadius: 0,
+          pointHitRadius: 6, fill: false, hidden: !D.produtividade.tem_cadastro, order: -1 },
+        { label: "Capacidade em campo", data: cap, backgroundColor: cor(cinza) },
         { label: "Executadas com sucesso", data: suc, backgroundColor: cor(verde) },
         { label: "Recusas (encerradas sem sucesso)", data: rec, backgroundColor: cor(vermelho) },
         { label: "Entraram na esteira", data: ent, backgroundColor: cor(azul) },
@@ -204,9 +225,12 @@
               return rotDia(d) + " (" + SEMANA[diaSemana(d)] + ")" + (d < D.inicio ? " — antes da War Room" : "");
             },
             afterBody: function (it) {
-              var c = CAP[dias[it[0].dataIndex]];
-              return c ? "Capacidade: " + c[1] + " técnicos de externa × " + D.cap_externa + " + " + c[2] +
-                " de interna × " + D.cap_interna : "";
+              var d = dias[it[0].dataIndex], c = CAP[d], i = INST[d], l = [];
+              if (i) l.push("Instalada: " + i[1] + " externos × " + D.cap_externa + " + " + i[2] +
+                " internos × " + D.cap_interna);
+              if (c) l.push("Em campo: " + c[1] + " externos × " + D.cap_externa + " + " + c[2] +
+                " internos × " + D.cap_interna + (c[3] ? " (" + c[3] + " fora do cadastro)" : ""));
+              return l;
             },
             footer: function (it) {
               return dias[it[0].dataIndex] === D.dia ? "Dia em foco na tela" : "Clique para ver este dia";
@@ -219,8 +243,9 @@
     $("wr-fluxo-nota").innerHTML = "★ " + rotDia(D.inicio) + ", início da War Room; as barras anteriores ficam mais claras. " +
       "Clique num dia para ver a tela daquele dia, ou na legenda para isolar uma série. " +
       "Recusas: OS de cliente encerradas sem sucesso. " +
-      "Capacidade: " + D.cap_externa + " OS por técnico de atendimento externo e " + D.cap_interna +
-      " por técnico de interno (maioria das OS dele em 30 dias), contando quem fechou OS de cliente no dia. " +
+      "Capacidade: " + D.cap_externa + " OS por dia para o técnico externo e " + D.cap_interna +
+      " para o interno, pelo cadastro da equipe. Instalada (linha): a equipe inteira, sem retirada; " +
+      "em campo (barra cinza): quem fechou OS de cliente no dia." + foraNota() + " " +
       "Executadas e recusas por dia civil (Produtividade); entradas por dia operacional, das 21h às 21h (esteira).";
 
     // Em barras, como o gráfico ao lado (pedido de 19/11/2026): mesma leitura
@@ -252,12 +277,13 @@
       var p = D.produtividade.por_dia[d], bk = D.esteira.backlog[d];
       var cls = (d < D.inicio ? "wr-antes " : "") + "clicavel" + (d === D.dia ? " wr-dia-foco" : "");
       return '<tr class="' + cls + '" data-dia="' + d + '" title="Clique para ver este dia"><td>' + rotDia(d) + " · " + SEMANA[diaSemana(d)].slice(0, 3) +
+        "</td><td class='num'>" + (INST[d] ? num(INST[d][0]) : "—") +
         "</td><td class='num'>" + (CAP[d] ? num(CAP[d][0]) : "—") +
         "</td><td class='num'>" + (p ? num(p[0]) : "—") + "</td><td class='num'>" + (p ? num(p[1]) : "—") +
         "</td><td class='num'>" + (D.esteira.entradas[d] === undefined ? "—" : num(D.esteira.entradas[d])) +
         "</td><td class='num'>" + (bk ? num(bk[0]) : "—") + "</td><td class='num'>" + (bk ? num(bk[1]) : "—") + "</td></tr>";
     }).join("");
-    $("wr-tab-dias").innerHTML = "<thead><tr><th>Dia</th><th>Capacidade</th><th>Executadas com sucesso</th><th>Recusas (sem sucesso)</th>" +
+    $("wr-tab-dias").innerHTML = "<thead><tr><th>Dia</th><th>Capacidade instalada</th><th>Em campo</th><th>Executadas com sucesso</th><th>Recusas (sem sucesso)</th>" +
       "<th>Entraram na esteira</th><th>Backlog</th><th>Não agendadas</th></tr></thead><tbody>" + linhas + "</tbody>";
   }
 

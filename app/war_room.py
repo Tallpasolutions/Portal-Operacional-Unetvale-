@@ -26,7 +26,7 @@ import unicodedata
 from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta, timezone
 
-from . import dados, esteira, supa
+from . import dados, equipe, esteira, supa
 from . import supervisores as sup
 
 BR_TZ = timezone(timedelta(hours=-3))
@@ -39,14 +39,23 @@ DIAS_GRAFICO = 28          # o gráfico mostra o antes e o depois do início
 DIAS_TECNICOS = 30         # técnico que não fechou OS em 30 dias sai da lista
 DIAS_RETROATIVO = 7        # registrar desvio de até uma semana atrás
 
-# Capacidade diária (decisão de 19/11/2026): 4 OS por dia para o técnico que
-# faz atendimento EXTERNO e 6 para o que faz INTERNO (o "Tipo de atendimento"
-# do WVSA, `ta` na Produtividade). O perfil é a MAIORIA das OS de cliente dele
-# nos últimos 30 dias — muitos fazem os dois (3 ELLO: 140 externas e 70
-# internas de 20/10 a 19/11), e decidir dia a dia faria a capacidade de quem
-# fechou uma OS só oscilar de 4 para 6. Conta quem fechou ao menos uma OS de
-# cliente no dia: é a equipe que de fato foi a campo, não a escalada.
-CAP_EXTERNA, CAP_INTERNA = 4, 6
+# Capacidade diária: 4 OS por dia para o técnico EXTERNO e 6 para o INTERNO
+# (que faz interna e externa). Desde 24/11/2026 quem diz o perfil é o
+# CADASTRO da equipe (`app/equipe.py`, a planilha "Equipe técnica"), não
+# mais o palpite. São dois números:
+#
+# * **instalada** — toda a equipe ativa do cadastro, sem retirada, como ela
+#   era em cada dia (o histórico do cadastro);
+# * **em campo** — quem fechou ao menos uma OS de cliente no dia: a
+#   confirmação de quem de fato trabalhou.
+#
+# O palpite antigo (MAIORIA das OS de cliente em 30 dias pelo "Tipo de
+# atendimento" do WVSA, `ta`) sobrou só para quem fecha OS e não está no
+# cadastro — e a tela conta esses à parte, para ninguém confundir o número
+# do cadastro com o do palpite. A planilha e o palpite discordam muito: dos
+# 10 técnicos da UNETVALE, a planilha marca 2 como internos e o palpite, 8
+# (Produtividade de 25/10 a 24/11/2026).
+CAP_EXTERNA, CAP_INTERNA = equipe.CAP_EXTERNA, equipe.CAP_INTERNA
 DIAS_PERFIL = 30
 
 # ---------------------------------------------------------------------
@@ -360,10 +369,6 @@ def _produtividade(dia_foco):
             soma[w][1] += ns
             n[w] += 1
     base = {w: [round(soma[w][0] / n[w]), round(soma[w][1] / n[w])] for w in n}
-    capacidade = {}
-    for d, tecs in em_campo.items():
-        ext = sum(1 for t in tecs if _faz_externa(perfil[t]))
-        capacidade[d] = [ext * CAP_EXTERNA + (len(tecs) - ext) * CAP_INTERNA, ext, len(tecs) - ext]
     return {
         "atualizado_em": atualizado_em,
         "por_dia": {d: v for d, v in por_dia.items() if d >= _desde_grafico() or d == foco},
@@ -376,8 +381,52 @@ def _produtividade(dia_foco):
         # min depois). Sem hora (coleta antiga) vai para o fim.
         "sem_sucesso": sorted(sem_sucesso, key=lambda x: (x["hora"] is None, x["hora"] or "",
                                                           _norma(x["tecnico"]))),
-        "capacidade": capacidade,
+        # Consumidos por `_capacidades` (precisam do cadastro) e retirados
+        # do pacote antes de ir para a tela.
+        "_em_campo": em_campo,
+        "_perfil": perfil,
     }
+
+
+def _capacidades(prod, cadastro, dia_foco):
+    """Capacidade instalada e em campo por dia, com o cadastro de cada dia.
+
+    `cadastro` = (técnicos atuais, histórico), ou (None, []) sem a
+    migration 0023 — aí a instalada some e a em campo volta ao palpite,
+    que é o comportamento de antes.
+
+    Em campo: [capacidade, externos, internos, fora do cadastro]. "Fora" é
+    quem fechou OS de cliente e não casou com o cadastro; ele entra pela
+    regra antiga, e a tela diz quantos são.
+    """
+    atuais, eventos = cadastro
+    em_campo, perfil = prod.pop("_em_campo"), prod.pop("_perfil")
+    inicio = date.fromisoformat(_desde_grafico())
+    fim = max(hoje(), dia_foco)
+    dias = [(inicio + timedelta(days=i)).isoformat() for i in range((fim - inicio).days + 1)]
+    if dia_foco.isoformat() not in dias:
+        dias.append(dia_foco.isoformat())
+    instalada = equipe.instalada_por_dia(dias, atuais, eventos)
+    capacidade, fora_foco = {}, []
+    for d, tecs in em_campo.items():
+        idx = equipe.indice(equipe.equipe_em(date.fromisoformat(d), atuais, eventos)) if atuais else {}
+        ext = inte = fora = 0
+        for t in tecs:
+            cad = idx.get(equipe.chave(t))
+            if cad is not None:
+                interno = bool(cad.get("interno"))
+            else:
+                interno = not _faz_externa(perfil[t])
+                fora += 1
+                if d == dia_foco.isoformat():
+                    fora_foco.append(t)
+            inte += interno
+            ext += not interno
+        capacidade[d] = [ext * CAP_EXTERNA + inte * CAP_INTERNA, ext, inte, fora]
+    prod["capacidade"] = capacidade
+    prod["instalada"] = instalada
+    prod["fora_cadastro"] = sorted(fora_foco, key=_norma)
+    prod["tem_cadastro"] = atuais is not None
 
 
 def _faz_externa(pf):
@@ -516,9 +565,17 @@ def pacote(dia_foco):
                 return None
             raise
 
-    prod, est, (lista, tem_tabela), rod, nomes, alcance, vals = supa.paralelo(
+    def cadastro():
+        # Em SÉRIE, dentro do paralelo de cima (paralelo aninhado no mesmo
+        # pool pode prender as threads — §4, Esteira). Sem a migration 0023,
+        # `listar` devolve None e o histórico nem é pedido.
+        atuais = equipe.listar()
+        return atuais, (equipe.historico() if atuais is not None else [])
+
+    prod, est, (lista, tem_tabela), rod, nomes, alcance, vals, cad = supa.paralelo(
         lambda: _produtividade(dia_foco), lambda: _esteira(dia_foco),
-        desvios, rodadas, _nomes, _alcance_supervisores, validacoes)
+        desvios, rodadas, _nomes, _alcance_supervisores, validacoes, cadastro)
+    _capacidades(prod, cad, dia_foco)
     # Cada encerrada sem sucesso leva os supervisores que respondem pelo
     # técnico: a tela filtra por supervisor sem conhecer a regra do vínculo.
     for o in prod["sem_sucesso"]:

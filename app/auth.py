@@ -43,7 +43,7 @@ def _eh_supervisor_cache(uid):
 # onde a pessoa troca a própria senha — esconder aquilo trancaria alguém para
 # fora da própria conta.
 MODULOS = ("dashboard", "war-room", "produtividade", "iqi", "massivas", "esteira",
-           "troca-poste", "acoes", "processos")
+           "troca-poste", "acoes", "processos", "equipe")
 
 ROTULO_MODULO = {
     "dashboard": "Dashboard",
@@ -55,6 +55,7 @@ ROTULO_MODULO = {
     "troca-poste": "Troca de Poste",
     "acoes": "Ações",
     "processos": "Processos",
+    "equipe": "Equipe técnica",
 }
 
 

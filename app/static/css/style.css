@@ -1388,3 +1388,47 @@ body.wr-carregando .wr-numeros, body.wr-carregando #wr-ss-card{ opacity:.55; tra
 .wr-ss td:nth-child(3){ min-width:170px; }
 .wr-ss td:nth-child(5){ min-width:220px; }
 .wr-ss a{ color:var(--brand-d); font-weight:600; }
+
+/* ===== Equipe técnica (/equipe) =====
+   A planilha "Equipe técnica" no portal: grupo por empresa, Sim/Não em
+   círculo, supervisor em pílula com a cor da posição dele (a mesma regra do
+   `.avatar`). Sim/Não do admin é botão: clicar grava. */
+.eq-kpis .eq-kpi-cap{ border-color:var(--brand); background:linear-gradient(180deg,var(--brand-l),var(--branco) 70%); }
+.eq-kpis .kpi .v small{ font-size:12.5px; font-weight:600; color:var(--muted); }
+.eq-kpis .eq-kpi-wr{ margin-top:6px; padding-top:6px; border-top:1px dashed var(--borda-2); }
+table.eq-tabela td, table.eq-tabela th{ vertical-align:middle; }
+table.eq-tabela th.eq-c, table.eq-tabela td.eq-c{ text-align:center; }
+table.eq-tabela tr.eq-grupo td{ background:#f6f9fd; border-bottom:1px solid var(--borda-2); padding:7px 12px;
+  font-size:12.5px; letter-spacing:.02em; color:var(--ink-d); }
+table.eq-tabela tr.eq-grupo .subnote{ margin:0; }
+table.eq-tabela tbody tr:not(.eq-grupo):hover td{ background:#fafcff; }
+.eq-nome{ min-width:230px; }
+.eq-nome > span, .eq-editar{ display:inline-flex; align-items:center; gap:9px; }
+.eq-nome .avatar{ background:var(--navy-3); }
+.eq-editar{ background:none; border:none; padding:0; cursor:pointer; text-align:left; font:inherit; color:inherit; }
+.eq-editar:hover b{ color:var(--brand-d); text-decoration:underline; }
+.eq-wvsa{ display:block; font-size:11.5px; color:var(--muted); font-weight:500; }
+.eq-sim, .eq-nao{ display:inline-grid; place-items:center; width:20px; height:20px; border-radius:50%; font-size:11px; font-weight:800; }
+.eq-sim{ background:var(--ink-d); color:#fff; }
+.eq-nao{ border:1.5px solid var(--borda-2); color:var(--muted-l); }
+.eq-sn{ background:none; border:none; padding:3px; border-radius:50%; cursor:pointer; line-height:0; }
+.eq-sn:hover{ box-shadow:0 0 0 3px var(--brand-l); }
+.eq-pilula{ display:inline-block; min-width:76px; text-align:center; padding:3px 10px; border-radius:20px;
+  font-size:11.5px; font-weight:700; color:#fff; }
+.eq-sup-sel{ font-size:12.5px; padding:4px 6px; }
+.eq-cid{ color:var(--ink); min-width:160px; }
+.eq-obs{ white-space:nowrap; }
+.eq-obs .subnote{ margin:0; }
+.eq-mini{ display:inline-block; width:46px; height:6px; border-radius:3px; background:var(--borda-2);
+  vertical-align:middle; margin:0 4px; overflow:hidden; }
+.eq-mini i, .eq-leg i{ display:block; height:100%; background:var(--warning); }
+.eq-leg{ font-weight:500; color:var(--muted); margin-left:6px; }
+.eq-leg i{ display:inline-block; width:10px; height:6px; border-radius:2px; vertical-align:middle; }
+tr.eq-inativo td{ opacity:.55; }
+tr.eq-retirada .eq-nome b::after{ content:"retirada"; margin-left:6px; font-size:10.5px; font-weight:700; color:var(--muted);
+  background:var(--fundo); border-radius:4px; padding:1px 5px; vertical-align:1px; }
+.eq-marcas{ display:flex; flex-direction:column; gap:6px; }
+.modal-largo .field.eq-marcas label{ display:flex; align-items:center; gap:8px; font-weight:500; color:var(--ink); margin:0; }
+.modal-largo .field.eq-marcas input{ width:auto; }
+#eq-busca{ width:240px; }
+@media (max-width:760px){ #eq-busca{ width:100%; } }

@@ -1,0 +1,97 @@
+{# A planilha "Equipe técnica" em papel, como a de 19/11/2026 — agora saindo
+   do cadastro. Página solta, como `reuniao_pdf.html`: o PDF não leva
+   sidebar nem topbar, e escondê-los com `@media print` seria carregar o que
+   se pretende esconder. Imprime sozinha ao abrir (o clique foi em
+   "Exportar PDF"). Só técnicos ativos. #}
+{% set ns = namespace(emp=None) %}
+{% set r = pacote.resumo %}
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<title>Equipe técnica — {{ pacote.hoje[8:10] }}/{{ pacote.hoje[5:7] }}/{{ pacote.hoje[:4] }}</title>
+<style>
+  @page{ size:A4; margin:9mm 9mm; }
+  *{ box-sizing:border-box; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  body{ font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif; color:#232e3c; font-size:8.6pt; margin:0; }
+  .doc{ max-width:190mm; margin:0 auto; padding:16px 0; }
+  .cab{ background:#0b1727; color:#fff; border-radius:6px; padding:14px 18px; display:flex;
+        justify-content:space-between; align-items:flex-end; }
+  .cab h1{ font-size:20pt; letter-spacing:.02em; margin:0; }
+  .cab p{ margin:2px 0 0; color:#c9d6ea; font-size:9pt; }
+  .cab .em{ text-align:right; font-size:8.5pt; color:#c9d6ea; }
+  .cab .em b{ display:block; color:#fff; font-size:12pt; letter-spacing:.04em; }
+  .kpis{ display:grid; grid-template-columns:repeat(6,1fr); gap:6px; margin:10px 0; }
+  .kpis div{ border:1px solid #d8e2ef; border-left:3px solid #232e3c; border-radius:5px; padding:6px 8px; }
+  .kpis b{ display:block; font-size:15pt; line-height:1.1; }
+  .kpis span{ color:#5e6e82; font-size:7.8pt; }
+  .kpis .cap{ border-left-color:#2c7be5; background:#f3f8fe; }
+  table{ width:100%; border-collapse:collapse; table-layout:fixed; }
+  /* Nome numa linha só: quebrado em dois, a lista de 40 não cabe numa folha. */
+  col.c-emp{ width:12%; } col.c-tec{ width:27%; } col.c-sn{ width:7%; } col.c-sup{ width:10%; }
+  td.cid{ font-size:7.6pt; }
+  td.tec{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  thead th{ background:#0b1727; color:#fff; font-size:7.8pt; text-align:left; padding:6px 6px; }
+  thead th.c, td.c{ text-align:center; }
+  td{ padding:2.5px 6px; border-bottom:1px solid #e6ecf4; vertical-align:middle; line-height:1.25; }
+  td.emp{ font-weight:800; font-size:8pt; background:#f6f9fd; border-right:1px solid #e6ecf4; }
+  tr.novo td{ border-top:1.5px solid #c3cfdf; }
+  .s, .n{ display:inline-block; width:12px; height:12px; border-radius:50%; line-height:12px; font-size:7pt; font-weight:800; }
+  .s{ background:#232e3c; color:#fff; }
+  .n{ border:1px solid #b8c4d4; }
+  .sup{ display:inline-block; min-width:56px; text-align:center; padding:1px 8px; border-radius:9px;
+        color:#fff; font-size:7.6pt; font-weight:700; }
+  .av-0{ background:#2c7be5; } .av-1{ background:#00b074; } .av-2{ background:#f5803e; }
+  .av-3{ background:#1c3157; } .av-4{ background:#0098da; } .av-5{ background:#5e6e82; }
+  .ret{ font-size:7pt; color:#5e6e82; font-weight:700; margin-left:4px; }
+  .pe{ display:flex; justify-content:space-between; margin-top:8px; color:#5e6e82; font-size:7.8pt; }
+  tr{ page-break-inside:avoid; }
+  @media screen{ body{ background:#edf2f9; } .doc{ background:#fff; padding:16px; margin:16px auto; } }
+</style>
+</head>
+<body>
+<div class="doc">
+  <div class="cab">
+    <div><h1>EQUIPE TÉCNICA</h1>
+      <p>Técnicos de campo por empresa · agenda automática, retenção e supervisão</p></div>
+    <div class="em"><b>UNETVALE</b>Atualizado em {{ pacote.hoje[8:10] }}/{{ pacote.hoje[5:7] }}/{{ pacote.hoje[:4] }}</div>
+  </div>
+
+  <div class="kpis">
+    <div><b>{{ r.tecnicos }}</b><span>técnicos</span></div>
+    <div><b>{{ r.empresas }}</b><span>empresas</span></div>
+    <div><b>{{ r.agenda_automatica }}</b><span>na agenda automática</span></div>
+    <div><b>{{ r.internos }}</b><span>internos</span></div>
+    <div><b>{{ r.retencao }}</b><span>em retenção</span></div>
+    <div class="cap"><b>{{ r.instalada[0] }}</b><span>OS/dia de capacidade ({{ pacote.cap_interna }} interno · {{ pacote.cap_externa }} externo)</span></div>
+  </div>
+
+  <table>
+    <colgroup><col class="c-emp"><col class="c-tec"><col class="c-sn"><col class="c-sn"><col class="c-sn"><col class="c-sup"><col></colgroup>
+    <thead><tr><th>Empresa</th><th>Técnico</th><th class="c">Agenda automática</th><th class="c">Retenção</th>
+      <th class="c">Interno</th><th class="c">Supervisor</th><th>Cidades</th></tr></thead>
+    <tbody>
+    {% for t in pacote.tecnicos %}
+      {% set primeira = t.empresa != ns.emp %}
+      <tr class="{{ 'novo' if primeira and not loop.first }}">
+        <td class="emp">{% if primeira %}{{ t.empresa }}{% endif %}</td>
+        <td class="tec">{{ t.nome }}{% if t.retirada %}<span class="ret">RETIRADA</span>{% endif %}</td>
+        {% for c in ['agenda_automatica', 'retencao', 'interno'] %}
+        <td class="c">{% if t[c] %}<span class="s">✓</span>{% else %}<span class="n"></span>{% endif %}</td>
+        {% endfor %}
+        <td class="c">{% if t.supervisor_id and sup_nome.get(t.supervisor_id) %}
+          {% set ns2 = namespace(i=0) %}{% for s in pacote.supervisores %}{% if s.id == t.supervisor_id %}{% set ns2.i = loop.index0 % 6 %}{% endif %}{% endfor %}
+          <span class="sup av-{{ ns2.i }}">{{ sup_nome[t.supervisor_id].split(' ')[0] }}</span>{% else %}—{% endif %}</td>
+        <td class="cid">{{ t.cidades or "—" }}</td>
+      </tr>
+      {% set ns.emp = t.empresa %}
+    {% endfor %}
+    </tbody>
+  </table>
+  <div class="pe"><span>● Sim &nbsp; ○ Não · Interno = faz atividade interna e externa</span><span>Fonte: Portal Operacional — Equipe técnica</span></div>
+</div>
+<script>
+  window.addEventListener("load", function () { window.print(); });
+</script>
+</body>
+</html>
