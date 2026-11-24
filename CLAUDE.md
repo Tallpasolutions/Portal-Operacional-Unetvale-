@@ -1251,6 +1251,19 @@ OS e não está no cadastro; a capacidade em campo traz quantos foram
 muito: dos 10 técnicos da UNETVALE, a planilha marca 2 como internos e o
 palpite, 8. Em 18/11/2026 o palpite dava 198 em campo.
 
+**Capacidade por supervisor** (24/11/2026, sem migration): o bloco tem
+uma escolha "Operação · Adolar · Davi · Guilherme" que recorta as réguas e
+os dois percentuais, e embaixo uma tabela que compara os times (técnicos,
+total, em campo, executadas, recusas, taxa de recusa, aproveitamento) —
+clicar na linha também escolhe. O supervisor abre no próprio time.
+`war_room._por_supervisor`: o dono do técnico é o supervisor do CADASTRO;
+quem fecha OS fora dele vai pelo vínculo de Configurações (`_no_alcance`).
+Medido em 24/11/2026, as duas fontes concordam em 38 de 39 (o que diverge
+é de retirada). As linhas somam a operação — conferido em 4 dias —, a não
+ser quando um técnico tem dois supervisores pelo vínculo (conta nos dois).
+Supervisor sem ninguém na War Room (o de infra) não aparece; técnico sem
+dono vai em "Sem supervisor".
+
 ⚠️ Falta o nível do meio, a **escalada** (quem tem OS agendada no dia):
 a Esteira não guarda o técnico do agendamento, e a fonte no WVSA ainda
 está por descobrir. Sem ela, às 9h a capacidade em campo de hoje é quase
@@ -2585,8 +2598,12 @@ a.run(port=5001, use_reloader=False)"
   War Room com a linha da instalada e o tooltip; 375 px sem rolar de lado
   nas duas telas; console limpo. PDF impresso no Chrome headless.
 
-  **Para valer em produção**: mergear (a `0023` já está no banco). Não
-  toca no coletor. O pacote da War Room ganha 2
+  **Instalado em 24/11/2026**: #72 mergeado (com as recusas por tipo, o
+  visual v2 e o "Capacidade total"), Vercel servindo `?v=18c7bd53` às
+  16:16. O código da `main` lendo produção pelo `test_client`: War Room de
+  24/11 com total 174 e em campo 162, 49 recusas tipadas = lista;
+  `/equipe` com 39 técnicos, 192/174 e 13 fora do cadastro. Não toca no
+  coletor. O pacote da War Room ganha 2
   idas (cadastro e histórico), dentro do paralelo — 13 idas no ensaio.
 
   No mesmo PR, **recusas por tipo de OS** com cross-filter (§4, War

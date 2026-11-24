@@ -368,6 +368,9 @@ def _produtividade(dia_foco):
     desde = _desde_grafico()
     corte_perfil = (hoje() - timedelta(days=DIAS_PERFIL)).isoformat()
     em_campo = defaultdict(set)                      # dia -> técnicos com OS de cliente
+    # Técnico -> [sucesso, sem sucesso, empresa] no dia em foco: é o que a
+    # capacidade POR SUPERVISOR atribui a cada um (`_capacidades`).
+    tec_foco = {}
     perfil = defaultdict(lambda: [0, 0, 0, 0])       # técnico -> [ext 30d, int 30d, ext, int]
     for d, e, t, f, su, mo, ta, os_n, hora, ficha in linhas:
         # A recusa vai para o dia e a hora da FICHA quando ela discorda do
@@ -391,6 +394,9 @@ def _produtividade(dia_foco):
         if t and t != "—":
             if d >= desde or d == foco:
                 em_campo[d].add(t)
+            if d == foco:
+                tf = tec_foco.setdefault(t, [0, 0, e if e and e != "—" else ""])
+                tf[0 if su else 1] += 1
             pf = perfil[t]
             pf[2 if ta else 3] += 1
             if d >= corte_perfil:
@@ -430,10 +436,11 @@ def _produtividade(dia_foco):
         # do pacote antes de ir para a tela.
         "_em_campo": em_campo,
         "_perfil": perfil,
+        "_tec_foco": tec_foco,
     }
 
 
-def _capacidades(prod, cadastro, dia_foco):
+def _capacidades(prod, cadastro, dia_foco, alcance=(), nomes=None):
     """Capacidade instalada e em campo por dia, com o cadastro de cada dia.
 
     `cadastro` = (técnicos atuais, histórico), ou (None, []) sem a
@@ -446,6 +453,7 @@ def _capacidades(prod, cadastro, dia_foco):
     """
     atuais, eventos = cadastro
     em_campo, perfil = prod.pop("_em_campo"), prod.pop("_perfil")
+    tec_foco = prod.pop("_tec_foco")
     inicio = date.fromisoformat(_desde_grafico())
     fim = max(hoje(), dia_foco)
     dias = [(inicio + timedelta(days=i)).isoformat() for i in range((fim - inicio).days + 1)]
@@ -470,8 +478,63 @@ def _capacidades(prod, cadastro, dia_foco):
         capacidade[d] = [ext * CAP_EXTERNA + inte * CAP_INTERNA, ext, inte, fora]
     prod["capacidade"] = capacidade
     prod["instalada"] = instalada
+    prod["por_supervisor"] = _por_supervisor(dia_foco, atuais, eventos, em_campo, perfil, tec_foco,
+                                             alcance, nomes or {})
     prod["fora_cadastro"] = sorted(fora_foco, key=_norma)
     prod["tem_cadastro"] = atuais is not None
+
+
+def _por_supervisor(dia_foco, atuais, eventos, em_campo, perfil, tec_foco, alcance, nomes):
+    """A capacidade do dia em foco quebrada por supervisor (pedido de
+    24/11/2026).
+
+    De quem é cada técnico: o supervisor do CADASTRO; quem fecha OS sem estar
+    no cadastro vai pelo vínculo de sempre (`_no_alcance`, o da lista de
+    encerradas). Medido em 24/11/2026, as duas fontes concordam em 38 dos 39
+    técnicos do cadastro — o que diverge (Gabriel André Feliciano) é de
+    retirada e não entra na War Room. Pelo vínculo um técnico pode ter dois
+    supervisores (INFRA WAVE): conta para os dois, e a soma das linhas passa
+    do total da operação — a tela diz isso.
+
+    Linha: {id, nome, tecnicos, total: [cap, ext, int], campo: [cap, n],
+    exec, rec}. Quem não tem supervisor vai na linha `id: None`.
+    """
+    foco = dia_foco.isoformat()
+    eq_dia = equipe.equipe_em(dia_foco, atuais, eventos) if atuais else []
+    idx = equipe.indice(eq_dia)
+    linhas = {a["id"]: {"id": a["id"], "nome": nomes.get(a["id"], "—"), "_tot": [], "_campo": [],
+                        "exec": 0, "rec": 0} for a in alcance}
+    linhas[None] = {"id": None, "nome": "Sem supervisor", "_tot": [], "_campo": [], "exec": 0, "rec": 0}
+
+    def donos(nome, empresa):
+        cad = idx.get(equipe.chave(nome))
+        if cad is not None:
+            return [cad.get("supervisor_id")] if cad.get("supervisor_id") in linhas else [None]
+        ids = [a["id"] for a in alcance if _no_alcance(a, empresa, nome)]
+        return ids or [None]
+
+    for t in eq_dia:
+        if equipe.entra_na_war_room(t):
+            for s_id in donos(t.get("nome_wvsa") or t["nome"], t["empresa"]):
+                linhas[s_id]["_tot"].append(t)
+    for nome in em_campo.get(foco, ()):
+        suc, rec, emp = tec_foco.get(nome, [0, 0, ""])
+        cad = idx.get(equipe.chave(nome))
+        interno = bool(cad.get("interno")) if cad is not None else not _faz_externa(perfil[nome])
+        for s_id in donos(nome, emp):
+            linhas[s_id]["_campo"].append(interno)
+            linhas[s_id]["exec"] += suc
+            linhas[s_id]["rec"] += rec
+    saida = []
+    for l in linhas.values():
+        tot, campo = l.pop("_tot"), l.pop("_campo")
+        if not tot and not campo:
+            continue          # supervisor sem ninguém na War Room (o de infra)
+        l["tecnicos"] = len(tot)
+        l["total"] = equipe.somar(tot)
+        l["campo"] = [sum(CAP_INTERNA if i else CAP_EXTERNA for i in campo), len(campo)]
+        saida.append(l)
+    return sorted(saida, key=lambda l: (l["id"] is None, _norma(l["nome"])))
 
 
 def _faz_externa(pf):
@@ -620,7 +683,7 @@ def pacote(dia_foco):
     prod, est, (lista, tem_tabela), rod, nomes, alcance, vals, cad = supa.paralelo(
         lambda: _produtividade(dia_foco), lambda: _esteira(dia_foco),
         desvios, rodadas, _nomes, _alcance_supervisores, validacoes, cadastro)
-    _capacidades(prod, cad, dia_foco)
+    _capacidades(prod, cad, dia_foco, alcance, nomes)
     # Cada encerrada sem sucesso leva os supervisores que respondem pelo
     # técnico: a tela filtra por supervisor sem conhecer a regra do vínculo.
     for o in prod["sem_sucesso"]:
