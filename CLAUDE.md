@@ -1287,6 +1287,23 @@ vira permanente sem ninguém decidir. Sucesso não vai para o `coletor_log`
 (seriam ~80 linhas por dia no histórico); falha vai e marca o card. O
 `intervalo` do SQLite (o "período" da tela da Produtividade) não é tocado.
 
+**Os desvios têm barra de filtro própria** (24/11/2026, sem migration),
+logo acima dos KPIs: período, Supervisor, Técnico, OS, Momento, Status,
+Registrou e busca. O Dia continua no topo, porque vale para a página inteira;
+antes, período, status e busca moravam lá também, e nada dizia que só
+recortavam a lista de desvios. Tipo, causa e responsável seguem pelo clique
+nos rankings e aparecem como chip com ×; o técnico do ranking e o do select
+são o mesmo estado.
+
+O **supervisor de um desvio** é quem responde pelo técnico (`sups`, pela
+mesma `_no_alcance` das encerradas: conferido em 24/11/2026, 0 divergências
+em 171 desvios) **ou** quem o registrou: desvio sem técnico (daily, rota) é
+do supervisor que o anotou. O desvio recém-registrado volta do POST sem
+`sups`, e o JS o completa por `tec_sups` (técnico → supervisores, do
+pacote), sem conhecer o vínculo. O supervisor abre a barra no próprio time,
+como a lista de encerradas; "Limpar filtros" volta a Todos. Hygor vê zero e
+está certo: as equipes dele são todas INFRA, que a War Room exclui.
+
 O que **ainda não** faz: o "virar ação" do desvio para o módulo Ações.
 
 ### Papéis
@@ -1482,6 +1499,7 @@ Os que nasceram na War Room:
 | `.wr-aviso` | aviso curto no rodapé depois de gravar, no lugar de `alert()` |
 | `.wr-valida` | `.toggle` Sim/Não por linha; "Não" marcado fica vermelho |
 | `.wr-equipes` | chips com `×` que removem (cada um é um `<form>`) |
+| `.wr-dfiltro` | `.toolbar` em moldura de cartão, com rótulo: o filtro que vale só para uma seção, não para a página |
 | `tr.wr-dia-foco` | linha do dia em foco na tabela dia a dia (o mesmo dia da faixa nos gráficos) |
 
 **Nada de `confirm()` do navegador.** Ele abre uma caixa do sistema, com o
@@ -2419,6 +2437,20 @@ a.run(port=5001, use_reloader=False)"
 ---
 
 ## 9. Estado atual e pendências
+
+- **War Room — barra de filtro dos desvios** em 24/11/2026, sem migration
+  e sem mexer no coletor (§4). Provado pelo `test_client` num servidor de
+  ensaio (lê produção, toda escrita recusada): 171 desvios, todos com `sups`
+  (Davi 67, Guilherme 65, Adolar 39), iguais aos das encerradas e ao
+  `tec_sups`; as mesmas 15 idas ao banco; `?dia=` ruim 400. No navegador,
+  como Davi, com o mouse: abre no time dele (7 de 8 no dia, 67 de 171 desde
+  19/11), OS "#6028" achando as 5, chip de tipo e o ×, técnico do ranking
+  indo para o select, Limpar, filtro sobrevivendo à troca de dia; 375 px sem
+  rolar de lado; console limpo.
+
+  **Ainda não exercitado:** o desvio recém-registrado entrando no filtro de
+  supervisor (o ensaio recusa a gravação; o mapa foi conferido igual ao
+  vínculo calculado no servidor).
 
 - **War Room — hora da recusa pela ficha da OS** em 24/11/2026, sem
   migration (§4, War Room). Pedido do Jhoni: a #601017 aparecia às 00:24

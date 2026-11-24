@@ -523,6 +523,20 @@ def pacote(dia_foco):
     # técnico: a tela filtra por supervisor sem conhecer a regra do vínculo.
     for o in prod["sem_sucesso"]:
         o["sups"] = [a["id"] for a in alcance if _no_alcance(a, o["empresa"], o["tecnico"])]
+    # O mesmo para os desvios (filtro Supervisor da barra dos desvios), e o
+    # mapa técnico -> supervisores para o desvio que a tela acaba de
+    # registrar: ele volta do POST sem `sups`, e o JS não conhece o vínculo.
+    # A chave é o NOME porque é por ele que o formulário escolhe a empresa
+    # (`tecEmpresa`), então o desvio novo leva a empresa deste mapa.
+    def sups_de(empresa, tecnico):
+        return [a["id"] for a in alcance if tecnico and _no_alcance(a, empresa, tecnico)]
+    tec_sups = {t: s for t, e in prod["tecnicos"] if (s := sups_de(e, t))}
+    formatados = []
+    for d in lista:
+        if d["dia"] <= dia_foco.isoformat():
+            f = _formatar(d, nomes)
+            f["sups"] = sups_de(f["empresa"], f["tecnico"])
+            formatados.append(f)
     return {
         "versao": f"{prod['atualizado_em'] or ''}|{est['atualizado_em'] or ''}",
         "dia": dia_foco.isoformat(),
@@ -534,7 +548,8 @@ def pacote(dia_foco):
         "esteira": {**est, "atualizado": _data_hora_local(est["atualizado_em"])},
         "catalogo": catalogo(),
         "tem_tabela": tem_tabela,
-        "desvios": [_formatar(d, nomes) for d in lista if d["dia"] <= dia_foco.isoformat()],
+        "desvios": formatados,
+        "tec_sups": tec_sups,
         "rodadas": [{"momento": r["momento"], "usuario_id": r["usuario_id"],
                      "nome": nomes.get(r["usuario_id"], "—"), "hora": _hora_local(r["feito_em"])}
                     for r in rod],
