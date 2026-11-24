@@ -1445,3 +1445,95 @@ tr.eq-retirada .eq-nome b::after{ content:"retirada"; margin-left:6px; font-size
 .wr-tipos .rank-linha .rl{ overflow:visible; }
 .wr-tipos .rank-linha .rv small{ font-weight:600; color:var(--muted); margin-left:4px; }
 #wr-rec-chips{ align-items:center; margin-top:-6px; }
+
+/* ===== War Room — visual v2 (24/11/2026) =====
+   Mesmas cores da casa (tokens), outra hierarquia: barra do dia grudada no
+   topo, seções com rótulo discreto, números grandes com tendência de 14
+   dias, capacidade em réguas na mesma escala e recusas em cartões por tipo. */
+.wr-barra{ position:sticky; top:var(--top-h); z-index:15; display:flex; align-items:center; justify-content:space-between;
+  gap:12px; flex-wrap:wrap; margin:0 0 6px; padding:10px 14px; background:rgba(255,255,255,.92);
+  backdrop-filter:saturate(1.4) blur(8px); -webkit-backdrop-filter:saturate(1.4) blur(8px);
+  border:1px solid var(--borda-2); border-radius:12px; box-shadow:var(--sombra); }
+.wr-barra-dia{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; min-width:0; }
+.wr-barra-dia label{ font-size:12.5px; font-weight:700; color:var(--muted); display:flex; align-items:center; gap:6px; }
+.wr-barra-rot{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:12px; color:var(--muted); }
+.wr-barra-rot b{ color:var(--ink-d); font-variant-numeric:tabular-nums; }
+.wr-pill{ background:var(--brand-l); color:var(--brand-d); border-radius:20px; padding:2px 9px; font-weight:700; font-size:11.5px; }
+.wr-barra-regua{ color:var(--muted-l); }
+
+.wr-sec{ display:flex; align-items:center; gap:10px; margin:22px 0 10px; }
+.wr-sec span{ font-size:11.5px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); white-space:nowrap; }
+.wr-sec::after{ content:""; flex:1; height:1px; background:var(--borda-2); }
+.wr-sec em{ font-style:normal; font-size:12px; color:var(--muted-l); white-space:nowrap; order:3; }
+.wr-sec em:empty{ display:none; }
+
+.wr-kpis{ display:grid; grid-template-columns:repeat(auto-fit,minmax(min(210px,100%),1fr)); gap:14px; margin-bottom:6px; }
+.wr-kpi{ position:relative; background:var(--branco); border:1px solid var(--borda-2); border-radius:14px; padding:14px 16px 12px;
+  box-shadow:var(--sombra); display:flex; flex-direction:column; gap:6px; overflow:hidden; }
+.wr-kpi::before{ content:""; position:absolute; left:0; top:0; bottom:0; width:4px; background:var(--k, var(--brand)); }
+.wr-k-suc{ --k:var(--success); } .wr-k-rec{ --k:var(--danger); } .wr-k-ent{ --k:var(--brand); } .wr-k-bk{ --k:var(--ouro); }
+.wr-kpi-t{ display:flex; justify-content:space-between; align-items:center; gap:8px; }
+.wr-kpi .q{ font-size:12px; font-weight:700; color:var(--muted); }
+.wr-vivo{ font-size:10.5px; font-weight:800; color:var(--success); text-transform:uppercase; letter-spacing:.06em; display:inline-flex; align-items:center; gap:5px; }
+.wr-vivo::before{ content:""; width:6px; height:6px; border-radius:50%; background:var(--success); box-shadow:0 0 0 3px #00b07426; }
+.wr-kpi-n{ display:flex; align-items:baseline; gap:10px; }
+.wr-kpi .n{ font-size:32px; font-weight:800; color:var(--ink-d); line-height:1; font-variant-numeric:tabular-nums; letter-spacing:-.01em; }
+.wr-delta{ font-size:12px; font-weight:800; padding:2px 8px; border-radius:20px; background:var(--fundo); color:var(--muted); font-variant-numeric:tabular-nums; }
+.wr-delta.ok{ background:#e3f6ee; color:#0a7a52; } .wr-delta.fora{ background:#fdecee; color:#b21f37; }
+/* Texto em cima, tendência embaixo, na largura do cartão: lado a lado o
+   traço espremia o texto em quatro linhas em telas médias. */
+.wr-kpi-p{ display:flex; flex-direction:column; gap:8px; }
+.wr-kpi .b{ font-size:12px; color:var(--muted); line-height:1.35; }
+.wr-kpi .b b{ color:var(--ink); }
+.wr-spark{ width:100%; height:30px; overflow:visible; }
+.wr-spark polyline{ fill:none; stroke:var(--k, var(--brand)); stroke-width:2; stroke-linejoin:round; stroke-linecap:round; vector-effect:non-scaling-stroke; }
+.wr-spark circle{ fill:var(--k, var(--brand)); stroke:var(--branco); stroke-width:1.5; }
+body.wr-carregando .wr-kpis, body.wr-carregando #wr-cap{ opacity:.55; transition:opacity .15s; }
+
+.wr-cap-card .card-b{ padding:18px 20px; }
+.wr-cap-grade{ display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:28px; align-items:center; }
+.wr-cap-barras{ display:flex; flex-direction:column; gap:12px; }
+.wr-cap-l{ display:grid; grid-template-columns:86px minmax(0,1fr) 54px; grid-template-areas:"r t v" ". d d"; column-gap:12px; row-gap:2px; align-items:center; }
+.wr-cap-r{ grid-area:r; font-size:12.5px; font-weight:700; color:var(--ink); }
+.wr-cap-t{ grid-area:t; height:12px; background:var(--fundo); border-radius:6px; overflow:hidden; }
+.wr-cap-t i{ display:block; height:100%; border-radius:6px; }
+.wr-cap-t .i-inst{ background:repeating-linear-gradient(135deg,#c9d6ea 0 6px,#dbe5f3 6px 12px); }
+.wr-cap-t .i-campo{ background:var(--muted-l); }
+.wr-cap-t .i-exec{ background:var(--success); }
+.wr-cap-v{ grid-area:v; text-align:right; font-weight:800; font-size:15px; color:var(--ink-d); font-variant-numeric:tabular-nums; }
+.wr-cap-d{ grid-area:d; font-size:11.5px; color:var(--muted); }
+.wr-cap-kpis{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.wr-cap-kpis > div{ background:var(--fundo); border-radius:12px; padding:14px; display:flex; flex-direction:column; gap:3px; }
+.wr-cap-kpis .n{ font-size:28px; font-weight:800; color:var(--ink-d); line-height:1; font-variant-numeric:tabular-nums; }
+.wr-cap-kpis .q{ font-size:12.5px; font-weight:700; color:var(--ink); }
+.wr-cap-kpis .b{ font-size:11px; color:var(--muted); }
+@media (max-width:900px){ .wr-cap-grade{ grid-template-columns:1fr; gap:16px; } }
+
+.wr-tcards{ display:grid; grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr)); gap:12px; margin-bottom:14px; }
+.wr-tcard{ font:inherit; text-align:left; cursor:pointer; background:var(--branco); border:1px solid var(--borda-2); border-radius:14px;
+  padding:13px 15px; box-shadow:var(--sombra); display:flex; flex-direction:column; gap:7px; position:relative; overflow:hidden;
+  transition:transform .12s, box-shadow .12s, border-color .12s, opacity .12s; }
+.wr-tcard::before{ content:""; position:absolute; inset:0 auto 0 0; width:4px; background:var(--tc); }
+.wr-tcard:hover{ transform:translateY(-1px); box-shadow:0 10px 22px rgba(11,23,39,.09), 0 1px 3px rgba(11,23,39,.08); }
+.wr-tcard.selecionado{ border-color:var(--tc); box-shadow:0 0 0 2px var(--tc), var(--sombra); }
+.wr-tcard.apagado{ opacity:.5; }
+.wr-tcard.wr-t-instalacao{ --tc:var(--brand); } .wr-tcard.wr-t-mudanca{ --tc:var(--warning); }
+.wr-tcard.wr-t-suporte{ --tc:var(--navy-3); } .wr-tcard.wr-t-servicos{ --tc:var(--muted-l); }
+.wr-tcard, .wr-tcard.wr-t-instalacao, .wr-tcard.wr-t-mudanca, .wr-tcard.wr-t-suporte, .wr-tcard.wr-t-servicos{ background:var(--branco); color:var(--ink); }
+.wr-tcard-r{ font-size:12.5px; font-weight:800; color:var(--ink-d); }
+.wr-tcard-n{ font-size:28px; font-weight:800; color:var(--ink-d); line-height:1; font-variant-numeric:tabular-nums; }
+.wr-tcard-n small{ font-size:12px; font-weight:600; color:var(--muted); margin-left:6px; }
+.wr-tcard-b{ height:6px; border-radius:3px; background:var(--fundo); overflow:hidden; }
+.wr-tcard-b i{ display:block; height:100%; background:var(--tc); border-radius:3px; }
+.wr-tcard-p{ font-size:12px; color:var(--muted); }
+.wr-tcard-p b{ color:var(--ink-d); }
+.wr-rec-grade{ grid-template-columns:1fr; }
+/* No celular a barra não gruda: com dia, fontes e botão em três linhas ela
+   cobria quase meia tela ao rolar. */
+@media (max-width:760px){ .wr-barra{ position:static; } .wr-barra-regua{ display:none; } .wr-kpi .n{ font-size:28px; }
+  .wr-tcard-n{ font-size:24px; } }
+/* Tendência em largura cheia: 28 dias de barras não cabem em meia tela. */
+.wr-tend{ grid-template-columns:1fr; }
+.wr-tend .chart-box{ height:330px; }
+.wr-tend .chart-box.wr-baixo{ height:230px; }
+@media (max-width:1180px){ .wr-barra-regua{ display:none; } }

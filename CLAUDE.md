@@ -1304,6 +1304,20 @@ vira permanente sem ninguém decidir. Sucesso não vai para o `coletor_log`
 (seriam ~80 linhas por dia no histórico); falha vai e marca o card. O
 `intervalo` do SQLite (o "período" da tela da Produtividade) não é tocado.
 
+**Visual v2** (24/11/2026, pedido de "uma visão melhorada", mesmas cores):
+a página lê como a mesa pensa, em seções com rótulo discreto (`.wr-sec`) —
+Ritmo do dia → Capacidade da equipe → Tendência → Recusas → Rotina →
+Desvios. A barra do dia gruda no topo ao rolar (no celular, não: lá ela
+cobria meia tela) e leva as fontes e a régua. Os quatro números viraram
+cartões com a variação em pílula e um traço SVG de 14 dias até o dia em
+foco ("ao vivo" no dia em andamento). A capacidade virou três réguas na
+mesma escala (instalada, em campo, executadas) com "da equipe em campo" e
+"aproveitamento" em destaque. O gráfico de tendência passou para largura
+cheia e UMA barra por dia — OS fechadas empilhadas em sucesso e recusa —
+com capacidade instalada, em campo e entradas em linha (cada linha com o
+seu `stack`, senão o eixo empilhado as somaria); cinco barras lado a lado
+ficavam com 3 px. As recusas vieram para antes da rotina e dos desvios.
+
 **Recusas por tipo de OS, com cross-filter** (24/11/2026, sem
 migration). Quatro tipos pela finalidade (`war_room.tipo_os`, uma
 definição só; a tela recebe o tipo pronto): **Instalação** (PF, PJ,
@@ -1586,6 +1600,11 @@ Os que nasceram na War Room:
 | `.wr-dfiltro` | `.toolbar` em moldura de cartão, com rótulo: o filtro que vale só para uma seção, não para a página |
 | `tr.wr-dia-foco` | linha do dia em foco na tabela dia a dia (o mesmo dia da faixa nos gráficos) |
 | `.wr-tipo-os` (`.wr-t-instalacao/mudanca/suporte/servicos`) | pílula do tipo de OS, a mesma cor no bloco e na coluna da lista |
+| `.wr-barra` | barra do dia grudada sob a topbar, com fundo translúcido (estática no celular) |
+| `.wr-sec` | rótulo de seção em caixa alta com fio até a borda; `em` à direita para o recorte |
+| `.wr-kpi` (`.wr-k-suc/rec/ent/bk`) + `.wr-spark` + `.wr-delta` | cartão de número com faixa de cor, variação em pílula e traço de 14 dias |
+| `.wr-cap-*` | réguas de capacidade na mesma escala e os dois percentuais ao lado |
+| `.wr-tcard` | cartão clicável do tipo de OS (filtro); `.selecionado`/`.apagado` como no `.rank-linha` |
 
 Os que nasceram na Equipe técnica:
 

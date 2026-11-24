@@ -43,28 +43,65 @@
   // na semana de 23/11/2026, de 2 em 2 h fora dela) e o app não a conhece:
   // a tela diz QUANDO atualizou, não promete de quanto em quanto.
   function fontes() {
-    $("wr-fontes").innerHTML =
-      "Sem retirada e sem infra. Produtividade atualizada em <b>" + esc(D.produtividade.atualizado || "—") +
-      "</b>; esteira em <b>" + esc(D.esteira.atualizado || "—") + "</b>. A página busca os dados novos sozinha." +
-      " Régua: média do mesmo dia da semana de " + rotDia(D.base_de) + " a " + rotDia(D.base_ate) + ".";
+    var hora = function (t) { return t ? t.slice(-5) : "—"; };
+    $("wr-barra-rot").innerHTML =
+      '<span class="wr-pill">sem retirada e sem infra</span>' +
+      '<span title="Produtividade atualizada em ' + esc(D.produtividade.atualizado || "—") + '">Produtividade <b>' +
+      esc(hora(D.produtividade.atualizado)) + "</b></span>" +
+      '<span title="Esteira atualizada em ' + esc(D.esteira.atualizado || "—") + '">esteira <b>' + esc(hora(D.esteira.atualizado)) +
+      "</b></span>" + '<span class="wr-barra-regua">régua: média do mesmo dia da semana de ' + rotDia(D.base_de) + " a " +
+      rotDia(D.base_ate) + "</span>";
   }
 
   // ---------------------------------------------------------------------
   // Números do dia
   // ---------------------------------------------------------------------
+  // Variação contra a régua, em pílula: verde quando vai no sentido bom,
+  // vermelho quando vai no ruim, neutra quando não há sentido (entradas).
   function delta(atual, ref, maiorMelhor) {
     if (ref === undefined || ref === null) return "";
     var d = atual - ref;
-    var cls = maiorMelhor === null ? "" : ((maiorMelhor ? d >= 0 : d <= 0) ? " ok" : " fora");
-    var sinal = d > 0 ? "+" : (d < 0 ? "−" : "±");
-    return '<span class="d' + cls + '">' + sinal + num(Math.abs(d)) + "</span>";
+    var cls = maiorMelhor === null || !d ? "" : ((maiorMelhor ? d > 0 : d < 0) ? " ok" : " fora");
+    var seta = d > 0 ? "▲" : (d < 0 ? "▼" : "");
+    return '<span class="wr-delta' + cls + '">' + seta + " " + num(Math.abs(d)) + "</span>";
+  }
+
+  // Mini-gráfico de 14 dias até o dia em foco, em SVG (quatro canvases a
+  // mais pesariam e não somam nada que um traço não diga). O último ponto
+  // é o dia em foco, marcado. Sem dado num dia, o traço quebra.
+  function sparkline(vals) {
+    var W = 240, H = 30, P = 3;
+    var ok = vals.filter(function (v) { return v !== null && v !== undefined; });
+    if (ok.length < 2) return "";
+    var max = Math.max.apply(null, ok), min = Math.min.apply(null, ok);
+    var esc_ = max - min || 1;
+    var x = function (i) { return P + i * (W - 2 * P) / (vals.length - 1); };
+    var y = function (v) { return H - P - (v - min) * (H - 2 * P) / esc_; };
+    var seg = [], cur = [];
+    vals.forEach(function (v, i) {
+      if (v === null || v === undefined) { if (cur.length) seg.push(cur); cur = []; return; }
+      cur.push(x(i).toFixed(1) + "," + y(v).toFixed(1));
+    });
+    if (cur.length) seg.push(cur);
+    var ult = vals[vals.length - 1];
+    return '<svg class="wr-spark" viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none" aria-hidden="true">' +
+      seg.map(function (p) { return '<polyline points="' + p.join(" ") + '"/>'; }).join("") +
+      (ult !== null && ult !== undefined ? '<circle cx="' + x(vals.length - 1).toFixed(1) + '" cy="' + y(ult).toFixed(1) + '" r="2.6"/>' : "") +
+      "</svg>";
+  }
+
+  function ultimosDias(n) {
+    var out = [], d = new Date(D.dia + "T12:00:00");
+    for (var i = n - 1; i >= 0; i--) {
+      var x = new Date(d); x.setDate(d.getDate() - i);
+      out.push(x.toISOString().slice(0, 10));
+    }
+    return out;
   }
 
   function numeros() {
     var dia = D.dia, w = diaSemana(dia), emAndamento = dia === D.hoje;
     var p = D.produtividade.por_dia[dia] || [0, 0];
-    var cap = (D.produtividade.capacidade || {})[dia];
-    var inst = (D.produtividade.instalada || {})[dia];
     var bp = D.produtividade.base[w];
     var ent = D.esteira.entradas[dia] || 0;
     var be = D.esteira.base[w];
@@ -73,32 +110,68 @@
     var vesp = new Date(D.inicio + "T12:00:00"); vesp.setDate(vesp.getDate() - 1);
     var vespIso = vesp.toISOString().slice(0, 10);
     var bkIni = D.esteira.backlog[vespIso];
+    var dias14 = ultimosDias(14);
+    var pd = function (i) { return dias14.map(function (d) { var x = D.produtividade.por_dia[d]; return x ? x[i] : null; }); };
+    var taxa = p[0] + p[1] ? Math.round(100 * p[1] / (p[0] + p[1])) : null;
     // Com o dia em andamento não há diferença a mostrar: às 14h, "−77" contra
     // a média do dia INTEIRO assusta e não diz nada sobre o ritmo. O backlog
     // continua comparando — ele é uma foto, não um acumulado do dia.
-    var andamento = emAndamento ? " · dia em andamento" : "";
     var cel = [
-      { q: "Executadas com sucesso", n: p[0],
+      { q: "Executadas com sucesso", n: p[0], cor: "suc",
         d: bp && !emAndamento ? delta(p[0], bp[0], true) : "",
-        b: (bp ? "média de " + SEMANA[w] + ": " + num(bp[0]) : "sem régua") +
-           (inst ? " · capacidade instalada: " + num(inst[0]) : "") +
-           (cap ? " · em campo: " + num(cap[0]) : "") + andamento },
-      { q: "Encerradas sem sucesso", n: p[1],
+        b: bp ? "média de " + SEMANA[w] + " <b>" + num(bp[0]) + "</b>" : "sem régua",
+        s: sparkline(pd(0)) },
+      { q: "Recusas", n: p[1], cor: "rec",
         d: bp && !emAndamento ? delta(p[1], bp[1], false) : "",
-        b: bp ? "média de " + SEMANA[w] + ": " + num(bp[1]) + andamento : "" },
-      { q: "Entraram na esteira", n: ent, d: be && !emAndamento ? delta(ent, be, null) : "",
-        b: (be ? "média de " + SEMANA[w] + ": " + num(be) : "sem régua") +
-           " · dia das 21h às 21h" + (D.esteira.lacuna[dia] ? " · +" + D.esteira.lacuna[dia] + " após lacuna de coleta" : "") },
-      { q: "Backlog da esteira", n: bk ? bk[0] : null,
+        b: (taxa !== null ? "<b>" + taxa + "%</b> das OS fechadas" : "") + (bp ? " · média <b>" + num(bp[1]) + "</b>" : ""),
+        s: sparkline(pd(1)) },
+      { q: "Entraram na esteira", n: ent, cor: "ent",
+        d: be && !emAndamento ? delta(ent, be, null) : "",
+        b: (be ? "média de " + SEMANA[w] + " <b>" + num(be) + "</b>" : "sem régua") +
+           (D.esteira.lacuna[dia] ? " · +" + D.esteira.lacuna[dia] + " após lacuna" : ""),
+        s: sparkline(dias14.map(function (d) { return D.esteira.entradas[d] === undefined ? null : D.esteira.entradas[d]; })) },
+      { q: "Backlog da esteira", n: bk ? bk[0] : null, cor: "bk",
         d: bk && bkIni && dia >= D.inicio ? delta(bk[0], bkIni[0], false) : "",
-        b: bk ? num(bk[1]) + " não agendadas" + (bkIni && dia >= D.inicio ? " · em " + rotDia(vespIso) + ": " + num(bkIni[0]) : "")
-              : "sem foto da esteira neste dia" },
+        b: bk ? "<b>" + num(bk[1]) + "</b> não agendadas" + (bkIni && dia >= D.inicio ? " · " + rotDia(vespIso) + ": " + num(bkIni[0]) : "")
+              : "sem foto da esteira neste dia",
+        s: sparkline(dias14.map(function (d) { var b = D.esteira.backlog[d]; return b ? b[0] : null; })) },
     ];
-    $("wr-numeros").innerHTML = cel.map(function (c, i) {
-      return '<div class="' + (i === 0 ? "foco" : "") + '"><span class="q">' + c.q + "</span>" +
-        '<span class="n">' + (c.n === null ? "—" : num(c.n)) + " " + (c.d || "") + "</span>" +
-        '<span class="b">' + c.b + "</span></div>";
+    $("wr-numeros").innerHTML = cel.map(function (c) {
+      return '<div class="wr-kpi wr-k-' + c.cor + '"><div class="wr-kpi-t"><span class="q">' + c.q + "</span>" +
+        (emAndamento && c.cor !== "bk" ? '<span class="wr-vivo" title="Dia em andamento: o número ainda cresce">ao vivo</span>' : "") +
+        '</div><div class="wr-kpi-n"><span class="n">' + (c.n === null ? "—" : num(c.n)) + "</span>" + (c.d || "") + "</div>" +
+        '<div class="wr-kpi-p"><span class="b">' + c.b + "</span>" + c.s + "</div></div>";
     }).join("");
+    capacidade();
+  }
+
+  // Capacidade em três réguas sobre a MESMA escala (a instalada): a equipe
+  // inteira, quem foi a campo e o que saiu com sucesso. Duas razões em
+  // destaque: quanto da equipe trabalhou e quanto do que ela podia fazer
+  // virou OS resolvida. Sem cadastro (migration 0023) cai só no em campo.
+  function capacidade() {
+    var dia = D.dia, el = $("wr-cap");
+    var inst = (D.produtividade.instalada || {})[dia];
+    var cap = (D.produtividade.capacidade || {})[dia];
+    var p = D.produtividade.por_dia[dia] || [0, 0];
+    var topo = Math.max(inst ? inst[0] : 0, cap ? cap[0] : 0, p[0] + p[1], 1);
+    function barra(rot, v, cls, det) {
+      return '<div class="wr-cap-l"><span class="wr-cap-r">' + rot + '</span><span class="wr-cap-t"><i class="' + cls +
+        '" style="width:' + (v === null ? 0 : (100 * v / topo)).toFixed(1) + '%"></i></span><span class="wr-cap-v">' +
+        (v === null ? "—" : num(v)) + "</span>" + (det ? '<span class="wr-cap-d">' + det + "</span>" : "") + "</div>";
+    }
+    var pct = function (a, b) { return b ? Math.round(100 * a / b) + "%" : "—"; };
+    var fora = cap && cap[3] ? " · " + cap[3] + " fora do cadastro" : "";
+    el.innerHTML = '<div class="wr-cap-grade"><div class="wr-cap-barras">' +
+      barra("Instalada", inst ? inst[0] : null, "i-inst", inst ? inst[2] + " internos × " + D.cap_interna + " + " + inst[1] + " externos × " + D.cap_externa : "sem cadastro") +
+      barra("Em campo", cap ? cap[0] : null, "i-campo", cap ? (cap[1] + cap[2]) + " técnicos fecharam OS" + fora : "ninguém fechou OS") +
+      barra("Executadas", p[0], "i-exec", num(p[1]) + " recusas") +
+      '</div><div class="wr-cap-kpis">' +
+      '<div><span class="n">' + (inst && cap ? pct(cap[0], inst[0]) : "—") + '</span><span class="q">da equipe em campo</span>' +
+      '<span class="b">capacidade em campo ÷ instalada</span></div>' +
+      '<div><span class="n">' + (cap ? pct(p[0], cap[0]) : "—") + '</span><span class="q">aproveitamento</span>' +
+      '<span class="b">executadas ÷ capacidade em campo</span></div>' +
+      "</div></div>" + (dia === D.hoje ? '<p class="subnote" style="margin:12px 0 0">Dia em andamento: em campo e executadas ainda crescem. A capacidade escalada (pela agenda do WVSA) é o próximo passo.</p>' : "");
   }
 
   // ---------------------------------------------------------------------
@@ -222,21 +295,32 @@
       data: { labels: rotulos, datasets: [
         // Linha em degrau, por cima das barras: é o teto da equipe inteira,
         // e só muda quando o cadastro muda. Some sem a migration 0023.
-        { type: "line", label: "Capacidade instalada", data: inst, stepped: "middle",
+        // Visual v2: UMA barra por dia — as OS fechadas, empilhadas em sucesso
+        // (verde) e recusa (vermelho), que é a leitura da mesa — e as
+        // réguas em linha por cima: capacidade instalada (tracejada, só muda
+        // com o cadastro), em campo (cinza) e entradas na esteira (azul).
+        // Cinco barras lado a lado por dia ficavam com 3 px cada. Cada linha
+        // tem o seu `stack`, senão o eixo empilhado somaria as linhas.
+        { type: "line", label: "Capacidade instalada", data: inst, stack: "inst", stepped: "middle",
           borderColor: css("--ink-d"), borderWidth: 1.5, borderDash: [5, 4], pointRadius: 0,
-          pointHitRadius: 6, fill: false, hidden: !D.produtividade.tem_cadastro, order: -1 },
-        { label: "Capacidade em campo", data: cap, backgroundColor: cor(cinza) },
-        { label: "Executadas com sucesso" + sufixo, data: suc, backgroundColor: cor(verde) },
-        { label: "Recusas (encerradas sem sucesso)" + sufixo, data: rec, backgroundColor: cor(vermelho) },
-        { label: "Entraram na esteira", data: ent, backgroundColor: cor(azul) },
+          pointHitRadius: 6, fill: false, hidden: !D.produtividade.tem_cadastro, order: -3 },
+        { type: "line", label: "Capacidade em campo", data: cap, stack: "campo", borderColor: cinza, borderWidth: 2,
+          pointRadius: 0, pointHitRadius: 6, tension: .3, spanGaps: false, order: -2 },
+        { type: "line", label: "Entraram na esteira", data: ent, stack: "ent", borderColor: azul, borderWidth: 2,
+          pointRadius: 2.5, pointBackgroundColor: azul, pointBorderColor: "#fff", pointBorderWidth: 1.5,
+          tension: .3, order: -1 },
+        { label: "Executadas com sucesso" + sufixo, data: suc, stack: "f", backgroundColor: cor(verde),
+          maxBarThickness: 16, borderColor: "#fff", borderWidth: { top: 2 }, borderRadius: 3 },
+        { label: "Recusas" + sufixo, data: rec, stack: "f", backgroundColor: cor(vermelho),
+          maxBarThickness: 16, borderRadius: { topLeft: 3, topRight: 3 } },
       ] },
       plugins: [faixaFoco],
       options: Object.assign({
         interaction: { mode: "index", intersect: false },
-        scales: { x: eixoX(dias), y: { beginAtZero: true } },
+        scales: { x: Object.assign(eixoX(dias), { stacked: true }), y: { beginAtZero: true, stacked: true } },
         plugins: {
           wrFaixa: { indice: dias.indexOf(D.dia) },
-          legend: { onClick: legendaIsola("fluxo") },
+          legend: { onClick: legendaIsola("fluxo"), align: "start", labels: { boxWidth: 7, boxHeight: 7, padding: 12 } },
           tooltip: { callbacks: {
             title: function (it) {
               var d = dias[it[0].dataIndex];
@@ -258,13 +342,10 @@
       }, cliqueDia(dias)),
     });
     aplicarIsolada("fluxo");
-    $("wr-fluxo-nota").innerHTML = "★ " + rotDia(D.inicio) + ", início da War Room; as barras anteriores ficam mais claras. " +
-      "Clique num dia para ver a tela daquele dia, ou na legenda para isolar uma série. " +
-      "Recusas: OS de cliente encerradas sem sucesso. " +
-      "Capacidade: " + D.cap_externa + " OS por dia para o técnico externo e " + D.cap_interna +
-      " para o interno, pelo cadastro da equipe. Instalada (linha): a equipe inteira, sem retirada; " +
-      "em campo (barra cinza): quem fechou OS de cliente no dia." + foraNota() + " " +
-      "Executadas e recusas por dia civil (Produtividade); entradas por dia operacional, das 21h às 21h (esteira).";
+    // Nota curta: a explicação de cada série mora no tooltip e na legenda.
+    $("wr-fluxo-nota").innerHTML = "★ " + rotDia(D.inicio) + " início da War Room (antes, mais claro) · barra = OS fechadas " +
+      "(sucesso + recusa) · linhas = capacidade e entradas · " + D.cap_interna + " OS/dia por interno, " + D.cap_externa +
+      " por externo." + foraNota();
 
     // Em barras, como o gráfico ao lado (pedido de 19/11/2026): mesma leitura
     // de dia a dia, mesmo esmaecido antes do início.
@@ -277,13 +358,13 @@
     CH.backlog = new Chart($("wr-ch-backlog"), {
       type: "bar",
       data: { labels: bdias.map(function (d) { return rotDia(d) + (d === D.inicio ? " ★" : ""); }), datasets: [
-        { label: "Na fila", data: bdias.map(function (d) { return D.esteira.backlog[d][0]; }), backgroundColor: corB(azul) },
-        { label: "Não agendadas", data: bdias.map(function (d) { return D.esteira.backlog[d][1]; }), backgroundColor: corB(escuro) },
+        { label: "Na fila", data: bdias.map(function (d) { return D.esteira.backlog[d][0]; }), backgroundColor: corB(azul), maxBarThickness: 12 },
+        { label: "Não agendadas", data: bdias.map(function (d) { return D.esteira.backlog[d][1]; }), backgroundColor: corB(escuro), maxBarThickness: 12 },
       ] },
       plugins: [faixaFoco],
       options: Object.assign({ interaction: { mode: "index", intersect: false },
         scales: { x: eixoX(bdias), y: { beginAtZero: true } },
-        plugins: { wrFaixa: { indice: bdias.indexOf(D.dia) }, legend: { onClick: legendaIsola("backlog") },
+        plugins: { wrFaixa: { indice: bdias.indexOf(D.dia) }, legend: { onClick: legendaIsola("backlog"), align: "start", labels: { boxWidth: 7, boxHeight: 7, padding: 12 } },
           tooltip: { callbacks: { title: function (it) {
             var d = bdias[it[0].dataIndex];
             return rotDia(d) + " (" + SEMANA[diaSemana(d)] + ")" + (d < D.inicio ? " — antes da War Room" : "");
@@ -781,27 +862,29 @@
       var n = porTipo[t.id] || 0, os = tot[t.id] ? tot[t.id][0] + tot[t.id][1] : 0;
       return { id: t.id, rotulo: t.rotulo, n: n, os: os };
     });
-    var max = Math.max.apply(null, linhas.map(function (l) { return l.n; }).concat([1]));
+    var totRec = linhas.reduce(function (x, l) { return x + l.n; }, 0) || 1;
     var el = $("wr-rank-tipo-os");
     el.innerHTML = linhas.map(function (l) {
       var sel = REC.tipo ? (REC.tipo === l.id ? " selecionado" : " apagado") : "";
-      var taxa = comTaxa && l.os ? Math.round(100 * l.n / l.os) + "%" : "";
+      var taxa = comTaxa && l.os ? Math.round(100 * l.n / l.os) : null;
       var tit = l.rotulo + ": " + num(l.n) + (l.n === 1 ? " recusa" : " recusas") +
         (comTaxa && l.os ? " em " + num(l.os) + " OS do tipo no dia" : "") +
         (REC.tipo === l.id ? " · clique para desfazer" : " · clique para filtrar");
-      return '<div class="rank-linha wr-tipo-linha clicavel' + sel + '" data-tipo="' + l.id + '" title="' + esc(tit) + '">' +
-        '<span class="rl"><span class="wr-tipo-os wr-t-' + l.id + '">' + esc(l.rotulo) + "</span></span>" +
-        '<span class="rt"><i class="rf" style="width:' + (100 * l.n / max).toFixed(1) + '%"></i></span>' +
-        '<span class="rv">' + num(l.n) + (taxa ? ' <small title="taxa de recusa do tipo no dia">' + taxa + "</small>" : "") + "</span></div>";
+      return '<button type="button" class="wr-tcard wr-t-' + l.id + sel + '" data-tipo="' + l.id + '" title="' + esc(tit) + '">' +
+        '<span class="wr-tcard-r">' + esc(l.rotulo) + "</span>" +
+        '<span class="wr-tcard-n">' + num(l.n) + '<small>' + (l.n === 1 ? "recusa" : "recusas") + "</small></span>" +
+        '<span class="wr-tcard-b"><i style="width:' + (100 * l.n / totRec).toFixed(1) + '%"></i></span>' +
+        '<span class="wr-tcard-p">' + (taxa !== null ? "<b>" + taxa + "%</b> de recusa · " + num(l.os) + " OS" :
+          Math.round(100 * l.n / totRec) + "% das recusas") + "</span></button>";
     }).join("");
     Dash.rank($("wr-rank-motivo"), porMotivo, {
       limite: 10, selecionado: REC.motivo,
       vazio: "Nenhuma recusa " + (REC.tipo ? "de " + rotTipo(REC.tipo) + " " : "") + "em " + rotDia(D.dia) + ".",
       aoClicar: function (rotulo) { REC.motivo = REC.motivo === rotulo ? null : rotulo; recorteRec(); },
     });
-    $("wr-rec-sub").textContent = rotDia(D.dia) + (filtroSup ? " · time de " + nomeCurto(supNome[filtroSup]) : "");
+    $("wr-rec-sub").textContent = rotDia(D.dia) + (filtroSup ? " · time de " + nomeCurto(supNome[filtroSup]) : " · operação inteira") + " · clique num tipo para filtrar";
     $("wr-rec-nota").textContent = comTaxa
-      ? "Ao lado do número, a taxa de recusa do tipo no dia (recusas ÷ OS de cliente daquele tipo). Clique num tipo para recortar motivos, lista e gráfico."
+      ? "Nos cartões, a taxa de recusa de cada tipo no dia (recusas ÷ OS de cliente daquele tipo). Tipo recorta motivos, lista e gráfico; motivo recorta tipos e lista."
       : "Com supervisor escolhido, a taxa de recusa some: o total de OS do dia não é separado por time.";
     var chips = [];
     if (REC.tipo) chips.push(["tipo", "Tipo: " + rotTipo(REC.tipo)]);

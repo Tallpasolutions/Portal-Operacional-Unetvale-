@@ -7,24 +7,37 @@
    desvios (vem do servidor, sem recarregar). O recorte dos desvios mora na
    barra própria deles, logo acima dos KPIs — a busca solta aqui em cima não
    dizia que só valia para a lista lá embaixo (pedido de 24/11/2026). #}
-<div class="toolbar" id="wr-filtros">
-  <label>Dia <input type="date" id="wr-dia" value="{{ pacote.dia }}" max="{{ pacote.hoje }}"></label>
-  <button class="btn-ghost" id="wr-hoje" type="button" {% if pacote.dia == pacote.hoje %}hidden{% endif %}>Hoje</button>
-  <button class="btn" id="wr-novo" type="button" style="margin-left:auto" {% if not pacote.tem_tabela %}disabled{% endif %}>+ Registrar desvio</button>
+{# Visual v2 (24/11/2026): a página lê de cima para baixo como a mesa
+   pensa — o RITMO do dia (quatro números com a tendência de 14 dias), a
+   CAPACIDADE (equipe × o que saiu), o gráfico, as RECUSAS e, por fim, a
+   rotina e os desvios. A barra do dia gruda no topo ao rolar: ela vale
+   para a página inteira. #}
+<div class="wr-barra" id="wr-filtros">
+  <div class="wr-barra-dia">
+    <label>Dia <input type="date" id="wr-dia" value="{{ pacote.dia }}" max="{{ pacote.hoje }}"></label>
+    <button class="btn-ghost" id="wr-hoje" type="button" {% if pacote.dia == pacote.hoje %}hidden{% endif %}>Hoje</button>
+    <span class="wr-barra-rot" id="wr-barra-rot"></span>
+  </div>
+  <button class="btn" id="wr-novo" type="button" {% if not pacote.tem_tabela %}disabled{% endif %}>+ Registrar desvio</button>
 </div>
-<p class="subnote" id="wr-fontes"></p>
 
-<div class="par-mes wr-numeros" id="wr-numeros" style="margin-bottom:16px"></div>
+<div class="wr-sec"><span>Ritmo do dia</span></div>
+<div class="wr-kpis wr-numeros" id="wr-numeros"></div>
 
-<div class="grid charts-2" style="margin-bottom:16px;">
-  <div class="card"><div class="card-h"><span>Executadas com sucesso × recusas × entraram na esteira</span>
+<div class="wr-sec"><span>Capacidade da equipe</span></div>
+<div class="card wr-cap-card" style="margin-bottom:16px"><div class="card-b" id="wr-cap"></div></div>
+
+<div class="wr-sec"><span>Tendência</span></div>
+
+<div class="grid wr-tend" style="margin-bottom:16px;">
+  <div class="card"><div class="card-h"><span>OS fechadas por dia × capacidade × entradas na esteira</span>
       <span class="subnote" style="margin:0">clique num dia ou na legenda</span></div>
     <div class="card-b"><div class="chart-box"><canvas id="wr-ch-fluxo"></canvas></div>
       <p class="subnote" style="margin:10px 0 0" id="wr-fluxo-nota"></p></div></div>
   <div class="card"><div class="card-h"><span>Backlog da esteira</span>
       <span class="subnote" style="margin:0">última foto de cada dia · clique num dia</span></div>
-    <div class="card-b"><div class="chart-box"><canvas id="wr-ch-backlog"></canvas></div>
-      <p class="subnote" style="margin:10px 0 0">Fila sem retirada e sem infra. Em amarelo, as OS ainda não agendadas — fora das retiradas, quase toda OS na fila está sem agendamento.</p></div></div>
+    <div class="card-b"><div class="chart-box wr-baixo"><canvas id="wr-ch-backlog"></canvas></div>
+      <p class="subnote" style="margin:10px 0 0">Fila sem retirada e sem infra; em amarelo, as ainda não agendadas.</p></div></div>
 </div>
 
 {# Os mesmos números em tabela: o verde dos gráficos tem contraste baixo
@@ -35,10 +48,35 @@
   <div class="card-b tabela-wrap" hidden><table class="tbl" id="wr-tab-dias"></table></div>
 </div>
 
+{# Recusas por tipo de OS e por motivo, com cross-filter (pedido de
+   24/11/2026): clicar num tipo recorta os motivos, a lista OS a OS e as
+   barras de executadas e recusas do gráfico; clicar num motivo recorta os
+   tipos e a lista. Vale o dia em foco e o supervisor da lista abaixo. #}
+<div class="wr-sec" id="wr-rec"><span>Recusas</span><em id="wr-rec-sub"></em></div>
+<div class="wr-tcards" id="wr-rank-tipo-os"></div>
+<div class="grid wr-rec-grade" style="margin-bottom:16px">
+  <div class="card"><div class="card-h"><span>Motivo das recusas</span>
+      <span class="subnote" style="margin:0">clique para filtrar</span></div>
+    <div class="card-b"><div class="rank" id="wr-rank-motivo"></div>
+      <p class="subnote" style="margin:12px 0 0" id="wr-rec-nota"></p></div></div>
+</div>
+<div class="chips" id="wr-rec-chips" style="display:none"></div>
+
+<div class="card" style="margin-bottom:16px" id="wr-ss-card">
+  <div class="card-h"><span>Encerradas sem sucesso no dia <span class="subnote" style="margin:0" id="wr-ss-contagem"></span></span>
+    <label class="wr-ss-filtro">Supervisor <select id="wr-ss-sup"><option value="">Todos</option></select></label></div>
+  <div class="card-b">
+    <p class="subnote" style="margin:0 0 10px" id="wr-ss-nota"></p>
+    <div class="tabela-wrap"><table class="tbl wr-ss" id="wr-ss"></table></div>
+  </div>
+</div>
+
+
 {# A rotina é de quem confere o time: só supervisor (linha em `supervisores`)
    vê e marca. Coordenação e gestão leem os desvios, não marcam rodada
    (decisão de 19/11/2026). A rota recusa também — esconder não é permissão. #}
 {% if usuario.is_supervisor %}
+<div class="wr-sec"><span>Rotina</span></div>
 <div class="card" style="margin-bottom:16px">
   <div class="card-h"><span>Rotina do dia</span>
     <span class="subnote" style="margin:0">marque a rodada quando terminar de conferir o seu time</span></div>
@@ -53,6 +91,7 @@
 {# Filtra KPIs, rankings, lista e CSV dos desvios. Tipo, causa e responsável
    entram pelo clique nos rankings e aparecem como chip; técnico também, e
    fica sincronizado com o select. #}
+<div class="wr-sec"><span>Desvios</span></div>
 <div class="toolbar wr-dfiltro" id="wr-d-filtros">
   <span class="wr-dfiltro-t">Desvios</span>
   <span class="toggle toggle-mini" id="wr-periodo" title="Quais desvios entram nos rankings e na lista">
@@ -103,30 +142,6 @@
 {# OS a OS, da Produtividade. O supervisor responde se a recusa passou por
    ele (regra nº 1 do plano) e registra o desvio dali mesmo. O filtro por
    supervisor é DESTE cartão: são as OS do time de cada um. #}
-{# Recusas por tipo de OS e por motivo, com cross-filter (pedido de
-   24/11/2026): clicar num tipo recorta os motivos, a lista OS a OS e as
-   barras de executadas e recusas do gráfico; clicar num motivo recorta os
-   tipos e a lista. Vale o dia em foco e o supervisor da lista abaixo. #}
-<div class="grid charts-2" style="margin-bottom:16px" id="wr-rec">
-  <div class="card"><div class="card-h"><span>Recusas por tipo de OS</span>
-      <span class="subnote" style="margin:0" id="wr-rec-sub"></span></div>
-    <div class="card-b"><div class="rank wr-tipos" id="wr-rank-tipo-os"></div>
-      <p class="subnote" style="margin:10px 0 0" id="wr-rec-nota"></p></div></div>
-  <div class="card"><div class="card-h"><span>Motivo das recusas</span>
-      <span class="subnote" style="margin:0">clique para filtrar</span></div>
-    <div class="card-b"><div class="rank" id="wr-rank-motivo"></div></div></div>
-</div>
-<div class="chips" id="wr-rec-chips" style="display:none"></div>
-
-<div class="card" style="margin-bottom:16px" id="wr-ss-card">
-  <div class="card-h"><span>Encerradas sem sucesso no dia <span class="subnote" style="margin:0" id="wr-ss-contagem"></span></span>
-    <label class="wr-ss-filtro">Supervisor <select id="wr-ss-sup"><option value="">Todos</option></select></label></div>
-  <div class="card-b">
-    <p class="subnote" style="margin:0 0 10px" id="wr-ss-nota"></p>
-    <div class="tabela-wrap"><table class="tbl wr-ss" id="wr-ss"></table></div>
-  </div>
-</div>
-
 {# Registrar: `.modal.modal-largo`, as DUAS classes (§5). #}
 <dialog class="modal modal-largo" id="wr-dlg">
   <form id="wr-form" method="dialog" novalidate>
