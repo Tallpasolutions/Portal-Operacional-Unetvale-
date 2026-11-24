@@ -222,6 +222,17 @@ def coletar_produtividade(full=False, so_hoje=False):
     subprocess.run(cmd, cwd=DIR, check=True, timeout=1800)
 
     conn = sqlite3.connect(DB_PATH)
+    # Hora da recusa pela ficha (coletor/ficha_recusa.py): o relatório chegou
+    # a carimbar recusas das 22h como 00:24 do dia seguinte. Só GET, só
+    # recusa nova, e nunca derruba o módulo — sem ela fica a do relatório.
+    try:
+        import ficha_recusa
+        import w8_client
+        ficha_recusa.conferir(conn, w8_client.login, log=log)
+        horas_ficha = ficha_recusa.mapa(conn)
+    except Exception as e:  # noqa: BLE001
+        log(f"  fichas das recusas: {e} — fica a hora do relatório")
+        horas_ficha = {}
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         "SELECT dia, empresa, tecnico, tecnico_id, finalidade, sucesso, rejeitada, tipo_atendimento, "
@@ -251,7 +262,7 @@ def coletar_produtividade(full=False, so_hoje=False):
         return False, (m or "Não informado")
 
     # Formato `v: 2` — uma LINHA por OS, na ordem
-    #   [d, e, t, ti, f, su, rj, ta, mo?, os?, hora?]
+    #   [d, e, t, ti, f, su, rj, ta, mo?, os?, hora?, ficha?]
     # com dia, empresa, técnico e id do técnico como índice nas listas `dias`,
     # `emp`, `tec` e `tid`. O registro com chaves (`v: 1`) chegou a 6,8 MB em
     # 26/10/2026, e o upsert passou a estourar o statement timeout de 8 s do
@@ -294,6 +305,13 @@ def coletar_produtividade(full=False, so_hoje=False):
                 n = (r["os"] or "").strip()
                 linha.append(int(n) if n.isdigit() else None)
                 linha.append((r["data_hora"] or "")[11:16] or None)
+                # Posição 11: data e hora da recusa NA FICHA, só quando
+                # difere do relatório ("2026-11-23T22:36"). A War Room põe a
+                # recusa nesse dia e nessa hora; a Produtividade segue com o
+                # relatório. O app sem a posição 11 a ignora.
+                em = horas_ficha.get((n, r["data_hora"], r["tecnico"] or ""))
+                if em:
+                    linha.append(em)
         linhas.append(linha)
 
     meta = {m["chave"]: m["valor"] for m in conn.execute("SELECT chave, valor FROM meta")}

@@ -681,7 +681,12 @@
         }
         var feito = o.os && temDesvio(o.os);
         return "<tr>" +
-          "<td>" + esc(o.hora || "—") + "</td>" +
+          // Hora da ficha quando ela discordou do relatório; o relatório vai
+          // embaixo, porque é ele que aparece na Produtividade e no WVSA.
+          "<td>" + esc(o.hora || "—") + (o.hora_rel
+            ? ' <span class="subnote wr-emp" title="O relatório da Produtividade do WVSA traz ' + esc(o.hora_rel) +
+              '. A hora ao lado é a da ficha da OS (fechada sem sucesso pelo técnico).">relatório ' + esc(o.hora_rel) + "</span>"
+            : "") + "</td>" +
           "<td>" + (o.os ? '<a href="' + D.wvsa_os + encodeURIComponent(o.os) + '" target="_blank" rel="noopener" title="Abrir a OS no WVSA">#' + esc(o.os) + "</a>" : "—") + "</td>" +
           "<td>" + esc(o.tecnico || "—") + (o.empresa ? ' <span class="subnote wr-emp">' + esc(o.empresa) + "</span>" : "") + "</td>" +
           "<td>" + (supsDe(o).length

@@ -1186,13 +1186,29 @@ a ordem era por técnico, e as horas pareciam embaralhadas. A ordenação
 mora no JS e sobrevive ao redesenho: validar uma linha não devolve a lista
 à ordem de partida.
 
-⚠️ **A hora é a do fechamento pelo técnico, conferida.** Ela sai da coluna
-"Data" do `operacional8`; contra a ficha da OS ("OS fechada sem sucesso
-pelo técnico…"), as 63 recusas de 23/11/2026 deram 52 iguais ao minuto, 10
-de 1 a 5 min DEPOIS e uma diferente de verdade, a #603151 — e ali a lista
-estava CERTA: o técnico recusou às 12:29 e um supervisor fechou de novo às
-15:39 ("OS Fechada sem sucesso", sem "pelo técnico"). Quem conferir pela
-ficha tem de olhar a linha "pelo técnico", não a última.
+⚠️ **A hora e o DIA da recusa saem da FICHA quando ela discorda do
+relatório** (24/11/2026). A coluna "Data" do `operacional8` nem sempre é a
+hora em que o técnico recusou: a #601017 (22:36 de 23/11) e a #602668
+(22:27) vieram no relatório como **24/11 00:24**, as duas no mesmo minuto e
+sem evento nenhum às 00:24 na ficha — e saíam da lista do dia em que
+aconteceram. O coletor lê a ficha de cada recusa NOVA dos últimos
+`FICHA_RECUSA_DIAS` (8) (`coletor/ficha_recusa.py`, só GET, cache no
+`dados.db`, tabela `ficha_recusa`) e manda a data da ficha na posição 11 da
+linha `v: 2`, só quando difere. A War Room põe a recusa nesse dia e hora — no
+gráfico também, para o número bater com a lista — e mostra "relatório …"
+embaixo quando muda de dia ou passa de 10 min. **A Produtividade segue com o
+relatório**, para fechar com o WVSA.
+
+Conferido contra o WVSA em 24/11/2026, 546 recusas de 8 dias: 466 iguais, 78
+de 1 a 17 min depois, 2 mudando de dia, nenhuma sem casar. Duas regras do
+casamento: a linha tem de COMEÇAR com "OS fechada sem sucesso pelo técnico"
+— "Rejeitando OS para o dono: OS fechada sem sucesso pelo técnico…" é quem
+rejeitou, dias depois (a #592878), e a "OS Fechada sem sucesso" sem "pelo
+técnico" é o supervisor fechando de novo (a #603151: técnico 12:29,
+supervisor 15:39); e a recusa da ficha tem de ser IGUAL ou ANTERIOR ao
+relatório, até 12 h, do mesmo técnico quando houver. ⚠️ A ficha também erra:
+a #599656 tem a recusa do Rudnei DUAS vezes às 10:18 de 17/11, e o relatório
+pôs a segunda às 14:47 — a War Room mostra as duas às 10:18, com a nota.
 
 O cartão tem filtro **Supervisor** próprio, e o supervisor abre já no dele.
 O alcance é a mesma regra do recorte da Produtividade — equipe inteira OU
@@ -2403,6 +2419,30 @@ a.run(port=5001, use_reloader=False)"
 ---
 
 ## 9. Estado atual e pendências
+
+- **War Room — hora da recusa pela ficha da OS** em 24/11/2026, sem
+  migration (§4, War Room). Pedido do Jhoni: a #601017 aparecia às 00:24
+  de 24/11 e foi recusada às 22:36 de 23/11. Provado: parser e cache por
+  script com fichas reais (23 casos — a do supervisor e a rejeição fora,
+  visita certa entre duas, dois técnicos, falha de rede relida, relatório
+  regravado relido, sem sessão sem levantar); contra o WVSA real numa cópia
+  do `dados.db`, 546 recusas em 92 s + 11 s (a segunda rodada pega o que
+  passou do prazo), depois nenhuma pendente; payload montado da cópia sem
+  extrator e sem Supabase, 80 linhas com a posição 11 (+1,6 KB). Rotas pelo
+  `test_client` num servidor de ensaio (lê produção, escrita recusada): as
+  duas em 23/11 e fora de 24/11, gráfico = lista nos dois dias, nota só nas
+  que mudam de dia ou passam de 10 min, `?dia=` ruim 400, e o app novo com
+  o payload VELHO igual ao de antes. No navegador, como Davi: as duas no fim
+  da lista de 23/11 com "relatório 24/11 00:24"; 375 px sem rolar de lado;
+  console limpo.
+
+  **Ordem de deploy**: qualquer uma — o app velho ignora a posição 11 e o
+  novo vive sem ela. Copiar `coletor/ficha_recusa.py` e `coletor/enviar.py`
+  para `~/unetvale-coletor` (o `enviar.py` é filho do watcher a cada
+  rodada: não precisa reiniciar). A primeira coleta lê ~550 fichas (~90 s,
+  o resto na seguinte); depois, só as recusas novas.
+
+  **Ainda não exercitado:** a etapa dentro de uma rodada real do watcher.
 
 - **War Room — lista de encerradas por hora, ordenável e com supervisor**
   em 23/11/2026, sem migration e sem mexer no coletor (§4). Provado: pacote
