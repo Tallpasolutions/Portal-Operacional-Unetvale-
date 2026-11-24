@@ -1234,7 +1234,10 @@ atividade interna E externa —, e quem diz qual é cada um é a Equipe técnica
 (`app/equipe.py`, ver adiante), não mais o palpite. São dois números no
 gráfico, no número do topo e na tabela dia a dia:
 
-* **instalada** (linha tracejada em degrau) — a equipe ativa inteira, SEM
+* **instalada** — na tela, **"Capacidade total"** (o rótulo "Instalada"
+  saiu em 24/11/2026: na mesma página há o tipo de OS "Instalação", e as
+  duas palavras se confundiam; no código e no pacote segue `instalada`)
+  (linha tracejada em degrau) — a equipe ativa inteira, SEM
   retirada, como ela era naquele dia (o histórico do cadastro). Em
   24/11/2026: 21 externos × 4 + 15 internos × 6 = **174**;
 * **em campo** (barra cinza) — quem fechou ao menos uma OS de cliente no

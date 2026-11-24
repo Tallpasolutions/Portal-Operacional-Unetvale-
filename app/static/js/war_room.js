@@ -145,7 +145,10 @@
     capacidade();
   }
 
-  // Capacidade em três réguas sobre a MESMA escala (a instalada): a equipe
+  // "Total" na tela, `instalada` no código e no pacote: o rótulo era
+  // "Instalada" e foi trocado em 24/11/2026 porque, na mesma página, há o
+  // tipo de OS "Instalação" e as duas palavras se confundiam.
+  // Capacidade em três réguas sobre a MESMA escala (a total): a equipe
   // inteira, quem foi a campo e o que saiu com sucesso. Duas razões em
   // destaque: quanto da equipe trabalhou e quanto do que ela podia fazer
   // virou OS resolvida. Sem cadastro (migration 0023) cai só no em campo.
@@ -163,12 +166,12 @@
     var pct = function (a, b) { return b ? Math.round(100 * a / b) + "%" : "—"; };
     var fora = cap && cap[3] ? " · " + cap[3] + " fora do cadastro" : "";
     el.innerHTML = '<div class="wr-cap-grade"><div class="wr-cap-barras">' +
-      barra("Instalada", inst ? inst[0] : null, "i-inst", inst ? inst[2] + " internos × " + D.cap_interna + " + " + inst[1] + " externos × " + D.cap_externa : "sem cadastro") +
+      barra("Total", inst ? inst[0] : null, "i-inst", inst ? inst[2] + " internos × " + D.cap_interna + " + " + inst[1] + " externos × " + D.cap_externa : "sem cadastro") +
       barra("Em campo", cap ? cap[0] : null, "i-campo", cap ? (cap[1] + cap[2]) + " técnicos fecharam OS" + fora : "ninguém fechou OS") +
       barra("Executadas", p[0], "i-exec", num(p[1]) + " recusas") +
       '</div><div class="wr-cap-kpis">' +
       '<div><span class="n">' + (inst && cap ? pct(cap[0], inst[0]) : "—") + '</span><span class="q">da equipe em campo</span>' +
-      '<span class="b">capacidade em campo ÷ instalada</span></div>' +
+      '<span class="b">capacidade em campo ÷ capacidade total</span></div>' +
       '<div><span class="n">' + (cap ? pct(p[0], cap[0]) : "—") + '</span><span class="q">aproveitamento</span>' +
       '<span class="b">executadas ÷ capacidade em campo</span></div>' +
       "</div></div>" + (dia === D.hoje ? '<p class="subnote" style="margin:12px 0 0">Dia em andamento: em campo e executadas ainda crescem. A capacidade escalada (pela agenda do WVSA) é o próximo passo.</p>' : "");
@@ -297,11 +300,11 @@
         // e só muda quando o cadastro muda. Some sem a migration 0023.
         // Visual v2: UMA barra por dia — as OS fechadas, empilhadas em sucesso
         // (verde) e recusa (vermelho), que é a leitura da mesa — e as
-        // réguas em linha por cima: capacidade instalada (tracejada, só muda
+        // réguas em linha por cima: capacidade total (tracejada, só muda
         // com o cadastro), em campo (cinza) e entradas na esteira (azul).
         // Cinco barras lado a lado por dia ficavam com 3 px cada. Cada linha
         // tem o seu `stack`, senão o eixo empilhado somaria as linhas.
-        { type: "line", label: "Capacidade instalada", data: inst, stack: "inst", stepped: "middle",
+        { type: "line", label: "Capacidade total", data: inst, stack: "inst", stepped: "middle",
           borderColor: css("--ink-d"), borderWidth: 1.5, borderDash: [5, 4], pointRadius: 0,
           pointHitRadius: 6, fill: false, hidden: !D.produtividade.tem_cadastro, order: -3 },
         { type: "line", label: "Capacidade em campo", data: cap, stack: "campo", borderColor: cinza, borderWidth: 2,
@@ -328,7 +331,7 @@
             },
             afterBody: function (it) {
               var d = dias[it[0].dataIndex], c = CAP[d], i = INST[d], l = [];
-              if (i) l.push("Instalada: " + i[1] + " externos × " + D.cap_externa + " + " + i[2] +
+              if (i) l.push("Total: " + i[1] + " externos × " + D.cap_externa + " + " + i[2] +
                 " internos × " + D.cap_interna);
               if (c) l.push("Em campo: " + c[1] + " externos × " + D.cap_externa + " + " + c[2] +
                 " internos × " + D.cap_interna + (c[3] ? " (" + c[3] + " fora do cadastro)" : ""));
@@ -382,7 +385,7 @@
         "</td><td class='num'>" + (D.esteira.entradas[d] === undefined ? "—" : num(D.esteira.entradas[d])) +
         "</td><td class='num'>" + (bk ? num(bk[0]) : "—") + "</td><td class='num'>" + (bk ? num(bk[1]) : "—") + "</td></tr>";
     }).join("");
-    $("wr-tab-dias").innerHTML = "<thead><tr><th>Dia</th><th>Capacidade instalada</th><th>Em campo</th><th>Executadas com sucesso</th><th>Recusas (sem sucesso)</th>" +
+    $("wr-tab-dias").innerHTML = "<thead><tr><th>Dia</th><th>Capacidade total</th><th>Em campo</th><th>Executadas com sucesso</th><th>Recusas (sem sucesso)</th>" +
       "<th>Entraram na esteira</th><th>Backlog</th><th>Não agendadas</th></tr></thead><tbody>" + linhas + "</tbody>";
   }
 

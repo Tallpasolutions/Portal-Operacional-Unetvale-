@@ -47,7 +47,7 @@
   }
 
   // ---------------------------------------------------------------------
-  // KPIs — os da planilha, mais a capacidade instalada
+  // KPIs — os da planilha, mais a capacidade total
   // ---------------------------------------------------------------------
   function kpis(lista) {
     var ativos = lista.filter(function (t) { return t.ativo; });
@@ -70,7 +70,7 @@
       return '<div class="kpi"><div class="v">' + num(k[0]) + '</div><div class="l">' + k[1] + "</div></div>";
     }).join("") +
       '<div class="kpi eq-kpi-cap"><div class="v">' + num(cap) + ' <small>OS/dia</small></div>' +
-      '<div class="l">capacidade instalada · ' + internos + " × " + D.cap_interna + " + " + externos + " × " + D.cap_externa +
+      '<div class="l">capacidade total · ' + internos + " × " + D.cap_interna + " + " + externos + " × " + D.cap_externa +
       '</div><div class="l eq-kpi-wr">War Room (sem retirada): <b>' + num(capWr) + "</b></div></div>";
   }
 
