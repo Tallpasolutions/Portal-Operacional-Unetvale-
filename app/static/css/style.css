@@ -1537,3 +1537,14 @@ body.wr-carregando .wr-kpis, body.wr-carregando #wr-cap{ opacity:.55; transition
 .wr-tend .chart-box{ height:330px; }
 .wr-tend .chart-box.wr-baixo{ height:230px; }
 @media (max-width:1180px){ .wr-barra-regua{ display:none; } }
+/* Capacidade por supervisor: a escolha no topo do bloco recorta as réguas;
+   a tabela embaixo compara os times e também escolhe (clique na linha). */
+.wr-cap-topo{ display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+.wr-cap-tit{ font-size:14px; font-weight:800; color:var(--ink-d); }
+.wr-cap-tab{ margin-top:18px; border-top:1px solid var(--borda); padding-top:12px; }
+.wr-cap-tab table.tbl th{ cursor:default; }
+.wr-cap-tab tr.clicavel{ cursor:pointer; }
+.wr-cap-tab tr.clicavel:hover td{ background:#fafcff; }
+.wr-cap-tab tr.wr-cap-on td{ background:var(--brand-l); }
+.wr-ap{ display:inline-block; width:70px; height:7px; border-radius:4px; background:var(--fundo); overflow:hidden; vertical-align:middle; }
+.wr-ap i{ display:block; height:100%; background:var(--success); border-radius:4px; }

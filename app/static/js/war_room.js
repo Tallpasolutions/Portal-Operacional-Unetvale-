@@ -152,30 +152,76 @@
   // inteira, quem foi a campo e o que saiu com sucesso. Duas razões em
   // destaque: quanto da equipe trabalhou e quanto do que ela podia fazer
   // virou OS resolvida. Sem cadastro (migration 0023) cai só no em campo.
+  // Supervisor escolhido no bloco de capacidade (null = operação inteira).
+  // O supervisor abre no próprio time, como a lista de encerradas.
+  var CAPSUP;
   function capacidade() {
     var dia = D.dia, el = $("wr-cap");
+    var PS = D.produtividade.por_supervisor || [];
+    if (CAPSUP === undefined) {
+      CAPSUP = SUP && PS.some(function (l) { return l.id === EU; }) ? EU : null;
+    }
+    var linha = CAPSUP === null ? null : PS.filter(function (l) { return l.id === CAPSUP; })[0];
+    if (CAPSUP !== null && !linha) { CAPSUP = null; }
     var inst = (D.produtividade.instalada || {})[dia];
     var cap = (D.produtividade.capacidade || {})[dia];
     var p = D.produtividade.por_dia[dia] || [0, 0];
-    var topo = Math.max(inst ? inst[0] : 0, cap ? cap[0] : 0, p[0] + p[1], 1);
+    // Os números do recorte: operação inteira, ou a linha do supervisor.
+    var tot = linha ? linha.total : inst, campoCap = linha ? linha.campo[0] : (cap ? cap[0] : null);
+    var campoN = linha ? linha.campo[1] : (cap ? cap[1] + cap[2] : 0);
+    var exe = linha ? linha.exec : p[0], rec = linha ? linha.rec : p[1];
+    var topo = Math.max(tot ? tot[0] : 0, campoCap || 0, exe + rec, 1);
     function barra(rot, v, cls, det) {
       return '<div class="wr-cap-l"><span class="wr-cap-r">' + rot + '</span><span class="wr-cap-t"><i class="' + cls +
         '" style="width:' + (v === null ? 0 : (100 * v / topo)).toFixed(1) + '%"></i></span><span class="wr-cap-v">' +
         (v === null ? "—" : num(v)) + "</span>" + (det ? '<span class="wr-cap-d">' + det + "</span>" : "") + "</div>";
     }
     var pct = function (a, b) { return b ? Math.round(100 * a / b) + "%" : "—"; };
-    var fora = cap && cap[3] ? " · " + cap[3] + " fora do cadastro" : "";
-    el.innerHTML = '<div class="wr-cap-grade"><div class="wr-cap-barras">' +
-      barra("Total", inst ? inst[0] : null, "i-inst", inst ? inst[2] + " internos × " + D.cap_interna + " + " + inst[1] + " externos × " + D.cap_externa : "sem cadastro") +
-      barra("Em campo", cap ? cap[0] : null, "i-campo", cap ? (cap[1] + cap[2]) + " técnicos fecharam OS" + fora : "ninguém fechou OS") +
-      barra("Executadas", p[0], "i-exec", num(p[1]) + " recusas") +
+    var fora = !linha && cap && cap[3] ? " · " + cap[3] + " fora do cadastro" : "";
+    var escolha = PS.length ? '<div class="toggle toggle-mini wr-cap-sup" id="wr-cap-sup">' +
+      '<button type="button" data-s="" class="' + (CAPSUP === null ? "active" : "") + '">Operação</button>' +
+      PS.filter(function (l) { return l.id; }).map(function (l) {
+        return '<button type="button" data-s="' + l.id + '" class="' + (CAPSUP === l.id ? "active" : "") + '">' +
+          esc(nomeCurto(l.nome)) + "</button>";
+      }).join("") + "</div>" : "";
+    var tabela = PS.length ? '<div class="tabela-wrap wr-cap-tab"><table class="tbl"><thead><tr><th>Supervisor</th>' +
+      '<th class="num">Técnicos</th><th class="num">Capacidade total</th><th class="num">Em campo</th>' +
+      '<th class="num">Executadas</th><th class="num">Recusas</th><th class="num">Taxa de recusa</th>' +
+      '<th>Aproveitamento</th></tr></thead><tbody>' + PS.map(function (l) {
+        var ap = l.campo[0] ? Math.round(100 * l.exec / l.campo[0]) : null;
+        var tx = l.exec + l.rec ? Math.round(100 * l.rec / (l.exec + l.rec)) : null;
+        return '<tr class="' + (l.id ? "clicavel" : "") + (l.id && l.id === CAPSUP ? " wr-cap-on" : "") + '"' +
+          (l.id ? ' data-s="' + l.id + '" title="Clique para ver a capacidade deste time"' : "") + "><td><b>" + esc(l.nome) +
+          '</b></td><td class="num">' + num(l.tecnicos) + '</td><td class="num">' + num(l.total[0]) +
+          '</td><td class="num">' + num(l.campo[0]) + ' <span class="subnote" style="margin:0">' + l.campo[1] + " téc.</span>" +
+          '</td><td class="num">' + num(l.exec) + '</td><td class="num">' + num(l.rec) +
+          '</td><td class="num">' + (tx === null ? "—" : tx + "%") + "</td><td>" +
+          (ap === null ? "—" : '<span class="wr-ap"><i style="width:' + Math.min(ap, 100) + '%"></i></span> <b>' + ap + "%</b>") +
+          "</td></tr>";
+      }).join("") + "</tbody></table></div>" : "";
+    el.innerHTML = '<div class="wr-cap-topo"><span class="wr-cap-tit">' + (linha ? "Time de " + esc(linha.nome) : "Operação inteira") +
+      "</span>" + escolha + "</div>" +
+      '<div class="wr-cap-grade"><div class="wr-cap-barras">' +
+      barra("Total", tot ? tot[0] : null, "i-inst", tot ? tot[2] + " internos × " + D.cap_interna + " + " + tot[1] + " externos × " + D.cap_externa : "sem cadastro") +
+      barra("Em campo", campoCap, "i-campo", campoN ? campoN + " técnicos fecharam OS" + fora : "ninguém fechou OS") +
+      barra("Executadas", exe, "i-exec", num(rec) + " recusas") +
       '</div><div class="wr-cap-kpis">' +
-      '<div><span class="n">' + (inst && cap ? pct(cap[0], inst[0]) : "—") + '</span><span class="q">da equipe em campo</span>' +
+      '<div><span class="n">' + (tot && campoCap !== null ? pct(campoCap, tot[0]) : "—") + '</span><span class="q">da equipe em campo</span>' +
       '<span class="b">capacidade em campo ÷ capacidade total</span></div>' +
-      '<div><span class="n">' + (cap ? pct(p[0], cap[0]) : "—") + '</span><span class="q">aproveitamento</span>' +
+      '<div><span class="n">' + (campoCap ? pct(exe, campoCap) : "—") + '</span><span class="q">aproveitamento</span>' +
       '<span class="b">executadas ÷ capacidade em campo</span></div>' +
-      "</div></div>" + (dia === D.hoje ? '<p class="subnote" style="margin:12px 0 0">Dia em andamento: em campo e executadas ainda crescem. A capacidade escalada (pela agenda do WVSA) é o próximo passo.</p>' : "");
+      "</div></div>" + tabela +
+      (dia === D.hoje ? '<p class="subnote" style="margin:12px 0 0">Dia em andamento: em campo e executadas ainda crescem. ' +
+        "Supervisor pelo cadastro da equipe; quem fecha OS fora dele, pelo vínculo de Configurações.</p>" : "");
   }
+  $("wr-cap").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-s]");
+    if (!b) return;
+    var id = b.getAttribute("data-s") || null;
+    CAPSUP = CAPSUP === id && b.tagName === "TR" ? null : id;
+    capacidade();
+  });
+
 
   // ---------------------------------------------------------------------
   // Gráficos e a tabela dia a dia
@@ -298,24 +344,19 @@
       data: { labels: rotulos, datasets: [
         // Linha em degrau, por cima das barras: é o teto da equipe inteira,
         // e só muda quando o cadastro muda. Some sem a migration 0023.
-        // Visual v2: UMA barra por dia — as OS fechadas, empilhadas em sucesso
-        // (verde) e recusa (vermelho), que é a leitura da mesa — e as
-        // réguas em linha por cima: capacidade total (tracejada, só muda
-        // com o cadastro), em campo (cinza) e entradas na esteira (azul).
-        // Cinco barras lado a lado por dia ficavam com 3 px cada. Cada linha
-        // tem o seu `stack`, senão o eixo empilhado somaria as linhas.
-        { type: "line", label: "Capacidade total", data: inst, stack: "inst", stepped: "middle",
-          borderColor: css("--ink-d"), borderWidth: 1.5, borderDash: [5, 4], pointRadius: 0,
-          pointHitRadius: 6, fill: false, hidden: !D.produtividade.tem_cadastro, order: -3 },
-        { type: "line", label: "Capacidade em campo", data: cap, stack: "campo", borderColor: cinza, borderWidth: 2,
-          pointRadius: 0, pointHitRadius: 6, tension: .3, spanGaps: false, order: -2 },
-        { type: "line", label: "Entraram na esteira", data: ent, stack: "ent", borderColor: azul, borderWidth: 2,
-          pointRadius: 2.5, pointBackgroundColor: azul, pointBorderColor: "#fff", pointBorderWidth: 1.5,
-          tension: .3, order: -1 },
+        // Tudo em BARRAS (pedido de 24/11/2026 — a versão com capacidade e
+        // entradas em linha não foi aceita, como o backlog em 19/11). Quatro
+        // grupos por dia, cada um com o seu `stack`: capacidade total, em
+        // campo, OS fechadas (sucesso + recusa empilhados) e entradas. O
+        // gráfico ocupa a largura toda para as barras terem corpo.
+        { label: "Capacidade total", data: inst, stack: "inst", backgroundColor: cor(cinza),
+          maxBarThickness: 11, hidden: !D.produtividade.tem_cadastro },
+        { label: "Capacidade em campo", data: cap, stack: "campo", backgroundColor: cor(css("--muted")), maxBarThickness: 11 },
         { label: "Executadas com sucesso" + sufixo, data: suc, stack: "f", backgroundColor: cor(verde),
-          maxBarThickness: 16, borderColor: "#fff", borderWidth: { top: 2 }, borderRadius: 3 },
+          maxBarThickness: 11, borderColor: "#fff", borderWidth: { top: 2 }, borderRadius: 3 },
         { label: "Recusas" + sufixo, data: rec, stack: "f", backgroundColor: cor(vermelho),
-          maxBarThickness: 16, borderRadius: { topLeft: 3, topRight: 3 } },
+          maxBarThickness: 11, borderRadius: { topLeft: 3, topRight: 3 } },
+        { label: "Entraram na esteira", data: ent, stack: "ent", backgroundColor: cor(azul), maxBarThickness: 11 },
       ] },
       plugins: [faixaFoco],
       options: Object.assign({
@@ -346,8 +387,8 @@
     });
     aplicarIsolada("fluxo");
     // Nota curta: a explicação de cada série mora no tooltip e na legenda.
-    $("wr-fluxo-nota").innerHTML = "★ " + rotDia(D.inicio) + " início da War Room (antes, mais claro) · barra = OS fechadas " +
-      "(sucesso + recusa) · linhas = capacidade e entradas · " + D.cap_interna + " OS/dia por interno, " + D.cap_externa +
+    $("wr-fluxo-nota").innerHTML = "★ " + rotDia(D.inicio) + " início da War Room (antes, mais claro) · por dia: capacidade total, " +
+      "em campo, OS fechadas (sucesso + recusa) e entradas · " + D.cap_interna + " OS/dia por interno, " + D.cap_externa +
       " por externo." + foraNota();
 
     // Em barras, como o gráfico ao lado (pedido de 19/11/2026): mesma leitura
