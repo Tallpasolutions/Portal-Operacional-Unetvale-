@@ -1548,3 +1548,7 @@ body.wr-carregando .wr-kpis, body.wr-carregando #wr-cap{ opacity:.55; transition
 .wr-cap-tab tr.wr-cap-on td{ background:var(--brand-l); }
 .wr-ap{ display:inline-block; width:70px; height:7px; border-radius:4px; background:var(--fundo); overflow:hidden; vertical-align:middle; }
 .wr-ap i{ display:block; height:100%; background:var(--success); border-radius:4px; }
+/* "desfazer" da resposta Sim/Não: discreto, ao lado de quem respondeu —
+   desfazer deixou de ser o segundo clique no botão já marcado. */
+.wr-desfazer{ background:none; border:none; padding:0; font:inherit; font-size:11.5px; color:var(--brand-d); cursor:pointer; text-decoration:underline; }
+.wr-desfazer:hover{ color:var(--danger); }

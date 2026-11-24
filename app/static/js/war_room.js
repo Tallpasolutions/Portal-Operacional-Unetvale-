@@ -488,8 +488,24 @@
   // redesenhar no meio de um registro trocaria a lista sob o formulário.
   // Na virada do dia, quem estava em "hoje" passa para o dia novo.
   var POLL_MS = 120000;
+  // Mexer na lista e a lista mudar sob o mouse é como a resposta cai na
+  // linha do lado (24/11/2026: o Sim/Não da #596787 foi parar na #603974,
+  // 2 s depois do desvio). Com interação nos últimos 30 s, a atualização
+  // espera; uma nova tentativa sai 15 s depois.
+  var ultimaInteracao = 0, ESPERA_INTERACAO = 30000, retentativa = null;
+  ["click", "keydown"].forEach(function (ev) {
+    document.addEventListener(ev, function (e) {
+      if (e.target.closest && e.target.closest(".main")) ultimaInteracao = Date.now();
+    }, true);
+  });
+  function tentarDeNovo() {
+    clearTimeout(retentativa);
+    retentativa = setTimeout(conferirNovidade, 15000);
+  }
+
   async function conferirNovidade() {
     if (document.hidden || carregando || document.querySelector("dialog[open]")) return;
+    if (gravando || Date.now() - ultimaInteracao < ESPERA_INTERACAO) { tentarDeNovo(); return; }
     var meu = false;
     try {
       var r = await fetch("/war-room/versao", { credentials: "same-origin", headers: { "Accept": "application/json" } });
@@ -498,8 +514,12 @@
       var virou = emHoje && new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10) !== D.hoje;
       if ((j.versao === D.versao && !virou) || carregando) return;   // trocou de dia enquanto perguntava
       carregando = meu = true;
+      var inicio = Date.now();
       var novo = await buscarPacote(emHoje ? (virou ? "" : D.dia) : D.dia);
-      if (document.querySelector("dialog[open]")) return;      // abriu um modal enquanto buscava
+      if (document.querySelector("dialog[open]")) { tentarDeNovo(); return; }   // abriu um modal enquanto buscava
+      // Gravou (ou está gravando) depois que o pacote começou a ser lido:
+      // ele pode não ter a gravação. Descarta e lê de novo daqui a pouco.
+      if (gravando || ultimaEscrita >= inicio || ultimaInteracao >= inicio) { tentarDeNovo(); return; }
       aplicar(novo);
     } catch (e) {
       /* rede caiu ou sessão expirou: tenta de novo no próximo ciclo, calado */
@@ -525,7 +545,21 @@
   // ---------------------------------------------------------------------
   // Fetch com JSON (o mesmo contrato do painel de Ações)
   // ---------------------------------------------------------------------
+  // Toda gravação passa por aqui e deixa marca: a atualização automática
+  // NÃO pode aplicar um pacote lido antes (ou durante) uma gravação. Foi o
+  // defeito de 24/11/2026: o pacote leva 1–3 s; se o supervisor respondia
+  // Sim/Não ou registrava um desvio nesse meio-tempo, a gravação chegava ao
+  // banco, mas o pacote velho redesenhava a tela por cima — a resposta
+  // "sumia", e ele refazia (o desvio da #603311 saiu duas vezes, 50 s
+  // depois). Voltar para a aba depois de abrir a OS no WVSA dispara a
+  // atualização, então era o fluxo normal da mesa.
+  var gravando = 0, ultimaEscrita = 0;
   async function postJSON(url, corpo) {
+    gravando++;
+    try { return await postJSONcru(url, corpo); }
+    finally { gravando--; ultimaEscrita = Date.now(); }
+  }
+  async function postJSONcru(url, corpo) {
     var r;
     try {
       r = await fetch(url, {
@@ -879,8 +913,12 @@
     });
   }
 
-  function temDesvio(os) {
-    return D.desvios.some(function (d) { return !d.anulado && d.dia === D.dia && (d.os || []).indexOf(os) >= 0; });
+  // A recusa que a ficha mudou de dia pode ter o desvio registrado no dia do
+  // relatório (`dia_rel`), antes de a ficha ser lida.
+  function temDesvio(os, diaRel) {
+    return D.desvios.some(function (d) {
+      return !d.anulado && (d.dia === D.dia || (diaRel && d.dia === diaRel)) && (d.os || []).indexOf(os) >= 0;
+    });
   }
 
   function passaRec(o, exceto) {
@@ -961,7 +999,13 @@
     recorteRec(tinhaTipo && !REC.tipo);
   });
 
-  function semSucesso() {
+  // Ordem da última lista desenhada (índices em `sem_sucesso`). Responder
+  // uma linha redesenha mantendo essa ordem: com a lista ordenada por
+  // "Validada", a linha respondida saltava para baixo e a de baixo subia
+  // para o lugar dela, sob o mouse. A ordem só muda no clique do cabeçalho,
+  // no filtro ou com dados novos.
+  var ORDEM_SS = null;
+  function semSucesso(manterOrdem) {
     var filtro = ssSup.value;
     supNome = {};
     (D.supervisores || []).forEach(function (x) { supNome[x.id] = x.nome; });
@@ -1000,7 +1044,18 @@
           : c[0] === "validada" ? "Clique para ver primeiro as sem resposta" : "Ordenar";
         return '<th data-ord="' + c[0] + '" class="' + cls + '" title="' + tit + '">' + c[1] + "</th>";
       }).join("") + "<th></th></tr></thead><tbody>" +
-      ordenarSS(lista).map(function (o) {
+      (function () {
+        var ord;
+        if (manterOrdem && ORDEM_SS) {
+          var pos = {}; ORDEM_SS.forEach(function (i, k) { pos[i] = k; });
+          ord = lista.slice().sort(function (a, b) {
+            var x = pos[D.produtividade.sem_sucesso.indexOf(a)], y = pos[D.produtividade.sem_sucesso.indexOf(b)];
+            return (x === undefined ? 1e9 : x) - (y === undefined ? 1e9 : y);
+          });
+        } else ord = ordenarSS(lista);
+        ORDEM_SS = ord.map(function (o) { return D.produtividade.sem_sucesso.indexOf(o); });
+        return ord;
+      })().map(function (o) {
         var idx = D.produtividade.sem_sucesso.indexOf(o);
         var v = o.os ? V[o.os] : null;
         var celV;
@@ -1010,13 +1065,14 @@
           celV = '<span class="toggle toggle-mini wr-valida" data-os="' + esc(o.os) + '">' +
             '<button type="button" data-v="sim" class="' + (est === "sim" ? "active" : "") + '">Sim</button>' +
             '<button type="button" data-v="nao" class="' + (est === "nao" ? "active wr-nao" : "") + '">Não</button></span>' +
-            (v ? '<span class="subnote wr-quem">' + esc(v.nome.split(" ")[0]) + " " + esc(v.hora || "") + "</span>" : "");
+            (v ? '<span class="subnote wr-quem">' + esc(v.nome.split(" ")[0]) + " " + esc(v.hora || "") +
+              ' · <button type="button" class="wr-desfazer" data-os="' + esc(o.os) + '" title="Apagar a resposta (volta a sem resposta)">desfazer</button></span>' : "");
         } else {
           celV = v ? '<span class="badge ' + (v.validado ? "badge-verde" : "badge-vermelho") + '">' + (v.validado ? "sim" : "não") +
             "</span> <span class='subnote wr-quem'>" + esc(v.nome.split(" ")[0]) + " " + esc(v.hora || "") + "</span>"
             : '<span class="badge badge-cinza">sem resposta</span>';
         }
-        var feito = o.os && temDesvio(o.os);
+        var feito = o.os && temDesvio(o.os, o.dia_rel);
         return "<tr>" +
           // Hora da ficha quando ela discordou do relatório; o relatório vai
           // embaixo, porque é ele que aparece na Produtividade e no WVSA.
@@ -1048,23 +1104,36 @@
     }
     var reg = e.target.closest("button.wr-reg");
     if (reg) { abrirRegistro(false, D.produtividade.sem_sucesso[+reg.getAttribute("data-idx")]); return; }
+    var desf = e.target.closest("button.wr-desfazer");
+    if (desf) { await validar(desf.getAttribute("data-os"), null, null); return; }
     var b = e.target.closest(".wr-valida button[data-v]");
     if (!b || b.disabled) return;
     var os = b.parentNode.getAttribute("data-os");
     var atual = (D.validacoes || {})[os];
     var quer = b.getAttribute("data-v") === "sim";
-    // Clicar de novo na resposta já marcada desfaz (volta a "sem resposta").
-    var valor = atual && atual.validado === quer ? null : quer;
-    b.parentNode.querySelectorAll("button").forEach(function (x) { x.disabled = true; });
+    // Clicar de novo na resposta já marcada NÃO desfaz mais (24/11/2026): um
+    // segundo clique — porque a tela demorou, ou um duplo clique — apagava a
+    // resposta em silêncio, e a OS voltava a "sem resposta". Desfazer agora
+    // é o "desfazer" explícito ao lado de quem respondeu.
+    if (atual && atual.validado === quer) return;
+    await validar(os, quer, b.parentNode);
+  });
+
+  async function validar(os, valor, caixa) {
+    if (caixa) caixa.querySelectorAll("button").forEach(function (x) { x.disabled = true; });
     try {
-      var r = await postJSON("/war-room/validacoes", { dia: D.dia, os: os, validado: valor });
+      // Desfazer apaga onde a resposta mora: a da recusa que mudou de dia
+      // pode estar gravada no dia do relatório.
+      var atualV = (D.validacoes || {})[os];
+      var dia = valor === null && atualV && atualV.dia ? atualV.dia : D.dia;
+      var r = await postJSON("/war-room/validacoes", { dia: dia, os: os, validado: valor });
       if (r.validacao) D.validacoes[os] = r.validacao; else delete D.validacoes[os];
-      semSucesso();
+      semSucesso(true);
     } catch (err) {
-      b.parentNode.querySelectorAll("button").forEach(function (x) { x.disabled = false; });
+      if (caixa) caixa.querySelectorAll("button").forEach(function (x) { x.disabled = false; });
       alertar(err.message);
     }
-  });
+  }
 
   // ---------------------------------------------------------------------
   // Registrar
@@ -1178,7 +1247,7 @@
       var r = await postJSON("/war-room/desvios", corpo);
       D.desvios.unshift(r.desvio);
       desvios();
-      semSucesso();
+      semSucesso(true);
       alertar("Desvio registrado.");
       if (outro) abrirRegistro(true); else dlg.close();
     } catch (err) {
@@ -1199,7 +1268,7 @@
       D.desvios[i] = novoD;
     }
     desvios();
-    semSucesso();
+    semSucesso(true);
   }
 
   var tab = $("wr-tabela");

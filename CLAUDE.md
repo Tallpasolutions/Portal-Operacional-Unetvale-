@@ -1298,6 +1298,29 @@ o MESMO pacote que vai no `__WR__` (conferido igual por `test_client`), e
 redesenha tudo, mantendo filtros dos desvios, supervisor da lista e série
 isolada. A URL acompanha por `replaceState`.
 
+⚠️ **A atualização automática apagava da TELA o que acabou de ser gravado**
+(corrigido em 24/11/2026). O pacote leva 1–3 s; se o supervisor respondia
+Sim/Não ou registrava um desvio nesse meio-tempo, a gravação chegava ao
+banco, mas o pacote — lido ANTES dela — redesenhava a tela por cima: a
+resposta voltava ao estado antigo e ele refazia. Voltar para a aba depois de
+abrir a OS no WVSA dispara a atualização, então era o fluxo normal da mesa
+(o Adolar relatou a #601251 e a #603909; o desvio da #603311 saiu duas
+vezes, 50 s depois). Reproduzido num ensaio que segura o pacote 4 s DEPOIS
+de ler o banco: com o código antigo o Sim voltou a "Não"; com o novo, ficou.
+Hoje toda gravação passa por `postJSON`, que marca `gravando`/
+`ultimaEscrita`; pacote lido antes de uma gravação, ou com clique na tela
+depois de começar, é DESCARTADO e relido 15 s depois; com interação nos
+últimos 30 s a atualização espera (a lista mudando sob o mouse é como a
+resposta da #596787 caiu na #603974). Junto: o segundo clique no Sim/Não já
+marcado não desfaz mais em silêncio (há um "desfazer" ao lado de quem
+respondeu), responder não reordena a lista (`ORDEM_SS`), e a recusa que a
+ficha mudou de dia acha a resposta gravada no dia do relatório
+(`dia_rel`, `_validacoes_do_dia`).
+
+⚠️ A resposta Sim/Não é UPSERT — só a última fica. Por isso não dá para
+saber, pelo banco, quantas vezes alguém refez: a investigação se apoiou no
+par desvio × resposta com segundos de diferença.
+
 **A tela se atualiza sozinha.** De 2 em 2 min, com a aba visível, pergunta
 `/war-room/versao` (os carimbos da Produtividade e da Esteira, duas linhas
 pequenas) e só pede o pacote quando mudaram. Com um `<dialog>` aberto ela

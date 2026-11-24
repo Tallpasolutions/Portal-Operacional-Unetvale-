@@ -381,10 +381,12 @@ def _produtividade(dia_foco):
         # A nota só aparece quando a diferença CONTA (outro dia ou 10+ min):
         # em 8 dias, 78 das 80 divergências eram de 1 a 5 min, e anotar todas
         # enchia a lista de "relatório" sem dizer nada.
-        hora_rel = None
+        hora_rel = dia_rel = None
         if not su and isinstance(ficha, str) and _FICHA.fullmatch(ficha):
             if d and hora and (ficha[:10] != d or _minutos(hora) - _minutos(ficha[11:16]) >= MIN_NOTA_REL):
                 hora_rel = f"{d[8:10]}/{d[5:7]} {hora}" if ficha[:10] != d else hora
+            if ficha[:10] != d:
+                dia_rel = d
             d, hora = ficha[:10], ficha[11:16]
         if not d or d < base_de or not eh_cliente(f):
             continue
@@ -408,7 +410,7 @@ def _produtividade(dia_foco):
             motivo = mo or "Não informado"
             sem_sucesso.append({"tecnico": t, "empresa": e, "finalidade": f, "tipo": tipo, "motivo": motivo,
                                 "os": str(os_n) if os_n else None, "hora": hora,
-                                "hora_rel": hora_rel, "causa": causa_do_motivo(motivo)})
+                                "hora_rel": hora_rel, "dia_rel": dia_rel, "causa": causa_do_motivo(motivo)})
     # Régua: média por dia da semana nas 8 semanas, só dias com OS (feriado
     # sem coleta não puxa a média para baixo como se fosse um dia fraco).
     soma, n = defaultdict(lambda: [0, 0]), Counter()
@@ -665,9 +667,16 @@ def pacote(dia_foco):
             raise
 
     def validacoes():
+        # A véspera e o dia seguinte também: a recusa que a ficha mudou de dia
+        # (relatório 24/11 00:24 → ficha 23/11 22:27) pode ter sido respondida
+        # no dia do relatório, antes de a ficha ser lida. Sem isto a resposta
+        # ficava presa no dia antigo e a recusa reaparecia "sem resposta" —
+        # a #602668, respondida por Guilherme às 09:22 de 24/11.
         try:
             return supa.select("warroom_validacoes", {
-                "select": "os,validado,usuario_id,em", "dia": f"eq.{dia_foco.isoformat()}"})
+                "select": "dia,os,validado,usuario_id,em",
+                "dia": f"gte.{(dia_foco - timedelta(days=1)).isoformat()}",
+                "and": f"(dia.lte.{(dia_foco + timedelta(days=1)).isoformat()})"})
         except Exception as e:
             if supa.tabela_faltando(e):
                 return None
@@ -720,7 +729,7 @@ def pacote(dia_foco):
                     for r in rod],
         "supervisores": [{"id": a["id"], "nome": nomes.get(a["id"], "—")} for a in alcance],
         # None = a migration 0022 ainda não subiu; {} = ninguém validou nada.
-        "validacoes": None if vals is None else {v["os"]: _validacao(v, nomes) for v in vals},
+        "validacoes": None if vals is None else _validacoes_do_dia(vals, prod["sem_sucesso"], dia_foco, nomes),
         "wvsa_os": WVSA_OS,
         "cap_externa": CAP_EXTERNA,
         "cap_interna": CAP_INTERNA,
@@ -764,9 +773,24 @@ def _no_alcance(a, empresa, tecnico):
             or sup.chave_tecnico(f"{empresa} - {tecnico}") in a["tecnicos"])
 
 
+def _validacoes_do_dia(vals, sem_sucesso, dia_foco, nomes):
+    """{os: resposta} do dia em foco. Vale a resposta gravada NESTE dia; para
+    a recusa que mudou de dia pela ficha, vale também a gravada no dia do
+    relatório (`dia_rel`), se não houver uma deste dia."""
+    foco = dia_foco.isoformat()
+    por = {(v["dia"], v["os"]): v for v in vals}
+    saida = {v["os"]: _validacao(v, nomes) for v in vals if v["dia"] == foco}
+    for o in sem_sucesso:
+        if o.get("os") and o["os"] not in saida and o.get("dia_rel"):
+            v = por.get((o["dia_rel"], o["os"]))
+            if v:
+                saida[o["os"]] = _validacao(v, nomes)
+    return saida
+
+
 def _validacao(v, nomes):
     return {"validado": v["validado"], "nome": nomes.get(v["usuario_id"], "—"),
-            "usuario_id": v["usuario_id"], "hora": _hora_local(v["em"])}
+            "usuario_id": v["usuario_id"], "hora": _hora_local(v["em"]), "dia": v.get("dia")}
 
 
 def marcar_validacao(corpo, uid):
