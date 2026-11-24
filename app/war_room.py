@@ -274,11 +274,14 @@ def _ler_produtividade():
 
         def iterar():
             for l in row.get("linhas") or []:
-                # [d, e, t, ti, f, su, rj, ta, mo?, os?, hora?] — número e
-                # hora só na não concluída recente (coletor/enviar.py).
+                # [d, e, t, ti, f, su, rj, ta, mo?, os?, hora?, ficha?] —
+                # número e hora só na não concluída recente; `ficha` só
+                # quando a ficha da OS discorda do relatório
+                # (coletor/ficha_recusa.py).
                 yield (dias[l[0]], emp[l[1]], tec[l[2]], fin[l[4]], l[5],
                        mot[l[8]] if len(l) > 8 else None, l[7],
-                       l[9] if len(l) > 9 else None, l[10] if len(l) > 10 else None)
+                       l[9] if len(l) > 9 else None, l[10] if len(l) > 10 else None,
+                       l[11] if len(l) > 11 else None)
         return row.get("atualizado_em"), iterar()
     antigo = dados.get_modulo("produtividade") or {}
     regs = (antigo.get("payload") or {}).get("registros") or []
@@ -286,8 +289,19 @@ def _ler_produtividade():
     return antigo.get("atualizado_em"), (
         (r.get("d"), r.get("e"), r.get("t"), r.get("f"), r.get("su"),
          mot[r["mo"]] if isinstance(r.get("mo"), int) and r["mo"] < len(mot) else r.get("mo"),
-         r.get("ta"), None, None)
+         r.get("ta"), None, None, None)
         for r in regs)
+
+
+_FICHA = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}")
+MIN_NOTA_REL = 10
+
+
+def _minutos(hhmm):
+    try:
+        return int(hhmm[:2]) * 60 + int(hhmm[3:5])
+    except (TypeError, ValueError):
+        return 0
 
 
 def _produtividade(dia_foco):
@@ -304,7 +318,20 @@ def _produtividade(dia_foco):
     corte_perfil = (hoje() - timedelta(days=DIAS_PERFIL)).isoformat()
     em_campo = defaultdict(set)                      # dia -> técnicos com OS de cliente
     perfil = defaultdict(lambda: [0, 0, 0, 0])       # técnico -> [ext 30d, int 30d, ext, int]
-    for d, e, t, f, su, mo, ta, os_n, hora in linhas:
+    for d, e, t, f, su, mo, ta, os_n, hora, ficha in linhas:
+        # A recusa vai para o dia e a hora da FICHA quando ela discorda do
+        # relatório: a #601017 foi recusada às 22:36 de 23/11 e o relatório
+        # a carimbou 00:24 de 24/11 — ela sumia da lista do dia em que
+        # aconteceu. O relatório fica ao lado (`hora_rel`) para quem for
+        # conferir contra a Produtividade, que segue com ele.
+        # A nota só aparece quando a diferença CONTA (outro dia ou 10+ min):
+        # em 8 dias, 78 das 80 divergências eram de 1 a 5 min, e anotar todas
+        # enchia a lista de "relatório" sem dizer nada.
+        hora_rel = None
+        if not su and isinstance(ficha, str) and _FICHA.fullmatch(ficha):
+            if d and hora and (ficha[:10] != d or _minutos(hora) - _minutos(ficha[11:16]) >= MIN_NOTA_REL):
+                hora_rel = f"{d[8:10]}/{d[5:7]} {hora}" if ficha[:10] != d else hora
+            d, hora = ficha[:10], ficha[11:16]
         if not d or d < base_de or not eh_cliente(f):
             continue
         por_dia[d][0 if su else 1] += 1
@@ -322,7 +349,7 @@ def _produtividade(dia_foco):
             motivo = mo or "Não informado"
             sem_sucesso.append({"tecnico": t, "empresa": e, "finalidade": f, "motivo": motivo,
                                 "os": str(os_n) if os_n else None, "hora": hora,
-                                "causa": causa_do_motivo(motivo)})
+                                "hora_rel": hora_rel, "causa": causa_do_motivo(motivo)})
     # Régua: média por dia da semana nas 8 semanas, só dias com OS (feriado
     # sem coleta não puxa a média para baixo como se fosse um dia fraco).
     soma, n = defaultdict(lambda: [0, 0]), Counter()
@@ -344,9 +371,9 @@ def _produtividade(dia_foco):
         "tecnicos": sorted(([nome, emp] for nome, (_, emp) in tecnicos.items()),
                            key=lambda x: _norma(x[0])),
         # Em ordem ao longo do dia, que é como a mesa lê a lista. A hora é a
-        # do relatório da Produtividade, conferida contra a ficha em
-        # 23/11/2026: 52 de 63 iguais à "fechada sem sucesso pelo técnico",
-        # as outras 1–5 min depois. Sem hora (coleta antiga) vai para o fim.
+        # da ficha quando o coletor a conferiu e ela discordou; senão, a do
+        # relatório (52 de 63 iguais à ficha em 23/11/2026, as outras 1–5
+        # min depois). Sem hora (coleta antiga) vai para o fim.
         "sem_sucesso": sorted(sem_sucesso, key=lambda x: (x["hora"] is None, x["hora"] or "",
                                                           _norma(x["tecnico"]))),
         "capacidade": capacidade,
