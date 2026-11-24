@@ -1237,10 +1237,10 @@ gráfico, no número do topo e na tabela dia a dia:
 * **instalada** — na tela, **"Capacidade total"** (o rótulo "Instalada"
   saiu em 24/11/2026: na mesma página há o tipo de OS "Instalação", e as
   duas palavras se confundiam; no código e no pacote segue `instalada`)
-  (linha tracejada em degrau) — a equipe ativa inteira, SEM
+  (barra cinza-clara) — a equipe ativa inteira, SEM
   retirada, como ela era naquele dia (o histórico do cadastro). Em
   24/11/2026: 21 externos × 4 + 15 internos × 6 = **174**;
-* **em campo** (barra cinza) — quem fechou ao menos uma OS de cliente no
+* **em campo** (barra cinza-escura) — quem fechou ao menos uma OS de cliente no
   dia, com o 4/6 do cadastro. É a confirmação de quem trabalhou, não a
   previsão.
 
@@ -1329,10 +1329,11 @@ cartões com a variação em pílula e um traço SVG de 14 dias até o dia em
 foco ("ao vivo" no dia em andamento). A capacidade virou três réguas na
 mesma escala (instalada, em campo, executadas) com "da equipe em campo" e
 "aproveitamento" em destaque. O gráfico de tendência passou para largura
-cheia e UMA barra por dia — OS fechadas empilhadas em sucesso e recusa —
-com capacidade instalada, em campo e entradas em linha (cada linha com o
-seu `stack`, senão o eixo empilhado as somaria); cinco barras lado a lado
-ficavam com 3 px. As recusas vieram para antes da rotina e dos desvios.
+cheia, com **tudo em barras** (pedido de 24/11/2026 — uma versão com
+capacidade e entradas em LINHA foi recusada; o backlog já tinha virado
+barra em 19/11): quatro grupos por dia, cada um com o seu `stack` —
+capacidade total, em campo, OS fechadas (sucesso + recusa empilhados) e
+entradas. As recusas vieram para antes da rotina e dos desvios.
 
 **Recusas por tipo de OS, com cross-filter** (24/11/2026, sem
 migration). Quatro tipos pela finalidade (`war_room.tipo_os`, uma

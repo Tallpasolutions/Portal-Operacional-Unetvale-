@@ -344,24 +344,19 @@
       data: { labels: rotulos, datasets: [
         // Linha em degrau, por cima das barras: é o teto da equipe inteira,
         // e só muda quando o cadastro muda. Some sem a migration 0023.
-        // Visual v2: UMA barra por dia — as OS fechadas, empilhadas em sucesso
-        // (verde) e recusa (vermelho), que é a leitura da mesa — e as
-        // réguas em linha por cima: capacidade total (tracejada, só muda
-        // com o cadastro), em campo (cinza) e entradas na esteira (azul).
-        // Cinco barras lado a lado por dia ficavam com 3 px cada. Cada linha
-        // tem o seu `stack`, senão o eixo empilhado somaria as linhas.
-        { type: "line", label: "Capacidade total", data: inst, stack: "inst", stepped: "middle",
-          borderColor: css("--ink-d"), borderWidth: 1.5, borderDash: [5, 4], pointRadius: 0,
-          pointHitRadius: 6, fill: false, hidden: !D.produtividade.tem_cadastro, order: -3 },
-        { type: "line", label: "Capacidade em campo", data: cap, stack: "campo", borderColor: cinza, borderWidth: 2,
-          pointRadius: 0, pointHitRadius: 6, tension: .3, spanGaps: false, order: -2 },
-        { type: "line", label: "Entraram na esteira", data: ent, stack: "ent", borderColor: azul, borderWidth: 2,
-          pointRadius: 2.5, pointBackgroundColor: azul, pointBorderColor: "#fff", pointBorderWidth: 1.5,
-          tension: .3, order: -1 },
+        // Tudo em BARRAS (pedido de 24/11/2026 — a versão com capacidade e
+        // entradas em linha não foi aceita, como o backlog em 19/11). Quatro
+        // grupos por dia, cada um com o seu `stack`: capacidade total, em
+        // campo, OS fechadas (sucesso + recusa empilhados) e entradas. O
+        // gráfico ocupa a largura toda para as barras terem corpo.
+        { label: "Capacidade total", data: inst, stack: "inst", backgroundColor: cor(cinza),
+          maxBarThickness: 11, hidden: !D.produtividade.tem_cadastro },
+        { label: "Capacidade em campo", data: cap, stack: "campo", backgroundColor: cor(css("--muted")), maxBarThickness: 11 },
         { label: "Executadas com sucesso" + sufixo, data: suc, stack: "f", backgroundColor: cor(verde),
-          maxBarThickness: 16, borderColor: "#fff", borderWidth: { top: 2 }, borderRadius: 3 },
+          maxBarThickness: 11, borderColor: "#fff", borderWidth: { top: 2 }, borderRadius: 3 },
         { label: "Recusas" + sufixo, data: rec, stack: "f", backgroundColor: cor(vermelho),
-          maxBarThickness: 16, borderRadius: { topLeft: 3, topRight: 3 } },
+          maxBarThickness: 11, borderRadius: { topLeft: 3, topRight: 3 } },
+        { label: "Entraram na esteira", data: ent, stack: "ent", backgroundColor: cor(azul), maxBarThickness: 11 },
       ] },
       plugins: [faixaFoco],
       options: Object.assign({
@@ -392,8 +387,8 @@
     });
     aplicarIsolada("fluxo");
     // Nota curta: a explicação de cada série mora no tooltip e na legenda.
-    $("wr-fluxo-nota").innerHTML = "★ " + rotDia(D.inicio) + " início da War Room (antes, mais claro) · barra = OS fechadas " +
-      "(sucesso + recusa) · linhas = capacidade e entradas · " + D.cap_interna + " OS/dia por interno, " + D.cap_externa +
+    $("wr-fluxo-nota").innerHTML = "★ " + rotDia(D.inicio) + " início da War Room (antes, mais claro) · por dia: capacidade total, " +
+      "em campo, OS fechadas (sucesso + recusa) e entradas · " + D.cap_interna + " OS/dia por interno, " + D.cap_externa +
       " por externo." + foraNota();
 
     // Em barras, como o gráfico ao lado (pedido de 19/11/2026): mesma leitura
