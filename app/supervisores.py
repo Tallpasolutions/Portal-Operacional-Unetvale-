@@ -212,13 +212,38 @@ def desmarcar(usuario_id):
     supa.delete("supervisores", {"usuario_id": usuario_id})
 
 
-def vincular(usuario_id, equipe):
+def registrar_evento(por, supervisor_id, tipo, valor, acao, rotulo=None, origem="configuracoes"):
+    """Uma linha no histórico do vínculo (migration 0024, append-only).
+
+    Desde 25/11/2026 o supervisor mexe no próprio time, e `supervisor_equipes`
+    / `supervisor_tecnicos` são caixas de marcar — desvincular apaga a linha.
+    O histórico é de onde se sabe quem tirou o quê, e se refaz o que saiu por
+    engano. Falhar AQUI não desfaz a mudança, que já foi gravada: o erro vai
+    para o log, e sem a tabela (migration ainda não subiu) segue calado.
+    """
+    try:
+        supa.insert("supervisor_vinculo_eventos", {
+            "por": por, "supervisor_id": supervisor_id, "tipo": tipo, "valor": valor,
+            "rotulo": rotulo, "acao": acao, "origem": origem})
+    except Exception as e:
+        if not supa.tabela_faltando(e):
+            _falhou("registrar_evento", e)
+
+
+def vincular(usuario_id, equipe, por=None):
+    ja = supa.select("supervisor_equipes", {"select": "equipe", "usuario_id": f"eq.{usuario_id}",
+                                            "equipe": f"eq.{equipe}"})
     supa.upsert("supervisor_equipes", {"usuario_id": usuario_id, "equipe": equipe},
                 on_conflict="usuario_id,equipe")
+    if not ja:
+        registrar_evento(por, usuario_id, "equipe", equipe, "vinculou")
 
 
-def desvincular(usuario_id, equipe):
-    supa.delete("supervisor_equipes", {"usuario_id": usuario_id, "equipe": equipe})
+def desvincular(usuario_id, equipe, por=None):
+    apagadas = supa.delete("supervisor_equipes", {"usuario_id": usuario_id, "equipe": equipe},
+                           retornar=True)
+    if apagadas:
+        registrar_evento(por, usuario_id, "equipe", equipe, "desvinculou")
 
 
 def tecnicos_de(usuario_id):
@@ -235,7 +260,7 @@ def tecnicos_de(usuario_id):
     return [l["tecnico"] for l in linhas]
 
 
-def vincular_tecnico(usuario_id, rotulo):
+def vincular_tecnico(usuario_id, rotulo, por=None):
     """Liga um técnico avulso. Guarda a chave normalizada e o rótulo original.
 
     A chave é o que o filtro compara; o rótulo é só para a tela conseguir
@@ -244,13 +269,66 @@ def vincular_tecnico(usuario_id, rotulo):
     chave = chave_tecnico(rotulo)
     if not chave:
         raise ValueError("rótulo de técnico vazio")
+    ja = supa.select("supervisor_tecnicos", {"select": "tecnico", "usuario_id": f"eq.{usuario_id}",
+                                             "tecnico": f"eq.{chave}"})
     supa.upsert("supervisor_tecnicos",
                 {"usuario_id": usuario_id, "tecnico": chave, "rotulo": rotulo},
                 on_conflict="usuario_id,tecnico")
+    if not ja:
+        registrar_evento(por, usuario_id, "tecnico", chave, "vinculou", rotulo)
 
 
-def desvincular_tecnico(usuario_id, chave):
-    supa.delete("supervisor_tecnicos", {"usuario_id": usuario_id, "tecnico": chave})
+def desvincular_tecnico(usuario_id, chave, por=None):
+    apagadas = supa.delete("supervisor_tecnicos", {"usuario_id": usuario_id, "tecnico": chave},
+                           retornar=True)
+    if apagadas:
+        rotulo = apagadas[0].get("rotulo")
+        registrar_evento(por, usuario_id, "tecnico", chave, "desvinculou", rotulo)
+
+
+# ---------------------------------------------------------------------
+# Quem responde por quem — UMA definição (decisão de 25/11/2026)
+# ---------------------------------------------------------------------
+# O responsável por um técnico é o VÍNCULO: a empresa inteira
+# (`supervisor_equipes`) ou o técnico nome a nome (`supervisor_tecnicos`).
+# Era assim na Produtividade, no IQI e nas encerradas da War Room; a
+# capacidade da War Room usava o `supervisor_id` do cadastro da Equipe, e as
+# duas fontes podiam divergir sem a tela dizer. Com o supervisor mexendo no
+# próprio time em Configurações, o vínculo passou a ser a fonte de tudo.
+def alcance_serie():
+    """[{id, equipes: set, tecnicos: set}] de cada supervisor, em SÉRIE.
+
+    `listar()` faz as leituras em `supa.paralelo`; esta roda DENTRO do
+    paralelo dos pacotes (War Room, Equipe), e paralelo aninhado no mesmo
+    pool pode prender as threads (§4, Esteira).
+    """
+    ids = [l["usuario_id"] for l in supa.select("supervisores", {"select": "usuario_id"})]
+    if not ids:
+        return []
+    filtro = f"in.({','.join(ids)})"
+    equipes = supa.select("supervisor_equipes", {"select": "usuario_id,equipe", "usuario_id": filtro})
+    try:
+        tecs = supa.select("supervisor_tecnicos", {"select": "usuario_id,tecnico", "usuario_id": filtro})
+    except Exception:
+        tecs = []          # migration 0004 ausente: vale só o vínculo por equipe
+    out = {i: {"id": i, "equipes": set(), "tecnicos": set()} for i in ids}
+    for e in equipes:
+        out[e["usuario_id"]]["equipes"].add(APELIDOS_EMPRESA.get(e["equipe"].upper(), e["equipe"].upper()))
+    for t in tecs:
+        out[t["usuario_id"]]["tecnicos"].add(t["tecnico"])
+    return list(out.values())
+
+
+def no_alcance(a, empresa, tecnico):
+    """Equipe inteira OU o técnico vinculado nome a nome (apelidos resolvidos)."""
+    e = (empresa or "").strip().upper()
+    return (APELIDOS_EMPRESA.get(e, e) in a["equipes"]
+            or chave_tecnico(f"{empresa} - {tecnico}") in a["tecnicos"])
+
+
+def responsaveis(alcance, empresa, tecnico):
+    """Ids dos supervisores que respondem pelo técnico (pode ser mais de um)."""
+    return [a["id"] for a in alcance if tecnico and no_alcance(a, empresa, tecnico)]
 
 
 def tecnicos_disponiveis():

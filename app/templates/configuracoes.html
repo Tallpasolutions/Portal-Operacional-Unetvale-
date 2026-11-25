@@ -24,14 +24,47 @@
 </div>
 
 {% if usuario.is_supervisor %}
-{# O supervisor cuida das PRÓPRIAS equipes: são elas que recortam o que ele
-   vê na Produtividade e no IQI e que a War Room usa no filtro "Supervisor". #}
-<h3 class="secao">Minhas equipes</h3>
+{# "Meu time" (pedido de 25/11/2026: "igual o da gestão"). O supervisor
+   mexe no PRÓPRIO vínculo: equipes inteiras e técnicos nome a nome. É ele
+   que recorta a Produtividade e o IQI e que diz de quem é cada técnico na
+   capacidade da War Room. Cada mudança vai para o histórico do vínculo. #}
+{% set mt = meu_time %}
+<h3 class="secao" id="meu-time">Meu time</h3>
 <p class="subnote">
-  As equipes pelas quais você responde. Elas definem o que você vê na Produtividade e no IQI, e quais
-  OS aparecem para você na War Room. Técnicos avulsos são vinculados pelo administrador.
+  Os técnicos pelos quais você responde: as equipes inteiras <b>mais</b> os técnicos vinculados nome a nome.
+  É este time que você vê na Produtividade, no IQI e na capacidade da War Room. Técnico novo de uma equipe sua
+  entra sozinho; técnico novo da UNETVALE pede um responsável (aviso abaixo e na War Room).
 </p>
-<div class="card" style="max-width:760px;margin-bottom:18px;">
+
+{% if mt.sem_responsavel %}
+<div class="card mt-aviso" id="sem-responsavel" style="max-width:980px;margin-bottom:18px;">
+  <div class="card-h"><span>Técnicos sem responsável ({{ mt.sem_responsavel|length }})</span>
+    <span class="subnote" style="margin:0">o primeiro supervisor que responder decide para todos</span></div>
+  <div class="card-b tabela-wrap">
+    <table class="tbl">
+      <thead><tr><th>Técnico</th><th>Empresa</th><th class="num">OS de cliente</th><th>Último dia</th><th>Responsável</th></tr></thead>
+      <tbody>
+      {% for p in mt.sem_responsavel %}
+      <tr><td><b>{{ p.nome }}</b>{% if p.cadastro %} <span class="subnote">no cadastro</span>{% endif %}</td>
+        <td>{{ p.empresa }}</td><td class="num">{{ p.os }}</td><td>{{ p.ultimo[8:10] }}/{{ p.ultimo[5:7] }}</td>
+        <td><form method="post" action="{{ url_for('dash.configuracoes_responsavel') }}" class="mt-resp">
+          <input type="hidden" name="rotulo" value="{{ p.rotulo }}">
+          <select name="supervisor_id" required aria-label="Responsável por {{ p.nome }}">
+            <option value="">Escolha…</option>
+            {% for s in supervisores_lista %}<option value="{{ s.id }}">{{ s.nome }}</option>{% endfor %}
+            <option value="nenhum">Não é técnico de campo</option>
+          </select>
+          <button class="btn" type="submit">Definir</button></form></td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<div class="card" style="max-width:980px;margin-bottom:18px;">
+  <div class="card-h"><span>Equipes inteiras</span>
+    <span class="subnote" style="margin:0">todo técnico da empresa, inclusive quem entrar depois</span></div>
   <div class="card-b">
     {% if minhas_equipes %}
     <div class="wr-equipes">
@@ -44,9 +77,6 @@
     </div>
     {% else %}
     <p class="subnote" style="margin:0 0 12px">Nenhuma equipe vinculada a você ainda.</p>
-    {% endif %}
-    {% if meus_avulsos %}
-    <p class="subnote" style="margin:12px 0 0">Técnicos avulsos: {{ meus_avulsos|join(', ') }}.</p>
     {% endif %}
     {% if equipes_para_mim %}
     <form method="post" action="{{ url_for('dash.minhas_equipes') }}" class="toolbar" style="margin:14px 0 0">
@@ -62,10 +92,77 @@
     {% endif %}
   </div>
 </div>
+
+<div class="card" style="max-width:980px;margin-bottom:18px;">
+  <div class="card-h"><span>Meus técnicos ({{ mt.n_meus }})</span>
+    <span class="subnote" style="margin:0">quem fechou OS nos últimos {{ mt.dias }} dias, o cadastro da Equipe e os vinculados a você</span></div>
+  <div class="card-b tabela-wrap">
+    {% if mt.meus %}
+    <table class="tbl mt-tabela">
+      <thead><tr><th>Técnico</th><th>Como está no seu time</th><th>OS ({{ mt.dias }} dias)</th>
+        <th>Também com</th><th></th></tr></thead>
+      <tbody>
+      {% for empresa, tecs in mt.meus.items() %}
+        <tr class="eq-grupo"><td colspan="5"><b>{{ empresa }}</b><span class="subnote"> {{ tecs|length }} técnico{{ 's' if tecs|length > 1 }}</span></td></tr>
+        {% for c in tecs %}
+        <tr>
+          <td><b>{{ c.nome }}</b>{% if c.cadastro %} <span class="badge badge-cinza" title="Está no cadastro da Equipe técnica">cadastro</span>{% endif %}</td>
+          <td>{% if c.nome_a_nome %}nome a nome{% if c.pela_equipe %} e pela equipe{% endif %}
+              {% elif c.pela_equipe %}<span title="Vem pela equipe inteira: para tirar, remova a equipe acima">pela equipe {{ c.empresa }}</span>{% else %}—{% endif %}</td>
+          <td>{% if c.ultimo %}<b>{{ c.os }}</b> <span class="subnote" style="margin:0">· último {{ c.ultimo[8:10] }}/{{ c.ultimo[5:7] }}</span>{% else %}<span class="subnote" style="margin:0">sem OS</span>{% endif %}</td>
+          <td>{% if c.outros %}<span class="badge badge-ambar">{{ c.outros|join(', ') }}</span>{% else %}<span class="subnote">—</span>{% endif %}</td>
+          <td>{% if c.nome_a_nome %}
+            <form method="post" action="{{ url_for('dash.meus_tecnicos') }}" style="display:inline">
+              <input type="hidden" name="acao" value="desvincular"><input type="hidden" name="tecnico" value="{{ c.chave }}">
+              <button class="btn-ghost" type="submit" title="Tirar {{ c.nome }} do seu time">Remover</button></form>
+            {% endif %}</td>
+        </tr>
+        {% endfor %}
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="vazio">Nenhum técnico no seu time ainda. Adicione uma equipe ou técnicos abaixo.</div>
+    {% endif %}
+  </div>
+</div>
+
+{% if mt.outros %}
+<div class="card" style="max-width:980px;margin-bottom:18px;">
+  <div class="card-h">Adicionar técnicos ao meu time</div>
+  <div class="card-b">
+    <p class="subnote" style="margin-top:0;">
+      Marque um ou vários. Quem já responde por outro supervisor continua com ele também — o técnico passa a
+      aparecer nos dois times. Para trocar de vez, peça a quem tem o técnico que o remova do time dele.
+    </p>
+    <form method="post" action="{{ url_for('dash.meus_tecnicos') }}">
+      <input type="hidden" name="acao" value="vincular">
+      <div class="field"><label>Buscar técnico</label>
+        <input type="search" data-busca-lista="lista-meu" placeholder="nome ou empresa…" autocomplete="off" style="width:100%;"></div>
+      <div class="field">
+        <div class="lista-marcar" id="lista-meu" style="max-height:330px;">
+          {% for empresa, tecs in mt.outros.items() %}
+          <div class="grupo-marcar">
+            <div class="grupo-titulo">{{ empresa }} <span>({{ tecs|length }})</span></div>
+            {% for c in tecs %}
+            <label class="linha-marcar" data-busca="{{ (empresa ~ ' ' ~ c.nome)|lower }}">
+              <input type="checkbox" name="tecnico" value="{{ c.rotulo }}"> {{ c.nome }}
+              <span class="subnote" style="margin:0 0 0 auto">{% if c.outros %}com {{ c.outros|join(', ') }}{% else %}sem responsável{% endif %}{% if c.os %} · {{ c.os }} OS{% endif %}</span>
+            </label>
+            {% endfor %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      <button class="btn" type="submit">Adicionar ao meu time</button>
+    </form>
+  </div>
+</div>
+{% endif %}
 {% endif %}
 
 {% if usuario.is_admin %}
-<h3 class="secao">Supervisores</h3>
+<h3 class="secao" id="supervisores">Supervisores</h3>
 <p class="subnote">
   O supervisor enxerga apenas os números das equipes vinculadas a ele, e não tem acesso ao módulo
   Troca de Poste. Cadastrar aqui não cria conta de acesso — promove um usuário que já existe, para
@@ -148,7 +245,7 @@
         </div>
         <div class="field">
           <label>Buscar técnico</label>
-          <input type="search" id="busca-tecnico" placeholder="nome ou empresa…" style="width:100%;"
+          <input type="search" id="busca-tecnico" data-busca-lista="lista-tecnicos" placeholder="nome ou empresa…" style="width:100%;"
                  autocomplete="off">
         </div>
       </div>
@@ -439,20 +536,22 @@
   // Esconde também o cabeçalho da empresa que ficou sem nenhum nome visível,
   // senão a lista vira uma sequência de títulos vazios.
   (function () {
-    const busca = document.getElementById("busca-tecnico");
-    if (!busca) return;
-    busca.addEventListener("input", () => {
-      const q = busca.value.trim().toLowerCase();
-      document.querySelectorAll("#lista-tecnicos .grupo-marcar").forEach((g) => {
-        let visiveis = 0;
-        g.querySelectorAll(".linha-marcar").forEach((l) => {
-          // Marcado sempre aparece: some-lo esconderia do usuário o que ele
-          // está prestes a enviar.
-          const bate = !q || l.dataset.busca.includes(q) || l.querySelector("input").checked;
-          l.style.display = bate ? "" : "none";
-          if (bate) visiveis += 1;
+    document.querySelectorAll("[data-busca-lista]").forEach((busca) => {
+      const lista = document.getElementById(busca.dataset.buscaLista);
+      if (!lista) return;
+      busca.addEventListener("input", () => {
+        const q = busca.value.trim().toLowerCase();
+        lista.querySelectorAll(".grupo-marcar").forEach((g) => {
+          let visiveis = 0;
+          g.querySelectorAll(".linha-marcar").forEach((l) => {
+            // Marcado sempre aparece: some-lo esconderia do usuário o que ele
+            // está prestes a enviar.
+            const bate = !q || l.dataset.busca.includes(q) || l.querySelector("input").checked;
+            l.style.display = bate ? "" : "none";
+            if (bate) visiveis += 1;
+          });
+          g.style.display = visiveis ? "" : "none";
         });
-        g.style.display = visiveis ? "" : "none";
       });
     });
   })();

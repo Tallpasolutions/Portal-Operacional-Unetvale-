@@ -31,6 +31,17 @@
 </div>
 <div class="chips" id="chips"></div>
 
+{# Visão do supervisor (pedido de 25/11/2026): capacidade, executadas,
+   recusas e os cinco técnicos que mais pesam em cada régua. Segue o
+   período e o supervisor do filtro acima; sem mês escolhido, o mês atual.
+   As regras são as da War Room (só OS de cliente, cadastro da Equipe,
+   correção de presença). #}
+<div class="card ps-card" style="margin-bottom:16px;" id="ps-card">
+  <div class="card-h"><span>Visão do supervisor <span class="subnote" style="margin:0" id="ps-periodo"></span></span>
+    <span class="subnote" style="margin:0">só OS de cliente · sem retirada e sem infra</span></div>
+  <div class="card-b" id="ps-corpo"><p class="subnote" style="margin:0">Carregando…</p></div>
+</div>
+
 <div class="kpis" id="kpis"></div>
 
 <!-- Gráfico principal (barras + linha) sozinho no contêiner para boa leitura -->
@@ -99,4 +110,5 @@
      em cada tela. -->
 <script src="{{ url_for('static', filename='js/iqi_supervisor.js') }}"></script>
 <script src="{{ url_for('static', filename='js/produtividade.js') }}"></script>
+<script src="{{ url_for('static', filename='js/produtividade_supervisor.js') }}"></script>
 {% endblock %}

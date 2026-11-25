@@ -36,8 +36,9 @@
 
   function passa(t) {
     if (!F.inativos && !t.ativo) return false;
-    if (F.sup === "-" && t.supervisor_id) return false;
-    if (F.sup && F.sup !== "-" && t.supervisor_id !== F.sup) return false;
+    var ids = t.supervisores || (t.supervisor_id ? [t.supervisor_id] : []);
+    if (F.sup === "-" && ids.length) return false;
+    if (F.sup && F.sup !== "-" && ids.indexOf(F.sup) < 0) return false;
     if (F.emp && t.empresa !== F.emp) return false;
     if (F.busca) {
       var alvo = norma([t.nome, t.nome_wvsa, t.empresa, t.cidades].join(" "));
@@ -85,15 +86,22 @@
       '" title="' + titulo + ": clique para " + (v ? "desmarcar" : "marcar") + '">' + ic + "</button></td>";
   }
 
+  // O supervisor sai do VÍNCULO de Configurações (decisão de 25/11/2026),
+  // não mais do cadastro: é o mesmo que recorta a Produtividade, o IQI e a
+  // War Room. Por isso aqui ele só é mostrado — quem muda é a tela de
+  // Configurações (o admin para todos, o supervisor para o próprio time).
   function supCel(t) {
-    var s = SUP[t.supervisor_id];
-    if (ADMIN) {
-      return '<td><select class="eq-sup-sel" data-id="' + t.id + '"><option value="">—</option>' +
-        D.supervisores.map(function (x) {
-          return '<option value="' + x.id + '"' + (x.id === t.supervisor_id ? " selected" : "") + ">" + esc(primeiro(x.nome)) + "</option>";
-        }).join("") + "</select></td>";
+    var ids = t.supervisores || (t.supervisor_id ? [t.supervisor_id] : []);
+    var cel = ids.map(function (id) {
+      var s = SUP[id];
+      return s ? '<span class="eq-pilula av-' + s.cor + '">' + esc(primeiro(s.nome)) + "</span>" : "";
+    }).join(" ");
+    var tit = "Responsável pelo vínculo de Configurações";
+    if (!cel) {
+      cel = '<span class="badge badge-ambar">sem supervisor</span>';
+      tit = "Nenhum supervisor tem esta empresa nem este técnico em Configurações";
     }
-    return "<td>" + (s ? '<span class="eq-pilula av-' + s.cor + '">' + esc(primeiro(s.nome)) + "</span>" : "—") + "</td>";
+    return '<td title="' + tit + '">' + (ADMIN ? '<a class="eq-sup-link" href="/configuracoes#supervisores">' + cel + "</a>" : cel) + "</td>";
   }
 
   function obsCel(t) {
@@ -264,10 +272,6 @@
     var ed = e.target.closest(".eq-editar");
     if (ed) abrir(D.tecnicos.filter(function (x) { return x.id === ed.dataset.id; })[0]);
   });
-  $("eq-tabela").addEventListener("change", function (e) {
-    var s = e.target.closest(".eq-sup-sel");
-    if (s) gravar(s.dataset.id, "supervisor_id", s.value || null);
-  });
   $("eq-fora").addEventListener("click", function (e) {
     var b = e.target.closest("[data-incluir]");
     if (!b) return;
@@ -278,8 +282,7 @@
   });
 
   var dlg = $("eq-dlg"), EDITANDO = null;
-  var CAMPOS = { nome: "eq-f-nome", empresa: "eq-f-empresa", nome_wvsa: "eq-f-wvsa", cidades: "eq-f-cidades",
-                 supervisor_id: "eq-f-sup" };
+  var CAMPOS = { nome: "eq-f-nome", empresa: "eq-f-empresa", nome_wvsa: "eq-f-wvsa", cidades: "eq-f-cidades" };
   var MARCAS = { interno: "eq-f-interno", agenda_automatica: "eq-f-agenda", retencao: "eq-f-retencao",
                  retirada: "eq-f-retirada", ativo: "eq-f-ativo" };
 

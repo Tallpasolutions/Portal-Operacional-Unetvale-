@@ -218,6 +218,23 @@
   </form>
 </dialog>
 
+{# Técnico sem responsável (pedido de 25/11/2026): abre para todo
+   supervisor; o primeiro que responde decide para todos. #}
+{% if usuario.is_supervisor %}
+<dialog class="modal modal-largo" id="wr-dlg-resp">
+  <div>
+    <h3>Técnico novo sem responsável</h3>
+    <p class="subnote" style="margin:0 0 12px">Fechou OS de cliente nos últimos 14 dias e não está no time de nenhum
+      supervisor. Diga quem responde por ele — vale para todos, e o primeiro que responder decide.
+      Quem não é técnico de campo (um supervisor que fechou uma OS, por exemplo) sai do aviso.</p>
+    <div class="tabela-wrap"><table class="tbl wr-ss"><thead><tr><th>Técnico</th><th class="num">OS</th><th>Último dia</th><th>Responsável</th></tr></thead>
+      <tbody id="wr-resp-lista"></tbody></table></div>
+    <p class="wr-erro" id="wr-resp-erro" hidden></p>
+    <div class="modal-acoes"><button class="btn sec" type="button" data-adiar>Depois</button></div>
+  </div>
+</dialog>
+{% endif %}
+
 {% endblock %}
 
 {% block scripts %}

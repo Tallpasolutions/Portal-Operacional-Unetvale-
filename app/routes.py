@@ -153,6 +153,28 @@ def produtividade():
                            apelidos_empresa=supervisores.APELIDOS_EMPRESA)
 
 
+@bp.route("/produtividade/supervisores")
+@login_obrigatorio
+@modulo_obrigatorio("produtividade")
+def produtividade_supervisores():
+    """A visão por supervisor da Produtividade (pedido de 25/11/2026), em
+    JSON: a tela pede quando o período ou o supervisor do filtro mudam.
+
+    O recorte é do servidor, como o resto da Produtividade: o supervisor
+    recebe só o próprio time; os outros, todos os supervisores.
+    """
+    from datetime import date
+    from . import war_room
+    u = usuario_atual()
+    try:
+        de = date.fromisoformat(request.args.get("de") or "")
+        ate = date.fromisoformat(request.args.get("ate") or "")
+    except ValueError:
+        return jsonify({"erro": "Período inválido."}), 400
+    permitidos = {u["id"]} if u["is_supervisor"] and not u["is_admin"] else None
+    return jsonify(war_room.visao_supervisores(de, ate, permitidos))
+
+
 @bp.route("/iqi")
 @login_obrigatorio
 @modulo_obrigatorio("iqi")
@@ -562,17 +584,19 @@ def configuracoes():
     u = usuario_atual()
     contexto = {"ativo": "configuracoes", "usuario": u}
     if u["is_supervisor"]:
-        # "Minhas equipes": o supervisor vê e mexe nas PRÓPRIAS equipes
-        # (decisão de 19/11/2026, com a War Room filtrando por supervisor).
-        # Os técnicos avulsos aparecem só para leitura — quem reparte a
-        # UNETVALE entre supervisores continua sendo o admin.
-        minhas, avulsos, disponiveis = supa.paralelo(
+        # "Meu time": o supervisor vê e mexe nas PRÓPRIAS equipes (decisão de
+        # 19/11/2026) e, desde 25/11/2026, também nos técnicos nome a nome —
+        # "igual o da gestão". É o vínculo que recorta Produtividade e IQI e
+        # que diz de quem é cada técnico na War Room.
+        from . import equipe, war_room
+        minhas, disponiveis, time = supa.paralelo(
             lambda: supervisores.equipes_de(u["id"]),
-            lambda: _avulsos_de(u["id"]),
-            supervisores.equipes_disponiveis)
+            war_room.empresas_conhecidas,
+            lambda: war_room.time_do_supervisor(u["id"]))
         contexto["minhas_equipes"] = minhas
-        contexto["meus_avulsos"] = avulsos
         contexto["equipes_para_mim"] = [e for e in disponiveis if e not in minhas]
+        contexto["meu_time"] = time
+        contexto["supervisores_lista"] = equipe.supervisores_lista()
     if u["is_admin"]:
         contexto["supervisores"] = supervisores.listar()
         contexto["equipes"] = supervisores.equipes_disponiveis()
@@ -744,9 +768,9 @@ def supervisor_equipe():
     try:
         for equipe in equipes:
             if acao == "desvincular":
-                supervisores.desvincular(uid, equipe)
+                supervisores.desvincular(uid, equipe, por=usuario_atual()["id"])
             else:
-                supervisores.vincular(uid, equipe)
+                supervisores.vincular(uid, equipe, por=usuario_atual()["id"])
         verbo = "desvinculada" if acao == "desvincular" else "vinculada"
         flash(f"{len(equipes)} equipe(s) {verbo}(s): {', '.join(equipes)}.", "ok")
     except Exception as e:
@@ -781,16 +805,87 @@ def minhas_equipes():
         return redirect(url_for("dash.configuracoes"))
     try:
         if acao == "desvincular":
-            supervisores.desvincular(u["id"], equipe)
+            supervisores.desvincular(u["id"], equipe, por=u["id"])
             flash(f"Equipe {equipe} removida das suas.", "ok")
         elif equipe not in supervisores.equipes_disponiveis():
             flash("Essa equipe não aparece na Produtividade.", "erro")
         else:
-            supervisores.vincular(u["id"], equipe)
+            supervisores.vincular(u["id"], equipe, por=u["id"])
             flash(f"Equipe {equipe} adicionada às suas.", "ok")
     except Exception as e:
         flash(f"Erro ao alterar suas equipes: {e}", "erro")
-    return redirect(url_for("dash.configuracoes"))
+    return redirect(url_for("dash.configuracoes") + "#meu-time")
+
+
+@bp.route("/configuracoes/meus-tecnicos", methods=["POST"])
+@login_obrigatorio
+def meus_tecnicos():
+    """O supervisor liga ou desliga técnicos nome a nome — só no PRÓPRIO
+    time (pedido de 25/11/2026). Para ligar, o técnico tem de ser conhecido
+    (Produtividade dos últimos 60 dias ou cadastro da Equipe): um nome
+    digitado viraria um vínculo que não casa com ninguém. Cada mudança vai
+    para o histórico do vínculo (`supervisor_vinculo_eventos`)."""
+    from . import war_room
+    u = usuario_atual()
+    if not u["is_supervisor"]:
+        abort(403)
+    acao = request.form.get("acao") or "vincular"
+    valores = [v.strip() for v in request.form.getlist("tecnico") if v.strip()]
+    if acao not in ("vincular", "desvincular") or not valores:
+        flash("Escolha ao menos um técnico.", "erro")
+        return redirect(url_for("dash.configuracoes") + "#meu-time")
+    try:
+        if acao == "desvincular":
+            meus = set(supervisores.tecnicos_de(u["id"]))
+            fora = [v for v in valores if v not in meus]
+            if fora:
+                flash("Esse técnico não está vinculado a você nome a nome.", "erro")
+                return redirect(url_for("dash.configuracoes") + "#meu-time")
+            for chave in valores:
+                supervisores.desvincular_tecnico(u["id"], chave, por=u["id"])
+            flash(f"{len(valores)} técnico(s) removido(s) do seu time.", "ok")
+        else:
+            t = war_room.time_do_supervisor(u["id"])
+            conhecidos = {c["rotulo"] for g in (t["meus"], t["outros"]) for lista in g.values() for c in lista}
+            desconhecidos = [v for v in valores if v not in conhecidos]
+            if desconhecidos:
+                flash("Técnico que não aparece na Produtividade nem no cadastro: "
+                      + ", ".join(desconhecidos[:3]) + ".", "erro")
+                return redirect(url_for("dash.configuracoes") + "#meu-time")
+            for rotulo in valores:
+                supervisores.vincular_tecnico(u["id"], rotulo, por=u["id"])
+            flash(f"{len(valores)} técnico(s) adicionado(s) ao seu time.", "ok")
+    except Exception as e:
+        flash(f"Erro ao alterar seu time: {e}", "erro")
+    return redirect(url_for("dash.configuracoes") + "#meu-time")
+
+
+@bp.route("/configuracoes/responsavel", methods=["POST"])
+@login_obrigatorio
+def configuracoes_responsavel():
+    """O aviso de técnico sem responsável, respondido de Configurações — a
+    mesma regra da War Room: o primeiro supervisor que responde decide."""
+    from . import war_room
+    u = usuario_atual()
+    if not (u["is_supervisor"] or u["is_admin"]):
+        abort(403)
+    sup_id = (request.form.get("supervisor_id") or "").strip()
+    corpo = {"rotulo": request.form.get("rotulo"),
+             "supervisor_id": None if sup_id == "nenhum" else (sup_id or False)}
+    if corpo["supervisor_id"] is False:
+        flash("Escolha o supervisor.", "erro")
+        return redirect(url_for("dash.configuracoes") + "#sem-responsavel")
+    try:
+        war_room.definir_responsavel(corpo, u["id"])
+        flash(f"Responsável por {corpo['rotulo']} definido.", "ok")
+    except (war_room.Recusa, war_room.Conflito) as e:
+        flash(str(e), "erro")
+    except Exception as e:
+        if supa.tabela_faltando(e):
+            flash("O aviso ainda não tem a tabela no banco (migration 0024).", "erro")
+        else:
+            flash(f"Erro ao definir o responsável: {e}", "erro")
+    return redirect(url_for("dash.configuracoes") + "#sem-responsavel")
 
 
 @bp.route("/supervisores/tecnico", methods=["POST"])
@@ -812,9 +907,9 @@ def supervisor_tecnico():
         for rotulo in rotulos:
             if acao == "desvincular":
                 # Aqui vem a chave normalizada, que é o que a tabela guarda.
-                supervisores.desvincular_tecnico(uid, rotulo)
+                supervisores.desvincular_tecnico(uid, rotulo, por=usuario_atual()["id"])
             else:
-                supervisores.vincular_tecnico(uid, rotulo)
+                supervisores.vincular_tecnico(uid, rotulo, por=usuario_atual()["id"])
         verbo = "desvinculado" if acao == "desvincular" else "vinculado"
         flash(f"{len(rotulos)} técnico(s) {verbo}(s).", "ok")
     except Exception as e:
