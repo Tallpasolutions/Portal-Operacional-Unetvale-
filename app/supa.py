@@ -196,12 +196,15 @@ def update(tabela, match, mudancas, schema=None):
     return r.json()
 
 
-def delete(tabela, match):
+def delete(tabela, match, retornar=False):
     """DELETE /rest/v1/<tabela>?<match>.
 
     `match` é um dict {coluna: valor} convertido em filtro de igualdade — a
     mesma forma do `update`. Sem filtro o PostgREST recusaria apagar a tabela
     inteira, mas não confiamos nisso: um match vazio levanta erro aqui.
+
+    `retornar=True` devolve as linhas apagadas (lista vazia = nada casou):
+    é o que o histórico do vínculo usa para registrar só o que de fato saiu.
     """
     if not match:
         raise ValueError("delete sem filtro não é permitido")
@@ -213,18 +216,20 @@ def delete(tabela, match):
     for k, v in match.items():
         if isinstance(v, (list, tuple, set)):
             if not v:
-                return
+                return [] if retornar else None
             params[k] = f"in.({','.join(str(x) for x in v)})"
         else:
             params[k] = f"eq.{v}"
     r = _pedir(
         "DELETE",
         f"{url}/rest/v1/{tabela}",
-        headers=_headers(),
+        headers=_headers({"Prefer": "return=representation"} if retornar else None),
         params=params,
         timeout=TIMEOUT,
     )
     r.raise_for_status()
+    if retornar:
+        return r.json() if r.content else []
 
 
 def upsert(tabela, registro, on_conflict, schema=None):

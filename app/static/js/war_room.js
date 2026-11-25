@@ -203,18 +203,84 @@
       "</span>" + escolha + "</div>" +
       '<div class="wr-cap-grade"><div class="wr-cap-barras">' +
       barra("Total", tot ? tot[0] : null, "i-inst", tot ? tot[2] + " internos × " + D.cap_interna + " + " + tot[1] + " externos × " + D.cap_externa : "sem cadastro") +
-      barra("Em campo", campoCap, "i-campo", campoN ? campoN + " técnicos fecharam OS" + fora : "ninguém fechou OS") +
+      barra("Em campo", campoCap, "i-campo", campoN ? campoN + (campoN === 1 ? " técnico" : " técnicos") + " em campo" + fora : "ninguém em campo") +
       barra("Executadas", exe, "i-exec", num(rec) + " recusas") +
       '</div><div class="wr-cap-kpis">' +
       '<div><span class="n">' + (tot && campoCap !== null ? pct(campoCap, tot[0]) : "—") + '</span><span class="q">da equipe em campo</span>' +
       '<span class="b">capacidade em campo ÷ capacidade total</span></div>' +
       '<div><span class="n">' + (campoCap ? pct(exe, campoCap) : "—") + '</span><span class="q">aproveitamento</span>' +
       '<span class="b">executadas ÷ capacidade em campo</span></div>' +
-      "</div></div>" + tabela +
-      (dia === D.hoje ? '<p class="subnote" style="margin:12px 0 0">Dia em andamento: em campo e executadas ainda crescem. ' +
-        "Supervisor pelo cadastro da equipe; quem fecha OS fora dele, pelo vínculo de Configurações.</p>" : "");
+      "</div></div>" + listaTecnicos(linha) + tabela +
+      '<p class="subnote" style="margin:12px 0 0">' + (dia === D.hoje ? "Dia em andamento: em campo e executadas ainda crescem. " : "") +
+        "De quem é cada técnico: o time de cada supervisor em Configurações (equipes inteiras e técnicos nome a nome).</p>";
   }
-  $("wr-cap").addEventListener("click", function (e) {
+
+  // A lista de técnicos do supervisor escolhido (pedido de 25/11/2026):
+  // quem a conta considera em campo no dia e quem não, e o supervisor
+  // corrige — esteve em campo sem fechar OS, ou fechou uma e foi embora.
+  // A correção é do banco (append-only), vale no topo, no gráfico e aqui.
+  function podeCorrigir() {
+    if (!SUP || !D.produtividade.tem_presenca) return false;
+    var lim = new Date(D.hoje + "T12:00:00"); lim.setDate(lim.getDate() - 7);
+    return D.dia >= lim.toISOString().slice(0, 10);
+  }
+  function listaTecnicos(linha) {
+    if (!linha || !linha.tecs || !linha.tecs.length) return "";
+    var pode = podeCorrigir();
+    var dentro = linha.tecs.filter(function (t) { return t.c; }), fora = linha.tecs.filter(function (t) { return !t.c; });
+    function linhaTec(t) {
+      var p = t.p;
+      var sit = t.auto ? '<span class="badge badge-verde">fechou OS</span>' : '<span class="badge badge-cinza">não fechou OS</span>';
+      var cor = p ? '<span class="subnote wr-quem">' + (p.presente ? "marcado em campo" : "marcado fora") + " por " +
+        esc(nomeCurto(p.por)) + " " + esc(p.hora || "") +
+        (pode ? ' · <button type="button" class="wr-desfazer" data-pres="auto" data-k="' + esc(t.k) + '" title="Volta a valer o que a Produtividade diz">automático</button>' : "") +
+        "</span>" : "";
+      var cel = pode
+        ? '<span class="toggle toggle-mini wr-valida wr-pres" data-k="' + esc(t.k) + '">' +
+          '<button type="button" data-p="sim" class="' + (t.c ? "active" : "") + '">Em campo</button>' +
+          '<button type="button" data-p="nao" class="' + (!t.c ? "active wr-nao" : "") + '">Fora</button></span>'
+        : '<span class="badge ' + (t.c ? "badge-verde" : "badge-cinza") + '">' + (t.c ? "em campo" : "fora") + "</span>";
+      return '<tr class="' + (t.c ? "" : "wr-tec-fora") + '"><td><b>' + esc(t.n) + '</b><span class="subnote wr-emp">' + esc(t.e || "—") +
+        (t.cad ? "" : " · fora do cadastro") + '<span class="wr-so-cel"> · ' + num(t.x) + (t.r ? " + " + t.r + " rec." : " OS") + "</span></span></td>" +
+        "<td>" + (t.i ? "interno · " + D.cap_interna : "externo · " + D.cap_externa) + "</td>" +
+        '<td class="num">' + num(t.x) + (t.r ? ' <span class="subnote" style="margin:0">+ ' + t.r + " rec.</span>" : "") + "</td>" +
+        "<td>" + sit + "</td><td>" + cel + cor + "</td></tr>";
+    }
+    function grupo(tit, lista) {
+      return lista.length ? '<tr class="eq-grupo"><td colspan="5"><b>' + tit + '</b><span class="subnote"> ' + lista.length +
+        (lista.length === 1 ? " técnico" : " técnicos") + "</span></td></tr>" + lista.map(linhaTec).join("") : "";
+    }
+    return '<div class="wr-cap-tecs"><div class="wr-cap-tecs-t"><b>Técnicos de ' + esc(nomeCurto(linha.nome)) + "</b>" +
+      '<span class="subnote" style="margin:0">' + (pode ? "corrija quem esteve ou não em campo: muda a capacidade em campo"
+        : SUP ? "só os últimos 7 dias podem ser corrigidos" : "o supervisor corrige quem esteve em campo") + "</span></div>" +
+      '<div class="tabela-wrap"><table class="tbl wr-ss wr-tecs"><thead><tr><th>Técnico</th><th>Perfil</th>' +
+      '<th class="num">Executadas</th><th>No WVSA</th><th>Na conta do dia</th></tr></thead><tbody>' +
+      grupo("Considerados em campo", dentro) + grupo("Não considerados", fora) + "</tbody></table></div></div>";
+  }
+
+  $("wr-cap").addEventListener("click", async function (e) {
+    var pb = e.target.closest("[data-p]") || e.target.closest("[data-pres]");
+    if (pb) {
+      if (pb.disabled) return;
+      var k = pb.getAttribute("data-k") || pb.parentNode.getAttribute("data-k");
+      var linha = (D.produtividade.por_supervisor || []).filter(function (l) { return l.id === CAPSUP; })[0];
+      var t = linha && linha.tecs.filter(function (x) { return x.k === k; })[0];
+      if (!t) return;
+      var presente = pb.hasAttribute("data-pres") ? null : pb.getAttribute("data-p") === "sim";
+      // Clicar no estado que já vale não grava nada: sem correção, "Em campo"
+      // de quem fechou OS é o próprio automático.
+      if (presente !== null && t.c === presente) return;
+      pb.disabled = true;
+      try {
+        var r = await postJSON("/war-room/presenca", { dia: D.dia, tecnico: k, presente: presente });
+        aplicar(r.pacote);
+        alertar(presente === null ? "Voltou ao automático." : "Correção gravada.");
+      } catch (err) {
+        pb.disabled = false;
+        alertar(err.message);
+      }
+      return;
+    }
     var b = e.target.closest("[data-s]");
     if (!b) return;
     var id = b.getAttribute("data-s") || null;
@@ -481,6 +547,7 @@
     tecnicosLista();
     semSucesso();
     desvios();
+    avisoResponsavel();
   }
 
   // De 2 em 2 min, só com a aba visível: pergunta os carimbos (duas linhas
@@ -1325,9 +1392,72 @@
   });
 
   // ---------------------------------------------------------------------
+  // Técnico sem responsável (pedido de 25/11/2026)
+  // ---------------------------------------------------------------------
+  // Fechou OS de cliente nos últimos 14 dias e não está no time de nenhum
+  // supervisor — na prática, técnico novo da UNETVALE (o de empresa
+  // terceira cai sozinho no supervisor da empresa). O aviso abre para todo
+  // supervisor; o primeiro que responde decide para todos (trava do banco),
+  // e os outros recebem quem decidiu. "Depois" adia só nesta aba.
+  var CHAVE_ADIADO = "wr-resp-adiado";
+  function adiados() {
+    try { return JSON.parse(sessionStorage.getItem(CHAVE_ADIADO) || "[]"); } catch (e) { return []; }
+  }
+  function avisoResponsavel() {
+    var dlg = $("wr-dlg-resp");
+    if (!dlg || !SUP) return;
+    var ad = adiados();
+    var lista = (D.sem_responsavel || []).filter(function (p) { return ad.indexOf(p.rotulo) < 0; });
+    if (!lista.length) { if (dlg.open) dlg.close(); return; }
+    var opcoes = '<option value="">Escolha…</option>' + (D.supervisores || []).map(function (x) {
+      return '<option value="' + x.id + '">' + esc(x.nome) + "</option>";
+    }).join("") + '<option value="nenhum">Não é técnico de campo</option>';
+    $("wr-resp-lista").innerHTML = lista.map(function (p) {
+      return '<tr><td><b>' + esc(p.nome) + '</b><span class="subnote wr-emp">' + esc(p.empresa) +
+        (p.cadastro ? " · no cadastro" : "") + "</span></td>" +
+        '<td class="num">' + num(p.os) + '</td><td>' + rotDia(p.ultimo) + "</td>" +
+        '<td><span class="wr-resp-acao"><select aria-label="Responsável por ' + esc(p.nome) + '">' + opcoes + "</select>" +
+        '<button type="button" class="btn" data-resp="' + esc(p.rotulo) + '">Definir</button></span></td></tr>';
+    }).join("");
+    $("wr-resp-erro").hidden = true;
+    if (!dlg.open && !document.querySelector("dialog[open]")) dlg.showModal();
+  }
+  if ($("wr-dlg-resp")) {
+    $("wr-resp-lista").addEventListener("click", async function (e) {
+      var b = e.target.closest("[data-resp]");
+      if (!b || b.disabled) return;
+      var sel = b.parentNode.querySelector("select");
+      if (!sel.value) { erro("wr-resp-erro", "Escolha o supervisor (ou “não é técnico de campo”)."); return; }
+      var rotulo = b.getAttribute("data-resp");
+      b.disabled = true;
+      var msg;
+      try {
+        await postJSON("/war-room/responsavel", { rotulo: rotulo, supervisor_id: sel.value === "nenhum" ? null : sel.value });
+        msg = "Responsável definido.";
+      } catch (err) {
+        // 409: outro supervisor respondeu antes — a linha sai do mesmo jeito.
+        if (!/já respondeu/.test(err.message)) { b.disabled = false; erro("wr-resp-erro", err.message); return; }
+        msg = err.message;
+      }
+      D.sem_responsavel = (D.sem_responsavel || []).filter(function (p) { return p.rotulo !== rotulo; });
+      alertar(msg);
+      avisoResponsavel();
+      // O técnico passou a ser de alguém: a capacidade por supervisor muda.
+      try { aplicar(await buscarPacote(D.dia)); } catch (err) { /* atualiza no próximo ciclo */ }
+    });
+    $("wr-dlg-resp").querySelector("[data-adiar]").addEventListener("click", function () {
+      var ad = adiados();
+      (D.sem_responsavel || []).forEach(function (p) { if (ad.indexOf(p.rotulo) < 0) ad.push(p.rotulo); });
+      try { sessionStorage.setItem(CHAVE_ADIADO, JSON.stringify(ad)); } catch (e) { /* aba privada */ }
+      $("wr-dlg-resp").close();
+    });
+  }
+
+  // ---------------------------------------------------------------------
   fontes();
   numeros();
   graficos();
   semSucesso();
   desvios();
+  avisoResponsavel();
 })();

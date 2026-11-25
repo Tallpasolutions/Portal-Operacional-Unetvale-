@@ -1533,7 +1533,7 @@ body.wr-carregando .wr-kpis, body.wr-carregando #wr-cap{ opacity:.55; transition
 @media (max-width:760px){ .wr-barra{ position:static; } .wr-barra-regua{ display:none; } .wr-kpi .n{ font-size:28px; }
   .wr-tcard-n{ font-size:24px; } }
 /* Tendência em largura cheia: 28 dias de barras não cabem em meia tela. */
-.wr-tend{ grid-template-columns:1fr; }
+.wr-tend{ grid-template-columns:minmax(0,1fr); }
 .wr-tend .chart-box{ height:330px; }
 .wr-tend .chart-box.wr-baixo{ height:230px; }
 @media (max-width:1180px){ .wr-barra-regua{ display:none; } }
@@ -1552,3 +1552,50 @@ body.wr-carregando .wr-kpis, body.wr-carregando #wr-cap{ opacity:.55; transition
    desfazer deixou de ser o segundo clique no botão já marcado. */
 .wr-desfazer{ background:none; border:none; padding:0; font:inherit; font-size:11.5px; color:var(--brand-d); cursor:pointer; text-decoration:underline; }
 .wr-desfazer:hover{ color:var(--danger); }
+
+/* War Room — técnicos do supervisor na capacidade (25/11/2026). */
+.wr-cap-tecs{ margin-top:18px; border-top:1px solid var(--borda); padding-top:12px; }
+.wr-cap-tecs-t{ display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:6px 14px; margin-bottom:8px; }
+.wr-tecs tr.wr-tec-fora td{ background:var(--fundo); }
+.wr-tecs tr.wr-tec-fora td b{ color:var(--muted); }
+.wr-tecs td{ vertical-align:middle; }
+.wr-tecs td:nth-child(5){ min-width:200px; }
+.wr-resp-acao{ display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap; }
+.wr-resp-acao select{ max-width:200px; }
+/* Configurações — Meu time. */
+.mt-resp{ display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap; }
+.mt-tabela td{ vertical-align:middle; }
+.lista-marcar .linha-marcar .subnote{ font-weight:400; text-align:right; }
+.wr-tecs td:nth-child(3), #wr-dlg-resp td:nth-child(3){ min-width:0; }
+/* Produtividade — visão do supervisor (25/11/2026). */
+.ps-carregando{ opacity:.55; transition:opacity .15s; }
+.ps-geral tr.clicavel{ cursor:pointer; }
+.ps-val{ display:inline-flex; flex-wrap:wrap; gap:4px; }
+.ps-tit{ margin:14px 0 10px; display:flex; flex-wrap:wrap; gap:4px 10px; align-items:baseline; }
+.ps-geral + .ps-tit{ margin-top:18px; }
+.ps-kpis .ps-kpi-b{ font-size:11.5px; opacity:.8; margin-top:2px; text-transform:none; letter-spacing:0; font-weight:400; }
+.ps-sec{ margin:16px 0 8px; font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+.ps-tops{ grid-template-columns:repeat(auto-fit,minmax(min(360px,100%),1fr)); }
+.ps-top td{ vertical-align:top; }
+.ps-top td:first-child{ color:var(--muted); width:18px; }
+.ps-emp{ display:block; margin:2px 0 4px; }
+.ps-baixo{ margin-top:16px; }
+.ps-mot{ display:grid; grid-template-columns:minmax(0,1fr) 80px 34px; gap:8px; align-items:center; padding:4px 0; font-size:13px; }
+.ps-mot-r{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ps-mot b{ text-align:right; }
+.wr-tecs td:first-child{ min-width:190px; }
+.wr-tecs td:nth-child(2){ white-space:nowrap; }
+.ps-top td:nth-child(2){ min-width:150px; }
+.ps-top td:nth-child(3){ min-width:150px; }
+.mt-tabela td:first-child{ min-width:210px; }
+.wr-so-cel{ display:none; }
+/* No celular a coluna que importa é "Na conta do dia" (o botão): perfil e
+   "No WVSA" saem, e o nome encolhe, para o botão caber sem rolar de lado. */
+@media (max-width:600px){
+  .wr-tecs th:nth-child(2), .wr-tecs td:nth-child(2), .wr-tecs th:nth-child(3), .wr-tecs td:nth-child(3),
+  .wr-tecs th:nth-child(4), .wr-tecs td:nth-child(4){ display:none; }
+  .wr-tecs .wr-so-cel{ display:inline; }
+  .wr-tecs td:first-child{ min-width:130px; }
+  .wr-tecs td:nth-child(5){ min-width:0; }
+  .mt-tabela td:first-child{ min-width:150px; }
+}

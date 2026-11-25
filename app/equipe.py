@@ -217,11 +217,31 @@ def resumo(tecnicos):
     }
 
 
+def aplicar_responsaveis(tecnicos, alcance):
+    """Troca o `supervisor_id` do cadastro pelo do VÍNCULO de Configurações.
+
+    Desde 25/11/2026 quem responde por um técnico é o vínculo
+    (`supervisores.responsaveis`), em todas as telas — a coluna do cadastro
+    ficou no banco, com o histórico, mas não manda mais. `supervisores`
+    traz todos (pelo vínculo um técnico pode ter dois); `supervisor_id` é o
+    primeiro, que é o que a tabela e o PDF desenham.
+    """
+    from . import supervisores as sup
+    for t in tecnicos or []:
+        ids = sup.responsaveis(alcance, t["empresa"], t.get("nome_wvsa") or t["nome"])
+        t["supervisor_cadastro"] = t.get("supervisor_id")
+        t["supervisores"] = ids
+        t["supervisor_id"] = ids[0] if ids else None
+    return tecnicos
+
+
 def pacote(hoje, supervisores):
     """Tudo o que a tela de Equipe precisa. `supervisores` = [{id, nome}]."""
-    tecnicos, obs = supa.paralelo(listar, lambda: observado(hoje))
+    from . import supervisores as sup
+    tecnicos, obs, alcance = supa.paralelo(listar, lambda: observado(hoje), sup.alcance_serie)
     if tecnicos is None:
         return {"tem_tabela": False}
+    aplicar_responsaveis(tecnicos, alcance)
     no_cadastro = set()
     for t in tecnicos:
         no_cadastro.add(t["chave"])

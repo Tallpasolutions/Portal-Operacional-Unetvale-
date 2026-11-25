@@ -3,7 +3,8 @@
 A regra mora em `app/equipe.py`. Quem vê é a matriz de Configurações
 (`modulo_obrigatorio("equipe")`); quem EDITA é só o admin (decisão de
 24/11/2026): o cadastro é a régua da capacidade de todas as telas, e o
-vínculo supervisor × equipe da Produtividade também é do admin.
+vínculo supervisor × técnico é de Configurações (o admin para todos, o
+supervisor para o próprio time) — e é ele que a tela mostra como supervisor.
 As escritas respondem JSON e a tela se redesenha no lugar.
 """
 from datetime import datetime, timedelta, timezone
@@ -88,7 +89,14 @@ def equipe_criar():
         if supa.tabela_faltando(e):
             return _sem_tabela()
         raise
-    return jsonify({"tecnico": t})
+    return jsonify({"tecnico": _com_responsavel(t)})
+
+
+def _com_responsavel(t):
+    """O técnico que volta da gravação leva o responsável do VÍNCULO, como no
+    pacote — senão a linha redesenhada mostraria o do cadastro."""
+    from . import supervisores
+    return eq.aplicar_responsaveis([t], supervisores.alcance_serie())[0] if t else t
 
 
 @bp.route("/equipe/tecnicos/<tecnico_id>", methods=["POST"])
@@ -113,4 +121,4 @@ def equipe_atualizar(tecnico_id):
         raise
     if t is None:
         abort(404)
-    return jsonify({"tecnico": t})
+    return jsonify({"tecnico": _com_responsavel(t)})

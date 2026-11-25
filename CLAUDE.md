@@ -87,7 +87,7 @@ data mais próxima primeiro (§6). A varredura do passado segue manual:
 | Tipo | Módulos | Se o dado sumir |
 |---|---|---|
 | **Espelho** do WVSA | Produtividade, IQI/IQM, Massivas | recoleta-se |
-| **Dado nasce aqui** | **Ações**, **Processos**, Troca de Poste (OS/revisão), **Esteira** (entrou/saiu — `esteira_movimentos`), **War Room** (desvios e rodadas), **Equipe técnica** (cadastro e histórico) | **não há de onde recoletar** |
+| **Dado nasce aqui** | **Ações**, **Processos**, Troca de Poste (OS/revisão), **Esteira** (entrou/saiu — `esteira_movimentos`), **War Room** (desvios, rodadas e correção de presença), **Equipe técnica** (cadastro e histórico), **vínculo supervisor × técnico** (histórico em `supervisor_vinculo_eventos` e o responsável de técnico novo) | **não há de onde recoletar** |
 
 Nos módulos do segundo tipo: histórico append-only, recorte de permissão no
 servidor, e cuidado redobrado com migration destrutiva.
@@ -100,7 +100,9 @@ servidor, e cuidado redobrado com migration destrutiva.
 - **Supabase via PostgREST**, encapsulado em `app/supa.py`. Usa a chave
   `service_role`, que **ignora RLS** — a autorização é toda do Flask.
   Atenção: `select`, `select_one`, `insert`, `update`, `upsert` e `rpc` aceitam
-  `schema=`; **`delete` não** — só funciona no `public`. Precisa apagar em
+  `schema=`; **`delete` não** — só funciona no `public` (e `delete(...,
+  retornar=True)` devolve as linhas apagadas: é como o histórico do vínculo
+  registra só o que de fato saiu). Precisa apagar em
   `troca_poste`? Acrescente o parâmetro lá (o PostgREST endereça schema pelos
   cabeçalhos `Accept-Profile`/`Content-Profile`, já tratados em `_headers`).
   `supa.rpc()` chama função no Postgres: é como se faz o que precisa ser
@@ -1138,6 +1140,10 @@ a véspera do início (18/11: 490). **Com o dia em andamento a tela não mostra
 diferença**: às 14h, "−77" contra a média do dia inteiro assusta e não diz
 nada sobre o ritmo.
 
+**Responsável "Relacionamento"** entrou no catálogo em 25/11/2026 (pedido do
+Jhoni): o time de contato com o cliente respondia por recusas e desvios de
+agenda e caía em "Agendamento" ou "Comercial" por falta de opção.
+
 **Registro com lista fechada.** No resumo, 52% dos encerramentos sem sucesso
 ficaram "sem motivo claro" porque o motivo era texto livre. Momento, tipo,
 causa e responsável são listas; o único texto obrigatório é a solução, e
@@ -1256,13 +1262,42 @@ uma escolha "Operação · Adolar · Davi · Guilherme" que recorta as réguas e
 os dois percentuais, e embaixo uma tabela que compara os times (técnicos,
 total, em campo, executadas, recusas, taxa de recusa, aproveitamento) —
 clicar na linha também escolhe. O supervisor abre no próprio time.
-`war_room._por_supervisor`: o dono do técnico é o supervisor do CADASTRO;
-quem fecha OS fora dele vai pelo vínculo de Configurações (`_no_alcance`).
-Medido em 24/11/2026, as duas fontes concordam em 38 de 39 (o que diverge
-é de retirada). As linhas somam a operação — conferido em 4 dias —, a não
-ser quando um técnico tem dois supervisores pelo vínculo (conta nos dois).
-Supervisor sem ninguém na War Room (o de infra) não aparece; técnico sem
-dono vai em "Sem supervisor".
+`war_room._por_supervisor`: o dono do técnico é o **VÍNCULO de
+Configurações** (`supervisores.responsaveis`, a mesma regra de
+Produtividade, IQI e encerradas) desde 25/11/2026 — até ali era o
+`supervisor_id` do cadastro, e as duas fontes podiam divergir sem a tela
+dizer. Conferido na troca: capacidade, quebra por supervisor, encerradas e
+desvios IDÊNTICOS à `main` em 20, 24 e 25/11. As linhas somam a operação, a
+não ser quando um técnico tem dois supervisores pelo vínculo (conta nos
+dois). Supervisor sem ninguém na War Room (o de infra) não aparece; técnico
+sem dono vai em "Sem supervisor".
+
+**Clicar no supervisor abre a LISTA dos técnicos dele** (pedido de
+25/11/2026): "Considerados em campo" e "Não considerados", com perfil (4/6),
+OS do dia e se fechou OS no WVSA. O supervisor CORRIGE quem esteve em campo
+(`Em campo` / `Fora`, até 7 dias atrás): esteve e não fechou nada, ou fechou
+uma OS e foi embora. A correção mora em `warroom_presenca` (migration
+`0024`), **append-only**: cada clique é uma linha, a mais nova de (dia,
+técnico) vale, e "automático" grava uma linha com `presente` nulo — nada
+some, e a tela diz quem corrigiu e quando. Ela vale no número do topo, no
+gráfico e na linha do supervisor (`_capacidades`): um número só para "em
+campo". **Executadas e recusas contam toda OS do time**, inclusive de quem
+foi marcado "Fora" — a OS existiu. Só supervisor corrige (403 ao resto,
+admin incluído, como a validação); a rota devolve o pacote inteiro. No
+celular a tabela fica só com o nome e o botão.
+
+**Técnico novo sem responsável: aviso para todo supervisor** (pedido de
+25/11/2026). Técnico novo de empresa terceira cai sozinho no supervisor da
+empresa (vínculo por equipe); o da UNETVALE, repartida nome a nome, não tem
+para onde ir. Quem fechou OS de cliente nos últimos 14 dias e não está no
+time de ninguém (`war_room._pendentes`, sem infra) abre um `<dialog>` na War
+Room para todo supervisor, e a mesma lista aparece em Configurações. O
+PRIMEIRO que responde decide para todos: `tecnico_definir_responsavel`
+(0024) grava a decisão (chave primária no técnico) e o vínculo nome a nome
+na mesma transação; o segundo recebe 409 com quem decidiu. "Não é técnico de
+campo" (o supervisor que fechou uma OS) tira do aviso sem criar vínculo.
+"Depois" adia só naquela aba (`sessionStorage`). Em 25/11/2026 eram três, os
+três supervisores fechando OS como UNETVALE.
 
 ⚠️ Falta o nível do meio, a **escalada** (quem tem OS agendada no dia):
 a Esteira não guarda o técnico do agendamento, e a fonte no WVSA ainda
@@ -1273,12 +1308,35 @@ O backlog também é em barras, como o de executadas; as não agendadas em
 ouro, não em azul-escuro (os dois azuis da casa ficam a ΔE 9 no validador
 de paleta).
 
-**Minhas equipes, em Configurações**: o supervisor vê as equipes dele e
-adiciona ou remove — só as dele, e só equipe que aparece na Produtividade
-(`/configuracoes/minhas-equipes`). Técnicos avulsos aparecem só para leitura:
-quem reparte a UNETVALE entre supervisores segue sendo o admin. É o mesmo
-vínculo que recorta Produtividade e IQI, então mexer ali muda o que ele vê
-nas duas telas.
+**Meu time, em Configurações** (era "Minhas equipes"; ampliado em
+25/11/2026, "igual o da gestão"): o supervisor vê e mexe no PRÓPRIO vínculo
+— equipes inteiras e, agora, técnicos nome a nome
+(`/configuracoes/meus-tecnicos`). A tabela "Meus técnicos" lista quem fechou
+OS em 60 dias, o cadastro ativo e os vinculados a ele, com "como está no seu
+time" (pela equipe / nome a nome) e "também com" (outro supervisor que
+responde pelo mesmo técnico). Só tira o que é nome a nome e dele; técnico
+que vem pela equipe sai tirando a equipe. Para incluir, o técnico tem de
+ser conhecido (Produtividade ou cadastro). **Cada mudança vai para
+`supervisor_vinculo_eventos`** (0024, append-only, com quem fez e de onde) —
+as do admin também: o vínculo é caixa de marcar, e sem isso não havia como
+saber quem tirou quem. É o mesmo vínculo que recorta Produtividade e IQI e
+que dá o dono na War Room.
+
+**Visão do supervisor na Produtividade** (pedido de 25/11/2026): um cartão
+no topo de `/produtividade` com capacidade total, em campo, executadas,
+recusadas, aproveitamento e "da equipe em campo" do time, e os cinco
+técnicos ofensores em três réguas — aproveitamento e média de produtividade
+(só quem teve 2+ dias em campo) e recusas, com o motivo principal e se a
+recusa passou pelo supervisor (`warroom_validacoes`). O cálculo é
+`war_room.visao_supervisores` (JSON em `/produtividade/supervisores`), com as
+MESMAS regras da War Room (só cliente, cadastro de cada dia, correção de
+presença, recusa no dia da ficha — `_pela_ficha`, uma função para as duas),
+num PERÍODO: segue o Mês/Semana/Dia e o Supervisor da barra da página
+(evento `prodfiltro`); sem período, o mês atual; teto de 93 dias. A
+capacidade só soma **dias com operação** (algum técnico fechou OS de
+cliente): domingo vazio não é "equipe parada". O recorte é do servidor:
+supervisor recebe só o próprio time. ⚠️ A validação começou em 19/11/2026:
+recusa de antes aparece "sem resposta", e a tela diz.
 
 **Recusas no gráfico e cross-filter** (23/11/2026, sem migration). A barra
 vermelha do "Executadas com sucesso × recusas × entraram na esteira" é
@@ -1408,7 +1466,7 @@ capacidade instalada; "Exportar PDF" sai como `reuniao_pdf.html`, página
 solta que imprime sozinha (`equipe_pdf.html`, 2 folhas A4).
 
 **Só o admin edita** (decisão de 24/11/2026): o cadastro é a régua da
-capacidade. Sim/Não por clique, supervisor no select da linha, o resto no
+capacidade. Sim/Não por clique, o resto no
 modal (clique no nome). Cada campo vai num POST próprio — é o que o
 histórico registra.
 
@@ -1439,10 +1497,15 @@ Daniel Orlando Soares (WAVE, 72) e Joao Revair Dill (26).
 continuam na equipe (192 OS/dia no total) e ficam fora da capacidade da
 War Room (174), que é do agendamento de cliente.
 
-⚠️ O `supervisor_id` do cadastro **não** é o vínculo que recorta
-Produtividade, IQI e War Room (`supervisor_equipes`/`supervisor_tecnicos`,
-`app/supervisores.py`). Unificar os dois muda o que cada supervisor
-enxerga nas outras telas — é decisão à parte.
+**O supervisor da tabela é o do VÍNCULO** (decisão de 25/11/2026, a
+"decisão à parte" que ficou pendente em 24/11): `equipe.aplicar_responsaveis`
+troca o `supervisor_id` do cadastro pelo de `supervisores.responsaveis` ao
+montar a tela, o PDF e a resposta das gravações. A coluna do cadastro ficou
+no banco, com o histórico (`supervisor_cadastro` no pacote), mas não manda
+mais e saiu do formulário — quem muda o responsável é Configurações (o
+admin para todos, o supervisor para o próprio time). Na troca, 38 de 39
+concordavam; o que divergia era o Gabriel André Feliciano (RETIRADA, sem
+vínculo).
 
 ### Papéis
 
@@ -1654,6 +1717,15 @@ Os que nasceram na Equipe técnica:
 | `.eq-sim` / `.eq-nao` / `.eq-sn` | Sim/Não em círculo, como na planilha; `.eq-sn` é o botão do admin que grava |
 | `.eq-pilula` | supervisor em pílula, com a cor `.av-N` da posição dele na lista |
 | `.eq-mini` | barrinha de 46 px da parte externa das OS (laranja) |
+
+Os que nasceram em 25/11/2026 (times dos supervisores):
+
+| Classe | O que é |
+|---|---|
+| `.wr-cap-tecs` / `.wr-tecs` / `tr.wr-tec-fora` | lista de técnicos do supervisor na capacidade da War Room; `.wr-so-cel` mostra as OS ao lado do nome só no celular |
+| `.wr-pres` | o `.wr-valida` (Em campo/Fora) da correção de presença |
+| `.mt-tabela` / `.mt-resp` | "Meus técnicos" e o formulário do responsável em Configurações |
+| `.ps-*` | a visão do supervisor na Produtividade (KPIs, tops, motivos) |
 
 **Nada de `confirm()` do navegador.** Ele abre uma caixa do sistema, com o
 domínio no topo, que não pertence à tela — use `.modal` com `<dialog>`. As
@@ -2590,6 +2662,42 @@ a.run(port=5001, use_reloader=False)"
 ---
 
 ## 9. Estado atual e pendências
+
+- **Times dos supervisores** em 25/11/2026, migration `0024`
+  (`warroom_presenca`, `tecnico_responsavel`, `supervisor_vinculo_eventos`,
+  `tecnico_definir_responsavel`), **ainda não aplicada em produção** — sem
+  ela a War Room abre sem o aviso e sem a correção (rota 503), Configurações
+  mostra "Meu time" e grava o vínculo sem histórico. O porquê está no §4
+  (War Room, Equipe técnica). Responsável "Relacionamento" no catálogo.
+
+  Migration no PGlite: aplicada e reaplicada, 31 travas — presença e
+  histórico recusando UPDATE e DELETE (até para o dono, por trigger), nula
+  aceita, textos e usuário conferidos; primeiro responsável grava decisão +
+  vínculo + evento, segundo perde com quem decidiu e não cria vínculo,
+  supervisor inexistente não deixa meia decisão, vínculo já existente sem
+  evento falso; `anon`/`authenticated` sem acesso; RLS nas três.
+
+  Rotas pelo `test_client` num servidor de ensaio (lê produção, as tabelas
+  novas e o vínculo em memória, toda outra escrita recusada): 88 casos —
+  presença +4/−6/automático, append-only, não vaza para outro dia, sete
+  entradas ruins 400, não supervisor e admin 403; responsável por JSON e por
+  formulário, conflito 409, quatro entradas ruins 400; Meu time incluindo,
+  tirando e recusando técnico alheio, inventado e ação inválida, histórico
+  com quem fez; sem a 0024 tudo 200/503. Números da War Room idênticos à
+  `main` (20, 24 e 25/11). Visão por supervisor: período cortado em 93
+  dias, quatro entradas ruins 400, supervisor só com o próprio time. No
+  navegador, com o mouse, como Davi: aviso (escolha obrigatória, gravação,
+  "Depois"), Alex Oliveira marcado em campo (56 → 60) e de volta, Meu time
+  incluindo e removendo; como admin, a visão seguindo outubro e o Guilherme
+  escolhidos na barra; 375 px sem rolar de lado nas três telas; console
+  limpo.
+
+  **Ainda não feito:** aplicar a 0024 e alinhar os dados com a lista do
+  Jhoni de 25/11/2026 — NODE TECH do Davi para o Guilherme, Gabriel André
+  Feliciano (RETIRADA) no Adolar nome a nome, Mateus Janicio da Silva
+  (CLEITON TELECOM) no cadastro, Lucas Alves Ramos com Guilherme no
+  cadastro. Os cinco avulsos antigos do Davi (Adnael, Cleber, Islas,
+  Juliano, Levi) continuam vinculados; ele pode tirar em Meu time.
 
 - **Equipe técnica e capacidade pelo cadastro** em 24/11/2026, migration
   `0023` (`equipe_tecnicos`, `equipe_tecnicos_historico`, carga da

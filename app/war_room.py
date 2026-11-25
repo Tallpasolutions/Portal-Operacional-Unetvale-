@@ -38,6 +38,7 @@ BASE_DE, BASE_ATE = date(2026, 9, 22), date(2026, 11, 16)
 DIAS_GRAFICO = 28          # o gráfico mostra o antes e o depois do início
 DIAS_TECNICOS = 30         # técnico que não fechou OS em 30 dias sai da lista
 DIAS_RETROATIVO = 7        # registrar desvio de até uma semana atrás
+DIAS_NOVO = 14             # técnico sem responsável: OS de cliente nos últimos 14 dias
 
 # Capacidade diária: 4 OS por dia para o técnico EXTERNO e 6 para o INTERNO
 # (que faz interna e externa). Desde 24/11/2026 quem diz o perfil é o
@@ -231,6 +232,10 @@ RESPONSAVEIS = [
     {"id": "infra", "rotulo": "Infraestrutura"},
     {"id": "cliente", "rotulo": "Cliente"},
     {"id": "sistema", "rotulo": "App / sistema"},
+    # Pedido de 25/11/2026: o time de Relacionamento (contato com o cliente,
+    # confirmação e retenção) responde por parte das recusas e dos desvios
+    # de agenda, e caía em "Agendamento" ou "Comercial" por falta de opção.
+    {"id": "relacionamento", "rotulo": "Relacionamento"},
 ]
 
 STATUS = ("resolvido", "pendente")
@@ -351,6 +356,28 @@ def _minutos(hhmm):
         return 0
 
 
+def _pela_ficha(d, su, hora, ficha):
+    """(dia, hora, hora_rel, dia_rel) da OS, com a FICHA quando ela discorda.
+
+    A recusa vai para o dia e a hora da ficha quando ela discorda do
+    relatório: a #601017 foi recusada às 22:36 de 23/11 e o relatório a
+    carimbou 00:24 de 24/11 — ela sumia da lista do dia em que aconteceu. O
+    relatório fica ao lado (`hora_rel`) para quem for conferir contra a
+    Produtividade, que segue com ele. A nota só aparece quando a diferença
+    CONTA (outro dia ou 10+ min): em 8 dias, 78 das 80 divergências eram de
+    1 a 5 min. Uma função só: a War Room e a visão por supervisor da
+    Produtividade põem a recusa no mesmo dia.
+    """
+    hora_rel = dia_rel = None
+    if not su and isinstance(ficha, str) and _FICHA.fullmatch(ficha):
+        if d and hora and (ficha[:10] != d or _minutos(hora) - _minutos(ficha[11:16]) >= MIN_NOTA_REL):
+            hora_rel = f"{d[8:10]}/{d[5:7]} {hora}" if ficha[:10] != d else hora
+        if ficha[:10] != d:
+            dia_rel = d
+        d, hora = ficha[:10], ficha[11:16]
+    return d, hora, hora_rel, dia_rel
+
+
 def _produtividade(dia_foco):
     """Contagens por dia civil, a régua por dia da semana, os técnicos e as
     encerradas sem sucesso do dia em foco — numa passada pelas OS."""
@@ -372,24 +399,18 @@ def _produtividade(dia_foco):
     # capacidade POR SUPERVISOR atribui a cada um (`_capacidades`).
     tec_foco = {}
     perfil = defaultdict(lambda: [0, 0, 0, 0])       # técnico -> [ext 30d, int 30d, ext, int]
+    # (empresa, técnico) -> [OS de cliente, último dia] nos últimos
+    # DIAS_NOVO dias: de onde sai o aviso de técnico sem responsável.
+    corte_novo = (hoje() - timedelta(days=DIAS_NOVO)).isoformat()
+    recentes = {}
     for d, e, t, f, su, mo, ta, os_n, hora, ficha in linhas:
-        # A recusa vai para o dia e a hora da FICHA quando ela discorda do
-        # relatório: a #601017 foi recusada às 22:36 de 23/11 e o relatório
-        # a carimbou 00:24 de 24/11 — ela sumia da lista do dia em que
-        # aconteceu. O relatório fica ao lado (`hora_rel`) para quem for
-        # conferir contra a Produtividade, que segue com ele.
-        # A nota só aparece quando a diferença CONTA (outro dia ou 10+ min):
-        # em 8 dias, 78 das 80 divergências eram de 1 a 5 min, e anotar todas
-        # enchia a lista de "relatório" sem dizer nada.
-        hora_rel = dia_rel = None
-        if not su and isinstance(ficha, str) and _FICHA.fullmatch(ficha):
-            if d and hora and (ficha[:10] != d or _minutos(hora) - _minutos(ficha[11:16]) >= MIN_NOTA_REL):
-                hora_rel = f"{d[8:10]}/{d[5:7]} {hora}" if ficha[:10] != d else hora
-            if ficha[:10] != d:
-                dia_rel = d
-            d, hora = ficha[:10], ficha[11:16]
+        d, hora, hora_rel, dia_rel = _pela_ficha(d, su, hora, ficha)
         if not d or d < base_de or not eh_cliente(f):
             continue
+        if d >= corte_novo and t and t != "—" and e and e != "—":
+            r = recentes.setdefault((e, t), [0, d])
+            r[0] += 1
+            r[1] = max(r[1], d)
         por_dia[d][0 if su else 1] += 1
         tipo = tipo_os(f)
         por_tipo[d][tipo][0 if su else 1] += 1
@@ -439,10 +460,11 @@ def _produtividade(dia_foco):
         "_em_campo": em_campo,
         "_perfil": perfil,
         "_tec_foco": tec_foco,
+        "_recentes": recentes,
     }
 
 
-def _capacidades(prod, cadastro, dia_foco, alcance=(), nomes=None):
+def _capacidades(prod, cadastro, dia_foco, alcance=(), nomes=None, pres=None):
     """Capacidade instalada e em campo por dia, com o cadastro de cada dia.
 
     `cadastro` = (técnicos atuais, histórico), ou (None, []) sem a
@@ -452,15 +474,31 @@ def _capacidades(prod, cadastro, dia_foco, alcance=(), nomes=None):
     Em campo: [capacidade, externos, internos, fora do cadastro]. "Fora" é
     quem fechou OS de cliente e não casou com o cadastro; ele entra pela
     regra antiga, e a tela diz quantos são.
+
+    `pres` = correções do supervisor ({dia: {chave: linha}}, migration
+    0024): "esteve em campo" põe o técnico na conta mesmo sem OS fechada,
+    "não esteve" tira quem fechou. Valem no número do topo, no gráfico e na
+    linha do supervisor — um número só para "em campo".
     """
     atuais, eventos = cadastro
     em_campo, perfil = prod.pop("_em_campo"), prod.pop("_perfil")
     tec_foco = prod.pop("_tec_foco")
+    foco = dia_foco.isoformat()
+    auto_foco = {equipe.chave(t): t for t in em_campo.get(foco, ())}
+    nomes_cad = {t["chave"]: t.get("nome_wvsa") or t["nome"] for t in atuais or []}
+    for d, mapa in (pres or {}).items():
+        cur = {equipe.chave(t): t for t in em_campo.get(d, ())}
+        for k, p in mapa.items():
+            if p["presente"]:
+                cur.setdefault(k, nomes_cad.get(k) or p["tecnico"])
+            else:
+                cur.pop(k, None)
+        em_campo[d] = set(cur.values())
     inicio = date.fromisoformat(_desde_grafico())
     fim = max(hoje(), dia_foco)
     dias = [(inicio + timedelta(days=i)).isoformat() for i in range((fim - inicio).days + 1)]
-    if dia_foco.isoformat() not in dias:
-        dias.append(dia_foco.isoformat())
+    if foco not in dias:
+        dias.append(foco)
     instalada = equipe.instalada_por_dia(dias, atuais, eventos)
     capacidade, fora_foco = {}, []
     for d, tecs in em_campo.items():
@@ -473,68 +511,127 @@ def _capacidades(prod, cadastro, dia_foco, alcance=(), nomes=None):
             else:
                 interno = not _faz_externa(perfil[t])
                 fora += 1
-                if d == dia_foco.isoformat():
+                if d == foco:
                     fora_foco.append(t)
             inte += interno
             ext += not interno
         capacidade[d] = [ext * CAP_EXTERNA + inte * CAP_INTERNA, ext, inte, fora]
     prod["capacidade"] = capacidade
     prod["instalada"] = instalada
-    prod["por_supervisor"] = _por_supervisor(dia_foco, atuais, eventos, em_campo, perfil, tec_foco,
+    prod["por_supervisor"] = _por_supervisor(dia_foco, atuais, eventos, em_campo, auto_foco,
+                                             (pres or {}).get(foco, {}), perfil, tec_foco,
                                              alcance, nomes or {})
     prod["fora_cadastro"] = sorted(fora_foco, key=_norma)
     prod["tem_cadastro"] = atuais is not None
+    prod["tem_presenca"] = pres is not None
 
 
-def _por_supervisor(dia_foco, atuais, eventos, em_campo, perfil, tec_foco, alcance, nomes):
+def _presencas(de, ate):
+    """{dia ISO: {chave: linha}} — a correção mais NOVA de cada técnico em
+    cada dia. A tabela é append-only (migration 0024): "voltar ao
+    automático" é uma linha com `presente` nulo, que aqui some do mapa.
+    None = a migration ainda não subiu."""
+    try:
+        linhas = _paginado("warroom_presenca", {
+            "select": "id,dia,tecnico_chave,tecnico,presente,motivo,usuario_id,em",
+            "dia": f"gte.{de}", "and": f"(dia.lte.{ate})", "order": "em.asc,id.asc"})
+    except Exception as e:
+        if supa.tabela_faltando(e):
+            return None
+        raise
+    ultima = defaultdict(dict)
+    for l in linhas:
+        ultima[l["dia"]][l["tecnico_chave"]] = l
+    return {d: {k: v for k, v in m.items() if v["presente"] is not None} for d, m in ultima.items()}
+
+
+def _por_supervisor(dia_foco, atuais, eventos, em_campo, auto_foco, pres_foco, perfil, tec_foco,
+                    alcance, nomes):
     """A capacidade do dia em foco quebrada por supervisor (pedido de
-    24/11/2026).
+    24/11/2026), com a LISTA de técnicos de cada um (pedido de 25/11/2026).
 
-    De quem é cada técnico: o supervisor do CADASTRO; quem fecha OS sem estar
-    no cadastro vai pelo vínculo de sempre (`_no_alcance`, o da lista de
-    encerradas). Medido em 24/11/2026, as duas fontes concordam em 38 dos 39
-    técnicos do cadastro — o que diverge (Gabriel André Feliciano) é de
-    retirada e não entra na War Room. Pelo vínculo um técnico pode ter dois
-    supervisores (INFRA WAVE): conta para os dois, e a soma das linhas passa
-    do total da operação — a tela diz isso.
+    De quem é cada técnico: o VÍNCULO de Configurações
+    (`supervisores.responsaveis`) — a mesma regra da Produtividade, do IQI e
+    das encerradas. Até 25/11/2026 a capacidade usava o supervisor do
+    cadastro da Equipe; com o supervisor mexendo no próprio time, duas
+    fontes divergiriam sem a tela dizer. Pelo vínculo um técnico pode ter
+    dois supervisores: conta para os dois, e a soma das linhas passa do
+    total da operação — a tela diz isso.
 
     Linha: {id, nome, tecnicos, total: [cap, ext, int], campo: [cap, n],
-    exec, rec}. Quem não tem supervisor vai na linha `id: None`.
+    exec, rec, tecs}. Quem não tem supervisor vai na linha `id: None`.
+    `tecs`: um por técnico — considerado em campo (`c`), se fechou OS
+    (`auto`) e a correção do supervisor (`p`), para a tela listar e corrigir.
     """
     foco = dia_foco.isoformat()
     eq_dia = equipe.equipe_em(dia_foco, atuais, eventos) if atuais else []
     idx = equipe.indice(eq_dia)
     linhas = {a["id"]: {"id": a["id"], "nome": nomes.get(a["id"], "—"), "_tot": [], "_campo": [],
-                        "exec": 0, "rec": 0} for a in alcance}
-    linhas[None] = {"id": None, "nome": "Sem supervisor", "_tot": [], "_campo": [], "exec": 0, "rec": 0}
+                        "_tecs": {}, "exec": 0, "rec": 0} for a in alcance}
+    linhas[None] = {"id": None, "nome": "Sem supervisor", "_tot": [], "_campo": [], "_tecs": {},
+                    "exec": 0, "rec": 0}
 
     def donos(nome, empresa):
-        cad = idx.get(equipe.chave(nome))
-        if cad is not None:
-            return [cad.get("supervisor_id")] if cad.get("supervisor_id") in linhas else [None]
-        ids = [a["id"] for a in alcance if _no_alcance(a, empresa, nome)]
-        return ids or [None]
+        return [i for i in sup.responsaveis(alcance, empresa, nome) if i in linhas] or [None]
+
+    # Por chave: o WVSA não é consistente na grafia ("GABRIEL ANDRE
+    # FELICIANO" sob RETIRADA, "Gabriel André Feliciano" no cadastro).
+    os_foco = {}
+    for nome, (suc, rec, emp) in tec_foco.items():
+        o = os_foco.setdefault(equipe.chave(nome), [0, 0, emp, nome])
+        o[0] += suc
+        o[1] += rec
+    campo_foco = {equipe.chave(n): n for n in em_campo.get(foco, ())}
+
+    def correcao(k):
+        p = pres_foco.get(k)
+        if not p:
+            return None
+        return {"presente": p["presente"], "por": nomes.get(p["usuario_id"], "—"),
+                "hora": _hora_local(p["em"]), "motivo": p.get("motivo")}
+
+    def ficha(k, nome, empresa, interno, cad):
+        suc, rec = (os_foco.get(k) or [0, 0])[:2]
+        return {"k": k, "n": nome, "e": empresa, "i": bool(interno), "cad": cad,
+                "auto": k in auto_foco, "c": k in campo_foco, "x": suc, "r": rec, "p": correcao(k)}
 
     for t in eq_dia:
         if equipe.entra_na_war_room(t):
+            k = t["chave"]
             for s_id in donos(t.get("nome_wvsa") or t["nome"], t["empresa"]):
                 linhas[s_id]["_tot"].append(t)
-    for nome in em_campo.get(foco, ()):
-        suc, rec, emp = tec_foco.get(nome, [0, 0, ""])
-        cad = idx.get(equipe.chave(nome))
+                linhas[s_id]["_tecs"][k] = ficha(k, t["nome"], t["empresa"], t.get("interno"), True)
+    for k, nome in campo_foco.items():
+        emp = (os_foco.get(k) or [0, 0, ""])[2]
+        cad = idx.get(k)
         interno = bool(cad.get("interno")) if cad is not None else not _faz_externa(perfil[nome])
+        if cad is not None:
+            emp = cad["empresa"]
         for s_id in donos(nome, emp):
             linhas[s_id]["_campo"].append(interno)
+            if k not in linhas[s_id]["_tecs"]:
+                linhas[s_id]["_tecs"][k] = ficha(k, cad["nome"] if cad else nome, emp, interno, cad is not None)
+    # Executadas e recusas contam TODA OS de cliente do time no dia, inclusive
+    # de quem o supervisor marcou como "não esteve em campo": a OS existiu.
+    for k, (suc, rec, emp, nome) in os_foco.items():
+        cad = idx.get(k)
+        for s_id in donos((cad.get("nome_wvsa") or cad["nome"]) if cad else nome,
+                            cad["empresa"] if cad else emp):
             linhas[s_id]["exec"] += suc
             linhas[s_id]["rec"] += rec
+            if k not in linhas[s_id]["_tecs"]:
+                interno = bool(cad.get("interno")) if cad else not _faz_externa(perfil[nome])
+                linhas[s_id]["_tecs"][k] = ficha(k, cad["nome"] if cad else nome,
+                                                 cad["empresa"] if cad else emp, interno, cad is not None)
     saida = []
     for l in linhas.values():
-        tot, campo = l.pop("_tot"), l.pop("_campo")
+        tot, campo, tecs = l.pop("_tot"), l.pop("_campo"), l.pop("_tecs")
         if not tot and not campo:
             continue          # supervisor sem ninguém na War Room (o de infra)
         l["tecnicos"] = len(tot)
         l["total"] = equipe.somar(tot)
         l["campo"] = [sum(CAP_INTERNA if i else CAP_EXTERNA for i in campo), len(campo)]
+        l["tecs"] = sorted(tecs.values(), key=lambda x: (not x["c"], _norma(x["n"])))
         saida.append(l)
     return sorted(saida, key=lambda l: (l["id"] is None, _norma(l["nome"])))
 
@@ -689,10 +786,23 @@ def pacote(dia_foco):
         atuais = equipe.listar()
         return atuais, (equipe.historico() if atuais is not None else [])
 
-    prod, est, (lista, tem_tabela), rod, nomes, alcance, vals, cad = supa.paralelo(
+    def decididos():
+        # Técnicos que o aviso de "sem responsável" já resolveu (0024). None
+        # = sem a migration: o aviso não aparece, porque não haveria onde
+        # gravar a resposta.
+        try:
+            return {l["tecnico"] for l in _paginado("tecnico_responsavel", {"select": "tecnico"})}
+        except Exception as e:
+            if supa.tabela_faltando(e):
+                return None
+            raise
+
+    prod, est, (lista, tem_tabela), rod, nomes, alcance, vals, cad, pres, dec = supa.paralelo(
         lambda: _produtividade(dia_foco), lambda: _esteira(dia_foco),
-        desvios, rodadas, _nomes, _alcance_supervisores, validacoes, cadastro)
-    _capacidades(prod, cad, dia_foco, alcance, nomes)
+        desvios, rodadas, _nomes, _alcance_supervisores, validacoes, cadastro,
+        lambda: _presencas(_desde_grafico(), max(hoje(), dia_foco).isoformat()), decididos)
+    _capacidades(prod, cad, dia_foco, alcance, nomes, pres)
+    pendentes = _pendentes(prod.pop("_recentes"), alcance, dec, cad[0])
     # Cada encerrada sem sucesso leva os supervisores que respondem pelo
     # técnico: a tela filtra por supervisor sem conhecer a regra do vínculo.
     for o in prod["sem_sucesso"]:
@@ -731,9 +841,208 @@ def pacote(dia_foco):
         # None = a migration 0022 ainda não subiu; {} = ninguém validou nada.
         "validacoes": None if vals is None else _validacoes_do_dia(vals, prod["sem_sucesso"], dia_foco, nomes),
         "wvsa_os": WVSA_OS,
+        # None = sem a migration 0024 (o aviso não aparece); [] = todos têm
+        # responsável.
+        "sem_responsavel": pendentes,
         "cap_externa": CAP_EXTERNA,
         "cap_interna": CAP_INTERNA,
     }
+
+
+def _pendentes(recentes, alcance, decididos, atuais=None):
+    """Técnicos que fecharam OS de cliente nos últimos DIAS_NOVO dias e não
+    têm supervisor (pedido de 25/11/2026).
+
+    Técnico novo de empresa terceira já cai no supervisor da empresa
+    (vínculo por equipe) e não aparece aqui; o da UNETVALE, repartida nome a
+    nome, aparece até alguém responder. Infra fica fora (a War Room não a
+    conta), e quem já foi respondido também — inclusive como "não é técnico
+    de campo". Sem a migration 0024 devolve None.
+    """
+    if decididos is None:
+        return None
+    no_cadastro = {t["chave"] for t in atuais or [] if t.get("ativo")}
+    saida = []
+    for (e, t), (n, ultimo) in recentes.items():
+        if sup.eh_infra(e) or sup.responsaveis(alcance, e, t):
+            continue
+        rotulo = f"{e} - {t}"
+        if sup.chave_tecnico(rotulo) in decididos:
+            continue
+        saida.append({"rotulo": rotulo, "empresa": e, "nome": t, "os": n, "ultimo": ultimo,
+                      "cadastro": equipe.chave(t) in no_cadastro})
+    return sorted(saida, key=lambda x: (-x["os"], _norma(x["nome"])))
+
+
+DIAS_TIME = 60             # Configurações: técnico que não fechou OS em 60 dias sai da lista
+
+
+def tecnicos_recentes(dias=DIAS_TIME):
+    """{(empresa, técnico): [OS, OS de cliente, último dia]} nos últimos
+    `dias`, lendo a Produtividade compacta (com cache por carimbo)."""
+    corte = (hoje() - timedelta(days=dias)).isoformat()
+    out = {}
+    _, linhas = _ler_produtividade()
+    for d, e, t, f, su, mo, ta, os_n, hora, ficha in linhas:
+        d = _pela_ficha(d, su, hora, ficha)[0]
+        if d and d >= corte and t and t != "—" and e and e != "—":
+            o = out.setdefault((e, t), [0, 0, d])
+            o[0] += 1
+            o[1] += eh_cliente(f)
+            o[2] = max(o[2], d)
+    return out
+
+
+def empresas_conhecidas():
+    """Empresas que aparecem na Produtividade, pela leitura compacta (com
+    cache por carimbo). `supervisores.equipes_disponiveis` dá o mesmo
+    conjunto expandindo as 57 mil OS em dicionários — ~1 s a mais em toda
+    abertura de Configurações de supervisor."""
+    _, linhas = _ler_produtividade()
+    return sorted({e for _, e, *_ in linhas if e and e != "—"})
+
+
+def _decididos():
+    try:
+        return {l["tecnico"] for l in _paginado("tecnico_responsavel", {"select": "tecnico"})}
+    except Exception as e:
+        if supa.tabela_faltando(e):
+            return None
+        raise
+
+
+def time_do_supervisor(uid, alcance=None):
+    """O time de um supervisor para a tela de Configurações (pedido de
+    25/11/2026: "igual o da gestão", com a lista de técnicos).
+
+    Técnicos conhecidos = quem fechou OS nos últimos DIAS_TIME dias, mais o
+    cadastro ativo da Equipe, mais os vinculados nome a nome (mesmo os que
+    pararam de aparecer: o vínculo existe e precisa poder ser removido).
+    Cada um sai com quem responde por ele hoje e por onde (equipe inteira ou
+    nome a nome) — é o que a tela mostra para o supervisor não tirar ou
+    pegar alguém às cegas.
+    """
+    alcance = alcance if alcance is not None else sup.alcance_serie()
+    meu = next((a for a in alcance if a["id"] == uid), {"id": uid, "equipes": set(), "tecnicos": set()})
+    rec, atuais, avulsos, nomes, dec = supa.paralelo(
+        tecnicos_recentes, equipe.listar,
+        lambda: supa.select("supervisor_tecnicos", {"select": "usuario_id,tecnico,rotulo"}),
+        _nomes, _decididos)
+    conhecidos = {}
+
+    def juntar(rotulo, os_n=0, cliente=0, ultimo=None):
+        k = sup.chave_tecnico(rotulo)
+        c = conhecidos.setdefault(k, {"chave": k, "rotulo": rotulo, "empresa": sup.empresa_de(rotulo),
+                                      "nome": rotulo.split(" - ", 1)[-1], "os": 0, "cliente": 0,
+                                      "ultimo": None, "cadastro": False})
+        c["os"] += os_n
+        c["cliente"] += cliente
+        if ultimo and (not c["ultimo"] or ultimo > c["ultimo"]):
+            c["ultimo"] = ultimo
+        return c
+
+    for (e, t), (n, nc, ult) in rec.items():
+        juntar(f"{e} - {t}", n, nc, ult)
+    for t in atuais or []:
+        if t.get("ativo"):
+            juntar(f"{t['empresa']} - {t.get('nome_wvsa') or t['nome']}")["cadastro"] = True
+    for a in avulsos:
+        juntar(a["rotulo"])
+    meus, outros = [], []
+    for k, c in conhecidos.items():
+        donos = sup.responsaveis(alcance, c["empresa"], c["nome"])
+        c["outros"] = [nomes.get(i, "—") for i in donos if i != uid]
+        c["pela_equipe"] = c["empresa"] in meu["equipes"]
+        c["nome_a_nome"] = k in meu["tecnicos"]
+        c["infra"] = sup.eh_infra(c["empresa"])
+        (meus if uid in donos else outros).append(c)
+
+    def agrupar(lista):
+        por = {}
+        for c in sorted(lista, key=lambda c: _norma(c["nome"])):
+            por.setdefault(c["empresa"] or "(sem empresa)", []).append(c)
+        return dict(sorted(por.items()))
+
+    pend = None
+    if dec is not None:
+        # A mesma janela e a mesma conta (OS de cliente) do aviso da War Room.
+        recentes_cli = {k: [v[1], v[2]] for k, v in tecnicos_recentes(DIAS_NOVO).items() if v[1]}
+        pend = _pendentes(recentes_cli, alcance, dec, atuais)
+    return {"meus": agrupar(meus), "n_meus": len(meus), "outros": agrupar(outros),
+            "sem_responsavel": pend, "dias": DIAS_TIME}
+
+
+class Conflito(Exception):
+    """Outro supervisor respondeu antes; a mensagem diz quem e quando."""
+
+
+def definir_responsavel(corpo, uid):
+    """O primeiro supervisor que responde o aviso decide quem responde pelo
+    técnico novo — para todos. A trava é do banco (`tecnico_definir_
+    responsavel`, chave primária no técnico): dois cliques ao mesmo tempo
+    gravam um só, e o segundo recebe quem decidiu.
+
+    `supervisor_id` nulo = "não é técnico de campo": a pergunta não volta e
+    nenhum vínculo nasce.
+    """
+    rotulo = re.sub(r"\s+", " ", str(corpo.get("rotulo") or "")).strip()
+    if " - " not in rotulo or len(rotulo) > 160:
+        raise Recusa("Técnico inválido.")
+    s_id = corpo.get("supervisor_id")
+    if s_id is not None:
+        ids = {l["usuario_id"] for l in supa.select("supervisores", {"select": "usuario_id"})}
+        if s_id not in ids:
+            raise Recusa("Supervisor desconhecido.")
+    # O técnico tem de existir na Produtividade: o rótulo vira vínculo, e um
+    # nome digitado à mão criaria um vínculo que não casa com ninguém.
+    chave = sup.chave_tecnico(rotulo)
+    empresa = sup.empresa_de(rotulo)
+    _, linhas = _ler_produtividade()
+    if not any((e or "").strip().upper() in (empresa, rotulo.split(" - ", 1)[0].strip().upper())
+               and sup.chave_tecnico(f"{e} - {t}") == chave for _, e, t, *_ in linhas):
+        raise Recusa("Esse técnico não aparece na Produtividade.")
+    r = supa.rpc("tecnico_definir_responsavel", {
+        "p_tecnico": chave, "p_rotulo": rotulo, "p_supervisor": s_id, "p_por": uid}) or {}
+    if r.get("ok"):
+        return {"ok": True}
+    nomes = _nomes()
+    quem = nomes.get(r.get("definido_por"), "outra pessoa")
+    para = nomes.get(r.get("supervisor_id")) if r.get("supervisor_id") else "não é técnico de campo"
+    raise Conflito(f"{quem} já respondeu às {_hora_local(r.get('definido_em')) or '—'}: {para}.")
+
+
+def marcar_presenca(corpo, uid):
+    """O supervisor corrige se o técnico esteve em campo no dia.
+
+    `presente` true/false grava a correção; null volta ao automático (ter
+    fechado OS de cliente). Cada clique é uma linha nova (append-only): a
+    mais nova vale, e o histórico fica.
+    """
+    d = dia_valido(corpo.get("dia"))
+    if d < hoje() - timedelta(days=DIAS_RETROATIVO):
+        raise Recusa(f"Só dá para corrigir os últimos {DIAS_RETROATIVO} dias.")
+    k = str(corpo.get("tecnico") or "").strip()
+    if not k or len(k) > 120:
+        raise Recusa("Técnico inválido.")
+    presente = corpo.get("presente")
+    if presente not in (True, False, None):
+        raise Recusa("Resposta inválida.")
+    motivo = _texto(corpo.get("motivo"), 300, "o motivo")
+    # O nome sai do servidor: do cadastro, ou de quem fechou OS de cliente
+    # naquele dia. Chave que não casa com ninguém é recusada.
+    nome = next(((t.get("nome_wvsa") or t["nome"]) for t in equipe.listar() or [] if t["chave"] == k), None)
+    if nome is None:
+        _, linhas = _ler_produtividade()
+        iso = d.isoformat()
+        for dd, e, t, f, su, mo, ta, os_n, hora, ficha in linhas:
+            if t and _pela_ficha(dd, su, hora, ficha)[0] == iso and equipe.chave(t) == k and eh_cliente(f):
+                nome = t
+                break
+    if nome is None:
+        raise Recusa("Esse técnico não está no cadastro nem fechou OS neste dia.")
+    supa.insert("warroom_presenca", {"dia": d.isoformat(), "tecnico_chave": k, "tecnico": nome[:120],
+                                     "presente": presente, "motivo": motivo, "usuario_id": uid})
+    return d
 
 
 # Ficha da OS no WVSA — o mesmo endereço que a Esteira usa. Só abre dentro
@@ -742,35 +1051,14 @@ WVSA_OS = "https://wvsa8.unetvale.com.br/os/"
 
 
 def _alcance_supervisores():
-    """Equipes e técnicos de cada supervisor, em SÉRIE.
-
-    `supervisores.listar()` faz as leituras em `supa.paralelo`, e isto roda
-    dentro do paralelo de `pacote`: paralelo aninhado no mesmo pool pode
-    prender as threads esperando filhas sem onde rodar (§4, Esteira).
-    """
-    ids = [l["usuario_id"] for l in supa.select("supervisores", {"select": "usuario_id"})]
-    if not ids:
-        return []
-    filtro = f"in.({','.join(ids)})"
-    equipes = supa.select("supervisor_equipes", {"select": "usuario_id,equipe", "usuario_id": filtro})
-    try:
-        tecs = supa.select("supervisor_tecnicos", {"select": "usuario_id,tecnico", "usuario_id": filtro})
-    except Exception:
-        tecs = []          # migration 0004 ausente: vale só o vínculo por equipe
-    out = {i: {"id": i, "equipes": set(), "tecnicos": set()} for i in ids}
-    for e in equipes:
-        out[e["usuario_id"]]["equipes"].add(sup.APELIDOS_EMPRESA.get(e["equipe"].upper(), e["equipe"].upper()))
-    for t in tecs:
-        out[t["usuario_id"]]["tecnicos"].add(t["tecnico"])
-    return list(out.values())
+    """Equipes e técnicos de cada supervisor, em SÉRIE (dentro do paralelo
+    do pacote). A regra mora em `supervisores.alcance_serie`."""
+    return sup.alcance_serie()
 
 
 def _no_alcance(a, empresa, tecnico):
-    """A mesma regra do recorte da Produtividade: equipe inteira OU o técnico
-    vinculado nome a nome (`supervisores`, apelidos resolvidos)."""
-    e = (empresa or "").strip().upper()
-    return (sup.APELIDOS_EMPRESA.get(e, e) in a["equipes"]
-            or sup.chave_tecnico(f"{empresa} - {tecnico}") in a["tecnicos"])
+    """A mesma regra do recorte da Produtividade (`supervisores.no_alcance`)."""
+    return sup.no_alcance(a, empresa, tecnico)
 
 
 def _validacoes_do_dia(vals, sem_sucesso, dia_foco, nomes):
@@ -987,3 +1275,171 @@ def marcar_rodada(corpo, uid):
                                           "dia": f"eq.{d.isoformat()}", "order": "feito_em.asc"})
     return [{"momento": r["momento"], "usuario_id": r["usuario_id"],
              "nome": nomes.get(r["usuario_id"], "—"), "hora": _hora_local(r["feito_em"])} for r in rod]
+
+
+# ---------------------------------------------------------------------
+# Visão por supervisor, na Produtividade (pedido de 25/11/2026)
+# ---------------------------------------------------------------------
+# Capacidade total, em campo, executadas e recusas do time de cada
+# supervisor num PERÍODO, e os cinco técnicos que mais pesam em três réguas:
+# aproveitamento (executadas ÷ capacidade em campo), média de produtividade
+# (executadas por dia em campo) e recusas — com os motivos e se a recusa
+# passou pelo supervisor (`warroom_validacoes`). As MESMAS regras da War
+# Room: só OS de cliente (sem retirada e sem infra), o cadastro como era em
+# cada dia, a correção de presença e a recusa no dia da ficha. A diferença é
+# a janela: aqui é o período, lá o dia.
+#
+# A capacidade só conta DIAS COM OPERAÇÃO (algum técnico fechou OS de
+# cliente): domingo sem nenhuma OS não é "a equipe inteira parada", e somá-lo
+# derrubaria o aproveitamento do mês sem dizer nada.
+VISAO_MAX_DIAS = 93
+TOP = 5
+MIN_DIAS_RANKING = 2       # técnico com um dia só em campo não entra nos rankings de razão
+
+
+def visao_supervisores(de, ate, permitidos=None):
+    """{de, ate, dias, supervisores: [...]} — `permitidos` (ids) recorta no
+    servidor: o supervisor só recebe o próprio time."""
+    ate = min(ate, hoje())
+    if de > ate:
+        de = ate
+    if (ate - de).days >= VISAO_MAX_DIAS:
+        de = ate - timedelta(days=VISAO_MAX_DIAS - 1)
+    de_i, ate_i = de.isoformat(), ate.isoformat()
+
+    def validacoes():
+        try:
+            return _paginado("warroom_validacoes", {
+                "select": "dia,os,validado",
+                "dia": f"gte.{(de - timedelta(days=1)).isoformat()}",
+                "and": f"(dia.lte.{(ate + timedelta(days=1)).isoformat()})"})
+        except Exception as e:
+            if supa.tabela_faltando(e):
+                return None
+            raise
+
+    def cadastro():
+        atuais = equipe.listar()
+        return atuais, (equipe.historico() if atuais is not None else [])
+
+    (_, linhas), alcance, nomes, (atuais, eventos), pres, vals = supa.paralelo(
+        _ler_produtividade, sup.alcance_serie, _nomes, cadastro,
+        lambda: _presencas(de_i, ate_i), validacoes)
+    val_os = {}
+    for v in vals or []:
+        val_os[v["os"]] = v["validado"]       # o número da OS é único entre dias
+
+    corte_perfil = (ate - timedelta(days=DIAS_PERFIL)).isoformat()
+    # chave -> {nome, empresa, dias: {dia: [suc, rec]}, motivos, val: [sim, não, sem resposta, sem número]}
+    tecs = {}
+    perfil = defaultdict(lambda: [0, 0, 0, 0])
+    dias_op = set()
+    for d, e, t, f, su, mo, ta, os_n, hora, ficha in linhas:
+        d = _pela_ficha(d, su, hora, ficha)[0]
+        if not d or not t or t == "—" or not eh_cliente(f):
+            continue
+        k = equipe.chave(t)
+        if d >= corte_perfil and d <= ate_i:
+            perfil[k][0 if ta else 1] += 1
+        if not (de_i <= d <= ate_i):
+            continue
+        dias_op.add(d)
+        x = tecs.setdefault(k, {"nome": t, "empresa": e if e and e != "—" else "", "dias": defaultdict(lambda: [0, 0]),
+                                "motivos": Counter(), "val": [0, 0, 0, 0]})
+        x["dias"][d][0 if su else 1] += 1
+        if not su:
+            x["motivos"][mo or "Não informado"] += 1
+            if not os_n:
+                x["val"][3] += 1
+            elif str(os_n) in val_os:
+                x["val"][0 if val_os[str(os_n)] else 1] += 1
+            else:
+                x["val"][2] += 1
+
+    cad_atual = {t["chave"]: t for t in atuais or []}
+    por_sup = {a["id"]: {"id": a["id"], "nome": nomes.get(a["id"], "—"), "cap_total": 0, "_tecs": {}}
+               for a in alcance if permitidos is None or a["id"] in permitidos}
+    if not por_sup:
+        return {"de": de_i, "ate": ate_i, "dias": 0, "supervisores": [],
+                "tem_cadastro": atuais is not None, "tem_validacao": vals is not None}
+
+    def donos(nome, empresa):
+        return [i for i in sup.responsaveis(alcance, empresa, nome) if i in por_sup]
+
+    def ficha_tec(s, k, nome, empresa, cad):
+        return por_sup[s]["_tecs"].setdefault(k, {
+            "k": k, "n": (cad or {}).get("nome") or nome, "e": empresa, "cad": cad is not None,
+            "dias_campo": 0, "cap_campo": 0, "exec": 0, "rec": 0, "motivos": Counter(), "val": [0, 0, 0, 0]})
+
+    for iso in sorted(dias_op):
+        dia = date.fromisoformat(iso)
+        eq_dia = equipe.equipe_em(dia, atuais, eventos) if atuais else []
+        idx = equipe.indice(eq_dia)
+        # A capacidade total do dia: o cadastro de então, sem retirada.
+        for t in eq_dia:
+            if equipe.entra_na_war_room(t):
+                for s in donos(t.get("nome_wvsa") or t["nome"], t["empresa"]):
+                    por_sup[s]["cap_total"] += equipe.capacidade_de(t)
+                    ficha_tec(s, t["chave"], t["nome"], t["empresa"], t)
+        # Em campo: quem fechou OS de cliente no dia, com a correção.
+        campo = {k for k, x in tecs.items() if iso in x["dias"]}
+        for k, p in (pres or {}).get(iso, {}).items():
+            (campo.add if p["presente"] else campo.discard)(k)
+        for k in campo:
+            cad = idx.get(k) or cad_atual.get(k)
+            x = tecs.get(k)
+            nome = (cad.get("nome_wvsa") or cad["nome"]) if cad else (x or {}).get("nome")
+            empresa = cad["empresa"] if cad else (x or {}).get("empresa", "")
+            if not nome:
+                continue
+            cap = equipe.capacidade_de(cad) if cad else (CAP_EXTERNA if _faz_externa(perfil[k]) else CAP_INTERNA)
+            for s in donos(nome, empresa):
+                f = ficha_tec(s, k, nome, empresa, cad)
+                f["dias_campo"] += 1
+                f["cap_campo"] += cap
+    # Executadas e recusas: toda OS de cliente do time, inclusive de quem a
+    # correção tirou de campo — a OS existiu.
+    for k, x in tecs.items():
+        cad = cad_atual.get(k)
+        nome = (cad.get("nome_wvsa") or cad["nome"]) if cad else x["nome"]
+        empresa = cad["empresa"] if cad else x["empresa"]
+        for s in donos(nome, empresa):
+            f = ficha_tec(s, k, nome, empresa, cad)
+            f["exec"] += sum(v[0] for v in x["dias"].values())
+            f["rec"] += sum(v[1] for v in x["dias"].values())
+            f["motivos"].update(x["motivos"])
+            f["val"] = [a + b for a, b in zip(f["val"], x["val"])]
+
+    saida = []
+    for l in por_sup.values():
+        fichas = list(l.pop("_tecs").values())
+        if not fichas:
+            continue
+        motivos, val = Counter(), [0, 0, 0, 0]
+        for f in fichas:
+            motivos.update(f["motivos"])
+            val = [a + b for a, b in zip(val, f["val"])]
+            f["ap"] = round(100 * f["exec"] / f["cap_campo"]) if f["cap_campo"] else None
+            f["media"] = round(f["exec"] / f["dias_campo"], 1) if f["dias_campo"] else None
+            f["motivos"] = f["motivos"].most_common(3)
+        cap_campo = sum(f["cap_campo"] for f in fichas)
+        exec_ = sum(f["exec"] for f in fichas)
+        rec = sum(f["rec"] for f in fichas)
+        com_dias = [f for f in fichas if f["dias_campo"] >= MIN_DIAS_RANKING]
+        l.update({
+            "tecnicos": len(fichas),
+            "cap_campo": cap_campo, "exec": exec_, "rec": rec,
+            "aproveitamento": round(100 * exec_ / cap_campo) if cap_campo else None,
+            "taxa_recusa": round(100 * rec / (exec_ + rec)) if exec_ + rec else None,
+            "motivos": motivos.most_common(8),
+            "validacao": val,
+            "top_aproveitamento": sorted(com_dias, key=lambda f: (f["ap"], -f["dias_campo"]))[:TOP],
+            "top_media": sorted(com_dias, key=lambda f: (f["media"], -f["dias_campo"]))[:TOP],
+            "top_recusas": sorted((f for f in fichas if f["rec"]), key=lambda f: (-f["rec"], _norma(f["n"])))[:TOP],
+            "tecs": sorted(fichas, key=lambda f: _norma(f["n"])),
+        })
+        saida.append(l)
+    return {"de": de_i, "ate": ate_i, "dias": len(dias_op),
+            "supervisores": sorted(saida, key=lambda l: _norma(l["nome"])),
+            "tem_cadastro": atuais is not None, "tem_validacao": vals is not None,
+            "min_dias": MIN_DIAS_RANKING, "cap_externa": CAP_EXTERNA, "cap_interna": CAP_INTERNA}

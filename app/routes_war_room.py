@@ -162,3 +162,52 @@ def war_room_validacao():
                                     "(migration 0022_war_room_validacoes.sql)."}), 503
         raise
     return jsonify({"validacao": v})
+
+
+def _sem_0024():
+    return jsonify({"erro": "Esta gravação ainda não tem a tabela no banco "
+                            "(migration 0024_responsaveis_e_presenca.sql)."}), 503
+
+
+@bp.route("/war-room/presenca", methods=["POST"])
+@login_obrigatorio
+@modulo_obrigatorio("war-room")
+def war_room_presenca():
+    """O supervisor corrige se o técnico esteve em campo (pedido de
+    25/11/2026). Devolve o pacote do dia: a correção muda a capacidade em
+    campo do topo, do gráfico e da linha do supervisor."""
+    u = usuario_atual()
+    if not u["is_supervisor"]:
+        return jsonify({"erro": "Só supervisor corrige a presença."}), 403
+    try:
+        dia = wr.marcar_presenca(_corpo(), u["id"])
+    except wr.Recusa as e:
+        return jsonify({"erro": str(e)}), 400
+    except Exception as e:
+        if supa.tabela_faltando(e):
+            return _sem_0024()
+        raise
+    return jsonify({"pacote": wr.pacote(dia)})
+
+
+@bp.route("/war-room/responsavel", methods=["POST"])
+@login_obrigatorio
+@modulo_obrigatorio("war-room")
+def war_room_responsavel():
+    """Resposta ao aviso de técnico sem responsável: o primeiro supervisor
+    que responde decide para todos. O admin também pode responder — é quem
+    reparte a UNETVALE quando nenhum supervisor está na mesa."""
+    u = usuario_atual()
+    if not (u["is_supervisor"] or u["is_admin"]):
+        return jsonify({"erro": "Só supervisor define o responsável."}), 403
+    try:
+        r = wr.definir_responsavel(_corpo(), u["id"])
+    except wr.Recusa as e:
+        return jsonify({"erro": str(e)}), 400
+    except wr.Conflito as e:
+        return jsonify({"erro": str(e), "conflito": True}), 409
+    except Exception as e:
+        if supa.tabela_faltando(e) or getattr(getattr(e, "response", None), "status_code", None) == 404:
+            return _sem_0024()
+        raise
+    return jsonify(r)

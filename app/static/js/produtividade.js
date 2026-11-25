@@ -188,6 +188,19 @@
     renderGraficoDia(dados); renderGraficoEmpresa(dados); renderGraficoTecnico(dados); renderGraficoDias(dados);
     renderGraficoFinalidade(dados); renderGraficoMotivo(dados); renderGraficoTipoAtend(dados);
     renderTabelaTecnicos(dados); renderTabelaDias(dados);
+    publicarFiltro();
+  }
+
+  // A visão por supervisor (produtividade_supervisor.js) segue o MESMO
+  // filtro da página — período (mês, semana, dia) e supervisor —, em vez de
+  // ter o seu. Ela carrega depois deste arquivo: o estado fica também em
+  // `window.__prodFiltro` para a primeira leitura.
+  function publicarFiltro() {
+    const sel = document.getElementById("f-supervisor");
+    const det = { sup: sel ? sel.value : "", dias: [...filtros.d], semanas: [...filtros.semana],
+                  meses: [...filtros.mes] };
+    window.__prodFiltro = det;
+    document.dispatchEvent(new CustomEvent("prodfiltro", { detail: det }));
   }
 
   function renderKpis(dados) {
