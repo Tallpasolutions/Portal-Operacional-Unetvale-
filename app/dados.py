@@ -178,14 +178,21 @@ def proxima_atualizacao(agora=None):
     return amanha
 
 
-def status_geral():
-    """Resumo consolidado para o cabeçalho: última atualização (mais recente entre
-    os módulos), status agregado e próxima atualização prevista."""
+def status_geral(modulos=MODULOS):
+    """Resumo para o cabeçalho: última atualização (mais recente entre os
+    módulos), status agregado e próxima atualização prevista.
+
+    `modulos` são as coletas de que A TELA depende (`routes.COLETAS_DA_TELA`).
+    Até 25/11/2026 eram sempre as dez: uma falha do IDF pintava "Falha na
+    última coleta" na Produtividade e na War Room, e quem estava nelas achava
+    que o próprio número estava errado.
+
+    `falhas` traz o nome de cada módulo com erro, para o selo dizer QUAL."""
     ultima = None
-    status = "ok"
+    falhas = []
     algum = False
     todos = get_todos()
-    for m in MODULOS:
+    for m in modulos:
         row = todos.get(m)
         if not row:
             continue
@@ -194,12 +201,13 @@ def status_geral():
         if dt and (ultima is None or dt > ultima):
             ultima = dt
         if row.get("status") and row["status"] != "ok":
-            status = "erro"
+            falhas.append(NOMES.get(m, m))
     prox = proxima_atualizacao()
     return {
         "tem_dados": algum,
         "ultima": ultima.astimezone(BR_TZ).strftime("%d/%m/%Y %H:%M") if ultima else "—",
-        "status": status if algum else "sem_dados",
+        "status": ("erro" if falhas else "ok") if algum else "sem_dados",
+        "falhas": falhas,
         "proxima": prox.strftime("%H:%M"),
         "horarios": HORARIOS,
     }

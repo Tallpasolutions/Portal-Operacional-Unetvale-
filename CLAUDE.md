@@ -2026,6 +2026,18 @@ outra.
 mês. Para eles vale `gerencial._mes_em_curso` (o mês acabou, fechou). Aplicar
 os 30 dias ali marcaria julho como parcial em pleno setembro.
 
+**O selo da topbar é da TELA, não do portal** (25/11/2026). Até então ele
+somava as dez coletas do WVSA: com `ger_idf` e `ger_salas` em erro desde a
+noite anterior, Produtividade, War Room e Equipe abriam com "Falha na última
+coleta", e quem estava nelas achava que o próprio número estava errado. Hoje
+`routes.COLETAS_DA_TELA` diz de quais módulos cada endpoint depende, e
+`dados.status_geral(modulos)` olha só esses — inclusive o "Última". O selo
+diz QUAL falhou ("Falha na coleta · IQM"; com mais de uma, "Falha em N
+coletas", com os nomes no `title`). Tela fora do mapa não mostra selo nem vai
+ao banco: Configurações e Usuários não exibem coleta, e Esteira e Troca de
+Poste têm coleta própria, cujo frescor dizem na página. O Monitoramento
+continua vendo todas. **Tela nova que lê `dados_modulo` entra no mapa.**
+
 **O botão "Atualizar" mora no `/monitoramento`, não na topbar.** Forçar coleta
 é ação de operação, e o Monitoramento é `admin_obrigatorio` — logo, **quem não
 é admin não força mais coleta**, só lê o estado. Foi decisão consciente ao
@@ -2109,6 +2121,20 @@ endereço respondia 200) e a rodada registrou "coleta da Celesc concluída" com
 `total: 0`. Sucesso na cara de quem lesse o log. `coletar_celesc.sh` agora lê
 o `total` do `coleta_concluida` que o próprio job gravou e recusa a rodada
 vazia, em vez de seguir para o geocodificar e o match sem nada nas mãos.
+
+**"This operation was aborted" é o prazo de 45 s por cidade — e agora tem
+segunda tentativa** (25/11/2026). De 03/09 a 25/11/2026 a coleta saiu
+"parcial" oito vezes assim, sempre UMA cidade e cada vez uma diferente
+(Brusque, Tijucas, Bombinhas, Penha, São João Batista, Nova Trento): o site
+da Celesc lento, não a cidade. A cidade só voltava na rodada seguinte, 6 h
+depois. O `CelescClient` (monorepo) repete uma vez, 5 s depois, em prazo
+estourado, queda de conexão e 5xx avulso; **não** repete manutenção
+(`Retry-After: 3600`), 4xx nem página sem `<pre>` (o site respondeu). E não
+repete se a cidade anterior falhou mesmo repetindo: aí o site está fora, e 11
+cidades estourando duas vezes (~17 min) encostariam no `LIMITE_ETAPA` de 20
+min. Cidade que falha nunca tem os avisos marcados `desapareceu`
+(`marcarDesaparecidos` recebe só as cidades ok). Testes em
+`packages/integrations/src/celesc/client.test.ts`.
 
 **O launchd dispara o job num DARK WAKE, e a máquina volta a dormir 2 s
 depois.** Este é o modo de falha mais caro da Celesc, porque não se parece com
