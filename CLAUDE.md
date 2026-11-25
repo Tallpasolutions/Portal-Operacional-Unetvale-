@@ -2665,9 +2665,12 @@ a.run(port=5001, use_reloader=False)"
 
 - **Times dos supervisores** em 25/11/2026, migration `0024`
   (`warroom_presenca`, `tecnico_responsavel`, `supervisor_vinculo_eventos`,
-  `tecnico_definir_responsavel`), **ainda não aplicada em produção** — sem
-  ela a War Room abre sem o aviso e sem a correção (rota 503), Configurações
-  mostra "Meu time" e grava o vínculo sem histórico. O porquê está no §4
+  `tecnico_definir_responsavel`), **aplicada em produção em 25/11/2026**
+  pelo `psycopg` (DATABASE_URL do monorepo), depois de a Vercel servir
+  `?v=7b57fd97` (#76), e conferida numa conexão NOVA (três tabelas, a
+  função, RLS; `anon`/`authenticated` sem acesso; `service_role` sem UPDATE
+  nem DELETE) e pelo PostgREST. Sem ela a War Room abriria sem o aviso e sem
+  a correção (rota 503). O porquê está no §4
   (War Room, Equipe técnica). Responsável "Relacionamento" no catálogo.
 
   Migration no PGlite: aplicada e reaplicada, 31 travas — presença e
@@ -2692,12 +2695,19 @@ a.run(port=5001, use_reloader=False)"
   escolhidos na barra; 375 px sem rolar de lado nas três telas; console
   limpo.
 
-  **Ainda não feito:** aplicar a 0024 e alinhar os dados com a lista do
-  Jhoni de 25/11/2026 — NODE TECH do Davi para o Guilherme, Gabriel André
-  Feliciano (RETIRADA) no Adolar nome a nome, Mateus Janicio da Silva
-  (CLEITON TELECOM) no cadastro, Lucas Alves Ramos com Guilherme no
-  cadastro. Os cinco avulsos antigos do Davi (Adnael, Cleber, Islas,
-  Juliano, Levi) continuam vinculados; ele pode tirar em Meu time.
+  **Dados alinhados com a lista do Jhoni de 25/11/2026** no mesmo dia, pelas
+  funções do app (com histórico): NODE TECH do Davi para o Guilherme,
+  Gabriel André Feliciano (RETIRADA) no Adolar nome a nome, Mateus Janicio
+  da Silva (CLEITON TELECOM, externo) no cadastro, Lucas Alves Ramos com o
+  Guilherme no cadastro. Conferido depois: **40 técnicos ativos, os 40 com o
+  supervisor da lista** no vínculo e no cadastro; equipes — Davi MAYRA, PC
+  PRIME, RTM; Guilherme INFRASEG, JVM, NODE TECH, RM; Adolar 3 ELLO, CLEITON
+  TELECOM, INNOVA, JONI, WAVE (e o apelido WAVE SUPERVISOR). A lista tinha o
+  Lucas Luiz da Silva Rolla duas vezes; é uma pessoa só. Os cinco avulsos
+  antigos do Davi (Adnael, Cleber, Islas, Juliano, Levi) continuam
+  vinculados; ele pode tirar em Meu time. Em 25/11/2026 o aviso de técnico
+  sem responsável tinha três nomes, os três supervisores fechando OS como
+  UNETVALE.
 
 - **Equipe técnica e capacidade pelo cadastro** em 24/11/2026, migration
   `0023` (`equipe_tecnicos`, `equipe_tecnicos_historico`, carga da
