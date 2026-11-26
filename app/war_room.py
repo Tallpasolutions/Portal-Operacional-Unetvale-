@@ -1565,6 +1565,10 @@ def visao_supervisores(de, ate, permitidos=None):
             f["motivos"].update(x["motivos"])
             f["val"] = [a + b for a, b in zip(f["val"], x["val"])]
 
+    # Num período de até 3 dias (o dia da War Room, por exemplo) ninguém
+    # passaria do mínimo de 2 dias em campo, e os rankings de razão sairiam
+    # vazios: aí basta 1 dia.
+    min_dias = 1 if len(dias_op) <= 3 else MIN_DIAS_RANKING
     saida = []
     for l in por_sup.values():
         fichas = list(l.pop("_tecs").values())
@@ -1580,7 +1584,7 @@ def visao_supervisores(de, ate, permitidos=None):
         cap_campo = sum(f["cap_campo"] for f in fichas)
         exec_ = sum(f["exec"] for f in fichas)
         rec = sum(f["rec"] for f in fichas)
-        com_dias = [f for f in fichas if f["dias_campo"] >= MIN_DIAS_RANKING]
+        com_dias = [f for f in fichas if f["dias_campo"] >= min_dias]
         l.update({
             "tecnicos": len(fichas),
             "cap_campo": cap_campo, "exec": exec_, "rec": rec,
@@ -1597,4 +1601,5 @@ def visao_supervisores(de, ate, permitidos=None):
     return {"de": de_i, "ate": ate_i, "dias": len(dias_op),
             "supervisores": sorted(saida, key=lambda l: _norma(l["nome"])),
             "tem_cadastro": atuais is not None, "tem_validacao": vals is not None,
-            "min_dias": MIN_DIAS_RANKING, "cap_externa": CAP_EXTERNA, "cap_interna": CAP_INTERNA}
+            "min_dias": min_dias if por_sup else MIN_DIAS_RANKING,
+            "cap_externa": CAP_EXTERNA, "cap_interna": CAP_INTERNA}

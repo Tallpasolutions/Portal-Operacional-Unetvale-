@@ -211,3 +211,23 @@ def war_room_responsavel():
             return _sem_0024()
         raise
     return jsonify(r)
+
+
+@bp.route("/war-room/ofensores")
+@login_obrigatorio
+@modulo_obrigatorio("war-room")
+def war_room_ofensores():
+    """Top 5 dos técnicos ofensores por supervisor (pedido de 26/11/2026), o
+    mesmo cálculo da visão do supervisor da Produtividade
+    (`wr.visao_supervisores`), num período escolhido na War Room: o dia em
+    foco, 7 dias ou o mês. Mesmo recorte da Produtividade: o supervisor
+    recebe só o próprio time; os outros, todos."""
+    from datetime import date
+    u = usuario_atual()
+    try:
+        de = date.fromisoformat(request.args.get("de") or "")
+        ate = date.fromisoformat(request.args.get("ate") or "")
+    except ValueError:
+        return jsonify({"erro": "Período inválido."}), 400
+    permitidos = {u["id"]} if u["is_supervisor"] and not u["is_admin"] else None
+    return jsonify(wr.visao_supervisores(de, ate, permitidos))
