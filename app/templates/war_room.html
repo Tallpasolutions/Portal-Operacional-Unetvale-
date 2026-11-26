@@ -27,6 +27,20 @@
 <div class="wr-sec"><span>Capacidade da equipe</span></div>
 <div class="card wr-cap-card" style="margin-bottom:16px"><div class="card-b" id="wr-cap"></div></div>
 
+{# Top 5 ofensores do time (pedido de 26/11/2026): o mesmo cálculo da
+   visão do supervisor da Produtividade, com Capacidade, Executadas,
+   Recusadas e % de aproveitamento por técnico. Segue o supervisor
+   escolhido na capacidade; o período é deste bloco (dia em foco, 7 dias
+   ou o mês até o dia em foco). #}
+<div class="wr-sec" id="wr-of-sec"><span>Top 5 ofensores</span><em id="wr-of-sub"></em></div>
+<div class="card" style="margin-bottom:16px">
+  <div class="card-h"><span>Técnicos ofensores do time</span>
+    <span class="toggle toggle-mini" id="wr-of-per" title="Período do top 5">
+      <button type="button" data-p="dia">Dia</button><button type="button" data-p="7">7 dias</button><button type="button" data-p="mes" class="active">Mês</button>
+    </span></div>
+  <div class="card-b" id="wr-of"><p class="subnote" style="margin:0">Carregando…</p></div>
+</div>
+
 <div class="wr-sec"><span>Tendência</span></div>
 
 <div class="grid wr-tend" style="margin-bottom:16px;">
@@ -240,5 +254,6 @@
 {% block scripts %}
 <script>window.__WR__ = {{ pacote|tojson }}; window.__WR_EU__ = {{ usuario.id|tojson }}; window.__WR_ADMIN__ = {{ usuario.is_admin|tojson }}; window.__WR_SUP__ = {{ usuario.is_supervisor|tojson }};</script>
 <script src="{{ url_for('static', filename='js/dashboard_rank.js') }}"></script>
+<script src="{{ url_for('static', filename='js/supervisor_ofensores.js') }}"></script>
 <script src="{{ url_for('static', filename='js/war_room.js') }}"></script>
 {% endblock %}

@@ -1338,6 +1338,18 @@ cliente): domingo vazio não é "equipe parada". O recorte é do servidor:
 supervisor recebe só o próprio time. ⚠️ A validação começou em 19/11/2026:
 recusa de antes aparece "sem resposta", e a tela diz.
 
+**O mesmo top 5 na War Room** (pedido de 26/11/2026: os supervisores passam o
+dia lá), no bloco "Top 5 ofensores" logo abaixo da capacidade, por
+`/war-room/ofensores` (o mesmo `visao_supervisores`, com o módulo War Room e o
+mesmo recorte). O supervisor do bloco é o da capacidade — escolher num lugar
+escolhe no outro; o período é do bloco: o dia em foco, 7 dias ou o mês até o
+dia em foco. **O desenho é um só** (`supervisor_ofensores.js`, carregado pelas
+duas telas), e os três top 5 têm as MESMAS colunas, a pedido: Capacidade (em
+campo, no período), Executadas, Recusadas e % de aproveitamento — muda só o
+critério de ordem, escrito no cabeçalho. Em período de até 3 dias o mínimo
+para entrar nos rankings de razão cai para 1 dia em campo (senão o "Dia"
+sairia vazio). No celular os cabeçalhos encurtam (Cap., Exec., Rec., %).
+
 **Recusas no gráfico e cross-filter** (23/11/2026, sem migration). A barra
 vermelha do "Executadas com sucesso × recusas × entraram na esteira" é
 `por_dia[d][1]`: OS de cliente **encerrada sem sucesso**, a mesma do número

@@ -286,7 +286,82 @@
     var id = b.getAttribute("data-s") || null;
     CAPSUP = CAPSUP === id && b.tagName === "TR" ? null : id;
     capacidade();
+    desenharOfensores();
   });
+
+  // ---------------------------------------------------------------------
+  // Top 5 ofensores (pedido de 26/11/2026)
+  // ---------------------------------------------------------------------
+  // O cálculo é do servidor (`/war-room/ofensores`, o mesmo da visão do
+  // supervisor da Produtividade) e o desenho é `supervisor_ofensores.js`,
+  // um só para as duas telas. O supervisor do bloco é o da capacidade
+  // (CAPSUP): escolher num lugar escolhe no outro. O período é deste bloco
+  // e vai até o dia em foco; só se pede de novo quando ele muda ou quando a
+  // Produtividade/Esteira trazem dado novo.
+  var OF = { per: "mes", chave: "", dados: null, versao: null };
+  function ofPeriodo() {
+    var ate = D.dia, de = ate;
+    if (OF.per === "7") {
+      var d = new Date(ate + "T12:00:00"); d.setDate(d.getDate() - 6); de = d.toISOString().slice(0, 10);
+    } else if (OF.per === "mes") de = ate.slice(0, 8) + "01";
+    return [de, ate];
+  }
+  async function ofensores() {
+    var el = $("wr-of");
+    if (!el || !window.Ofensores) return;
+    var p = ofPeriodo(), chave = p.join("|") + "|" + D.versao;
+    $("wr-of-sub").textContent = rotDia(p[0]) + (p[0] === p[1] ? "" : " a " + rotDia(p[1]));
+    if (chave === OF.chave && OF.dados) { desenharOfensores(); return; }
+    OF.chave = chave;
+    el.classList.add("ps-carregando");
+    try {
+      var r = await fetch("/war-room/ofensores?de=" + p[0] + "&ate=" + p[1],
+        { credentials: "same-origin", headers: { "Accept": "application/json" } });
+      var j = null;
+      try { j = await r.json(); } catch (e) { /* sessão expirada devolve HTML */ }
+      if (!r.ok || !j) throw new Error((j && j.erro) || "HTTP " + r.status);
+      if (chave !== OF.chave) return;          // outro período chegou enquanto buscava
+      OF.dados = j;
+      desenharOfensores();
+    } catch (e) {
+      OF.chave = "";
+      el.innerHTML = '<p class="subnote" style="margin:0">Não foi possível carregar o top 5 (' + esc(e.message) + ").</p>";
+    } finally {
+      el.classList.remove("ps-carregando");
+    }
+  }
+  function desenharOfensores() {
+    var el = $("wr-of");
+    if (!el || !OF.dados || !window.Ofensores) return;
+    var lista = OF.dados.supervisores || [];
+    if (!lista.length) {
+      el.innerHTML = '<p class="subnote" style="margin:0">Nenhum time com OS de cliente no período.</p>';
+      return;
+    }
+    var escolhido = CAPSUP && lista.some(function (l) { return l.id === CAPSUP; }) ? CAPSUP
+      : lista.length === 1 ? lista[0].id : null;
+    var l = lista.filter(function (x) { return x.id === escolhido; })[0];
+    el.innerHTML = (lista.length > 1 ? Ofensores.geral(lista, escolhido) : "") +
+      (l ? Ofensores.detalhe(l, OF.dados)
+         : '<p class="subnote" style="margin:12px 0 0">Clique num supervisor (aqui ou na capacidade) para ver o top 5 do time.</p>');
+  }
+  if ($("wr-of")) {
+    $("wr-of").addEventListener("click", function (e) {
+      var tr = e.target.closest("tr[data-ofs]");
+      if (!tr) return;
+      var id = tr.getAttribute("data-ofs");
+      CAPSUP = CAPSUP === id ? null : id;
+      capacidade();
+      desenharOfensores();
+    });
+    $("wr-of-per").addEventListener("click", function (e) {
+      var b = e.target.closest("button[data-p]");
+      if (!b || b.classList.contains("active")) return;
+      OF.per = b.getAttribute("data-p");
+      this.querySelectorAll("button").forEach(function (x) { x.classList.toggle("active", x === b); });
+      ofensores();
+    });
+  }
 
 
   // ---------------------------------------------------------------------
@@ -548,6 +623,7 @@
     semSucesso();
     desvios();
     avisoResponsavel();
+    ofensores();
   }
 
   // De 2 em 2 min, só com a aba visível: pergunta os carimbos (duas linhas
@@ -1460,4 +1536,5 @@
   semSucesso();
   desvios();
   avisoResponsavel();
+  ofensores();
 })();
