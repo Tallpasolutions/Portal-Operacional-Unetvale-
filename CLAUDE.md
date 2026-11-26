@@ -1356,8 +1356,9 @@ recusa de antes aparece "sem resposta", e a tela diz.
 dia lá), no bloco "Top 5 ofensores" logo abaixo da capacidade, por
 `/war-room/ofensores` (o mesmo `visao_supervisores`, com o módulo War Room e o
 mesmo recorte). O supervisor do bloco é o da capacidade — escolher num lugar
-escolhe no outro; o período é do bloco: o dia em foco, 7 dias ou o mês até o
-dia em foco. **O desenho é um só** (`supervisor_ofensores.js`, carregado pelas
+escolhe no outro; o período é do bloco e **abre no dia em foco** (pedido de
+26/11/2026, "somente os de hoje"), com 7 dias e o mês até o dia em foco a um
+clique. Na Produtividade o top 5 segue o Mês/Semana/Dia da barra da página. **O desenho é um só** (`supervisor_ofensores.js`, carregado pelas
 duas telas), e os três top 5 têm as MESMAS colunas, a pedido: Capacidade (em
 campo, no período), Executadas, Recusadas e % de aproveitamento — muda só o
 critério de ordem, escrito no cabeçalho. Em período de até 3 dias o mínimo

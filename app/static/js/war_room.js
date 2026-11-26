@@ -298,7 +298,10 @@
   // (CAPSUP): escolher num lugar escolhe no outro. O período é deste bloco
   // e vai até o dia em foco; só se pede de novo quando ele muda ou quando a
   // Produtividade/Esteira trazem dado novo.
-  var OF = { per: "mes", chave: "", dados: null, versao: null };
+  // Abre no DIA em foco (pedido de 26/11/2026: "precisa mostrar somente os
+  // de hoje"); 7 dias e mês ficam a um clique. Trocar o dia no topo da
+  // página troca o período junto.
+  var OF = { per: "dia", chave: "", dados: null, versao: null };
   function ofPeriodo() {
     var ate = D.dia, de = ate;
     if (OF.per === "7") {
