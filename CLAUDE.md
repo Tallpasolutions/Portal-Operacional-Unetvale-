@@ -45,7 +45,9 @@ A **Esteira** (`/esteira`) tem coleta própria, fora da grade de 2 em 2 h:
 `coletor/esteira.py`, LaunchAgent `net.unetvale.esteira`, de 10 em 10 min das
 6h às 22h, gravando por função (`esteira_aplicar_*`, migration `0020`). Entrou
 e saiu da fila é diferença entre duas coletas; com 2 h de intervalo, a OS
-agendada na mesma manhã em que entrou nunca apareceria (§4).
+agendada na mesma manhã em que entrou nunca apareceria (§4). Na mesma rodada
+ela lê a ficha de cada OS que SAIU e grava o porquê em `esteira_saidas`
+(devolvida na triagem, agendada, fechada — migration `0025`, §4 War Room).
 
 A **Produtividade de HOJE** também sai fora da grade, de 10 em 10 min das 7h
 às 20h, **até `PROD_RAPIDA_ATE`** (29/11/2026 por padrão): é a coleta rápida
@@ -1102,6 +1104,18 @@ foi Fechada pelo Técnico", "Não Finalizada", "Não Faturada" — 1.095 de 1.09
 e o calendário cinza/laranja é o próprio agendamento; ficam fora. Os ícones
 eram Font Awesome, que o portal não carrega: viram texto curto.
 
+**Por que cada OS saiu** mora em `esteira_saidas` (migration `0025`), uma
+linha por (OS, `saiu_em` do movimento). O passo 4 da rodada
+(`esteira.passo_saidas`) lê a ficha das saídas dos últimos 3 dias ainda sem
+linha — até `ESTEIRA_SAIDAS_MAX` (120) por rodada — e, de hora em hora, as
+devolvidas que esperam o consultor há até 14 dias; a decisão é de
+`coletor/triagem.py`, funções puras. É espelho do WVSA (upsert, sem trigger),
+mas a CLASSIFICAÇÃO não se reescreve: a primeira leitura, ≤ 10 min depois da
+saída, é a que ainda vê os localizadores (`p_reclassificar` existe para regra
+nova). `apos_lacuna` vem copiado do movimento. Carga retroativa:
+`esteira.py --saidas-desde AAAA-MM-DD` (com `--arquivo`, não grava). O uso
+está no §4, War Room ("Triagem da esteira").
+
 O que o módulo **não** faz, de propósito: Telegram (alertas 6/12/18h de
 instalação/mudança não agendada e o resumo das 18h) — fase seguinte, no mesmo
 coletor; "baixar imagem do quadro" (html2canvas por CDN); a projeção do
@@ -1452,6 +1466,63 @@ pacote), sem conhecer o vínculo. O supervisor abre a barra no próprio time,
 como a lista de encerradas; "Limpar filtros" volta a Todos. Hygor vê zero e
 está certo: as equipes dele são todas INFRA, que a War Room exclui.
 
+**Triagem da esteira: OS DEVOLVIDAS antes de ir a campo** (pedido de
+25/11/2026, migration `0025`). Nesse dia o Renan passou a abrir cada OS da
+esteira e devolver ao dono ("Rejeitando OS para o dono") o que não devia ir a
+campo, com um painel próprio coletado pelo navegador logado. A OS devolvida
+SAI da fila, e o backlog caía sem que a tela dissesse por quê — "backlog −100"
+se lê como "o time agendou". O portal virou a fonte: a rodada da esteira lê
+a ficha de quem saiu (§4, Esteira) e a War Room mostra o número.
+
+⚠️ **A palavra é DEVOLVIDA.** Nesta página "recusa" já é o técnico encerrando
+sem sucesso, e "Rejeitada" do WVSA é a validação do fechamento. Três coisas,
+três palavras — "rejeitada" no lugar de "devolvida" faria o supervisor somar
+a triagem às recusas do time dele.
+
+**Discreto de propósito** (decisão do Jhoni): uma linha no rodapé do cartão
+"Backlog da esteira" ("Neste dia, N das M OS que saíram da fila foram
+devolvidas…", só com N > 0) e o cartão RECOLHIDO "Triagem da esteira", depois
+de "Dia a dia, em tabela": para quem voltou (N1 › Comercial › Relacionamento ›
+Suporte, a ordem do documento do Renan; `Infra` pelo texto "Enviando OS para
+a Infra"), situação depois (aguardando o consultor, voltou para a esteira,
+agendada de novo, fechada), motivo e a lista do dia. Nenhum número no topo,
+nenhuma série no gráfico. **Não recorta por supervisor**: a triagem é da fila
+inteira, e o cartão diz isso. Recorte: SEMPRE, por dia operacional, não só a
+campanha de 25/11 — antes dela já eram ~6 devoluções de cliente por dia.
+
+Três regras da classificação (`coletor/triagem.py`), cada uma medida:
+
+* **pelo EVENTO, não pelo estado.** O evento mais recente que muda o lugar da
+  OS até `saiu_em` + 10 min (devolução, "OS agendada para dia", ou um que a
+  devolve à fila — "Respondendo OS", fechada sem sucesso…), e só se for de
+  até 36 h antes. A #601025 foi devolvida e respondida no MESMO minuto e
+  reagendada 40 min depois: lida pelo estado, seria "agendada";
+* **o histórico mora em `tab-all` OU em `tab-os-movimentacao`.** A aba
+  "todos" só existe quando a OS tem evento do app: em 25/11/2026, 6 das 96
+  devolvidas (#582478, #604217…) só tinham a segunda, e a devolução sumia;
+* **saída após lacuna fica fora do dia**, como no fluxo da esteira (0020): em
+  25/11/2026 a primeira coleta (08:40) veio depois de mais de 12 h parada e
+  marcou 75 saídas sem dia certo. Sem isto, "N das M" comparava 275
+  classificadas contra 245 saídas do fluxo. A conferência do cartão mostra as
+  duas contas e as ainda sem leitura.
+
+**O motivo é palpite, no APP** (`war_room.MOTIVO_DEVOLUCAO`, sobre o
+comentário inteiro gravado): ajustar a regra não exige recoletar. O texto
+padrão do Renan ("OS aberta em X, Por gentileza… se ainda possui interesse")
+foi 89 de 97 em 25/11. "Depois de visita sem sucesso" vem antes de "outro
+setor": o fechamento do técnico costuma citar a infra.
+
+Conferido contra o painel do Renan (25/11/2026, fila das 09:52, as 12
+finalidades dele): **90 devolvidas contra 92** — N1 36/38, Relacionamento
+20/20, Comercial 19/22, Suporte 12/12 e 3 sem destino, lidas depois de o
+consultor responder (a resposta limpa os localizadores). Na rodada normal a
+leitura é ≤ 10 min depois da saída.
+
+A `versao` da tela ganhou o carimbo `esteira_coleta.saidas_em`: a lista é
+aplicada ANTES das fichas, e sem ele a classificação só apareceria na rodada
+seguinte. ⚠️ A `versao` do pacote e a da rota têm de ser a MESMA string — a
+tela compara as duas, e um formato diferente a faria reler para sempre.
+
 O que **ainda não** faz: o "virar ação" do desvio para o módulo Ações.
 
 ### Equipe técnica: o cadastro de quem está em campo
@@ -1717,6 +1788,13 @@ Os que nasceram na Equipe técnica:
 | `.eq-sim` / `.eq-nao` / `.eq-sn` | Sim/Não em círculo, como na planilha; `.eq-sn` é o botão do admin que grava |
 | `.eq-pilula` | supervisor em pílula, com a cor `.av-N` da posição dele na lista |
 | `.eq-mini` | barrinha de 46 px da parte externa das OS (laranja) |
+
+Os que nasceram na triagem da esteira (25/11/2026):
+
+| Classe | O que é |
+|---|---|
+| `.wr-tri-grade` / `.wr-tri-t` | os três rankings do cartão recolhido, com título em caixa alta |
+| `.wr-tri-lista` (`td.wr-tri-com`) | lista das devolvidas do dia; o comentário em cinza, com largura limitada |
 
 Os que nasceram em 25/11/2026 (times dos supervisores):
 
@@ -2662,6 +2740,43 @@ a.run(port=5001, use_reloader=False)"
 ---
 
 ## 9. Estado atual e pendências
+
+- **Triagem da esteira na War Room** em 25-26/11/2026, migration `0025`
+  (`esteira_saidas`, `esteira_aplicar_saidas`, `esteira_coleta.saidas_em`),
+  **ainda não aplicada em produção**. Sem ela a linha e o cartão somem e a
+  rodada da esteira registra "sem a migration 0025" e segue. O porquê está
+  no §4 (War Room, Esteira).
+
+  Provado: migration no PGlite (com a 0020 antes), aplicada e reaplicada, 25
+  travas — domínios recusados, destino só na devolvida, classificação mantida
+  e reescrita com `p_reclassificar`, releitura só na devolvida, comentário
+  cortado em 500, dia operacional às 21:30, `anon`/`authenticated` sem
+  acesso, `service_role` sem DELETE, RLS. Classificação por script em 321
+  fichas reais das saídas de 25/11 (GET, só leitura). Coletor contra o WVSA
+  real em arquivo: `--saidas-desde 2026-11-25` (336 saídas, 45 s) e
+  `--saidas-desde 2026-11-19` (1.340 saídas, 134 devolvidas). Comparação com
+  o painel do Renan: 90 × 92 (§4). Rotas pelo `test_client` num servidor de
+  ensaio (lê produção, `esteira_saidas` da carga em memória, toda escrita
+  recusada): 25 casos — admin e Davi, lista = devolvidas do dia, soma por
+  motivo ≤ saídas do fluxo, `versao` igual nos dois lados, `__WR__` = pacote
+  JSON, dia ruim 4xx, sem a 0025 tudo 200 e `triagem` nulo. No navegador,
+  como Davi, com o mouse: linha no Backlog, cartão abrindo, clique em 21/11
+  redesenhando (5 de 54, a conta fecha); 375 px sem rolar de lado; console
+  limpo.
+
+  **Ordem de deploy**: app → Vercel servindo → aplicar a `0025` → copiar
+  `coletor/esteira.py` e `coletor/triagem.py` para `~/unetvale-coletor` (o
+  launchd abre processo novo a cada 10 min) → `esteira.py --saidas-desde
+  2026-11-19` uma vez → o Renan compara com o painel dele e desliga a coleta
+  pelo navegador.
+
+  **Ainda não exercitado:** a gravação real pelo PostgREST, o passo dentro de
+  uma rodada do launchd (tempo somado à rodada de ~190 s) e o
+  `Server-Timing` do pacote com as duas leituras novas.
+
+  ⚠️ Visto de passagem: `esteira.parse_ficha` conta visitas e contatos só pela
+  `tab-all` — a OS sem evento do app sai com 0 visitas. Mesma causa do segundo
+  item das regras da triagem; não corrigido aqui.
 
 - **Times dos supervisores** em 25/11/2026, migration `0024`
   (`warroom_presenca`, `tecnico_responsavel`, `supervisor_vinculo_eventos`,

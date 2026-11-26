@@ -17,7 +17,11 @@ Uma rodada:
              ainda não tem — endereço;
   3. GEO     Nominatim para quem tem endereço e não tem coordenada;
              -> `esteira_aplicar_status`;
-  4. BACKLOG indicadores2 + agendamento1, no máximo 1x/hora
+  4. SAÍDAS  GET /os/{n} de quem SAIU da fila: devolvida ao dono (a triagem),
+             agendada, fechada ou outro — `triagem.py`; e, de hora em hora,
+             a situação das devolvidas que esperam o consultor
+             -> `esteira_aplicar_saidas` (migration 0025);
+  5. BACKLOG indicadores2 + agendamento1, no máximo 1x/hora
              -> `esteira_aplicar_backlog`.
 
 A lista é o que importa: se as fichas não terminarem no prazo, o que foi lido
@@ -29,6 +33,9 @@ Uso:
   python esteira.py --forcar            # aceita fila que encolheu mais da metade
   python esteira.py --backlog           # força o backlog oficial nesta rodada
   python esteira.py --agora             # ignora a janela de horário
+  python esteira.py --saidas-desde 2026-11-19   # só classifica as saídas desde a data
+                                        # (carga retroativa; sem lista, sem fichas da fila)
+  python esteira.py --saidas-desde 2026-11-19 --reclassificar   # regra nova: reescreve
 """
 import argparse
 import json
@@ -49,6 +56,7 @@ load_dotenv(DIR / ".env")
 sys.path.insert(0, str(DIR))
 
 import gerencial as g  # noqa: E402  (parser da lista: um só, ver parse_esteira_linhas)
+import triagem  # noqa: E402
 import w8_client  # noqa: E402
 
 BR_TZ = timezone(timedelta(hours=-3))
@@ -72,6 +80,13 @@ FICHAS_WORKERS = int(os.environ.get("ESTEIRA_FICHAS_WORKERS", "6"))
 PRAZO_SEGUNDOS = int(os.environ.get("ESTEIRA_PRAZO_SEGUNDOS", "480"))
 
 BACKLOG_INTERVALO = timedelta(hours=1)
+# Saídas: quantas fichas a mais por rodada. Numa rodada normal saem 10–40 OS
+# (321 no dia 25/11/2026, o dia da triagem, ~30 por rodada); o teto só morde
+# depois de o coletor ficar parado, e o resto sai nas rodadas seguintes.
+SAIDAS_MAX = int(os.environ.get("ESTEIRA_SAIDAS_MAX", "120"))
+SAIDAS_DIAS = 3                       # saída mais velha que isto só pela carga retroativa
+REVER_DIAS = 14                       # devolvida que espera o consultor: relida até 14 dias
+REVER_INTERVALO = timedelta(hours=1)
 GEO_MAX_POR_RODADA = int(os.environ.get("ESTEIRA_GEO_MAX", "40"))
 
 _NOMINATIM = "https://nominatim.openstreetmap.org/search"
@@ -373,11 +388,14 @@ def _endereco(linhas):
     return out
 
 
-def ler_fichas(sessao, alvos, prazo):
-    """alvos: {os: precisa_endereco}. Devolve {os: dados}. Para no prazo."""
+def ler_fichas(sessao, alvos, prazo, ler=None):
+    """alvos: {os: precisa_endereco}. Devolve {os: dados}. Para no prazo.
+    `ler(html, extra)` troca o parser (as saídas usam `triagem.parse`)."""
     def uma(os_num, com_end):
         r = sessao.get(f"{sessao.base}/os/{os_num}", timeout=30)
         r.raise_for_status()
+        if ler is not None:
+            return ler(r.text, com_end)
         return parse_ficha(r.text, com_endereco=com_end)
 
     lidas, falhas = {}, 0
@@ -398,6 +416,102 @@ def ler_fichas(sessao, alvos, prazo):
     if falhas:
         log(f"  fichas: {falhas} falharam (ficam para a próxima rodada)")
     return lidas
+
+
+# ==========================================================================
+# Saídas — por que cada OS saiu da fila (triagem, migration 0025)
+# ==========================================================================
+class TabelaFaltando(Exception):
+    pass
+
+
+def _get_paginado(tabela, params):
+    url, h = _supa()
+    out, inicio = [], 0
+    while True:
+        r = requests.get(f"{url}/rest/v1/{tabela}", params=params,
+                         headers={**h, "Range": f"{inicio}-{inicio + 999}"}, timeout=60)
+        if r.status_code == 404 and "PGRST205" in r.text:
+            raise TabelaFaltando(tabela)
+        r.raise_for_status()
+        lote = r.json()
+        out.extend(lote)
+        if len(lote) < 1000:
+            return out
+        inicio += 1000
+
+
+def _ts(iso):
+    return datetime.fromisoformat(iso)
+
+
+def passo_saidas(sessao, na_fila, prazo, desde=None, maximo=SAIDAS_MAX, reclassificar=False,
+                 gravar=True):
+    """Classifica as saídas ainda sem linha em `esteira_saidas` e relê a
+    situação das devolvidas que esperam o consultor. Devolve as linhas.
+
+    A saída é lida na rodada SEGUINTE à que a notou (≤ 10 min depois): é o
+    que deixa os localizadores ainda no lugar — a resposta do consultor os
+    limpa. Por isso a primeira leitura vale para sempre (ver a 0025).
+    """
+    agora = _agora()
+    desde = desde or agora - timedelta(days=SAIDAS_DIAS)
+    movs = _get_paginado("esteira_movimentos", {
+        "select": "os,em,finalidade,apos_lacuna", "tipo": "eq.sai", "em": f"gte.{desde.isoformat()}",
+        "order": "em.desc,os.asc"})
+    try:
+        feitas = _get_paginado("esteira_saidas", {
+            "select": "os,saiu_em", "saiu_em": f"gte.{desde.isoformat()}", "order": "saiu_em.desc,os.asc"})
+        rever = _get_paginado("esteira_saidas", {
+            "select": "os,saiu_em,devolvida_em", "motivo": "eq.devolvida", "situacao": "eq.aguardando",
+            "devolvida_em": f"gte.{(agora - timedelta(days=REVER_DIAS)).isoformat()}",
+            "verificado_em": f"lt.{(agora - REVER_INTERVALO).isoformat()}",
+            "order": "devolvida_em.desc,os.asc"})
+    except TabelaFaltando:
+        if gravar:
+            raise
+        feitas, rever = [], []           # ensaio em arquivo antes da 0025: tudo é novo
+    if reclassificar:
+        novas = movs
+    else:
+        ja = {(f["os"], _ts(f["saiu_em"])) for f in feitas}
+        novas = [m for m in movs if (m["os"], _ts(m["em"])) not in ja]
+    novas = novas[:maximo]
+    rever = rever[:max(0, maximo - len(novas))]
+    alvos = {m["os"]: False for m in novas}
+    alvos.update({r["os"]: False for r in rever})
+    if not alvos:
+        return []
+    fichas = ler_fichas(sessao, alvos, prazo, ler=lambda html, _: triagem.parse(html))
+
+    linhas = []
+    for m in novas:
+        f = fichas.get(m["os"])
+        if not f or not f["valida"]:
+            continue                     # fica para a próxima rodada
+        c = triagem.classificar(f, _ts(m["em"]), m["os"] in na_fila)
+        linhas.append({"os": m["os"], "saiu_em": m["em"], "finalidade": m["finalidade"],
+                       "apos_lacuna": bool(m.get("apos_lacuna")), **c})
+    for r in rever:
+        f = fichas.get(r["os"])
+        if not f or not f["valida"]:
+            continue
+        dev = _ts(r["devolvida_em"]) if r["devolvida_em"] else None
+        linhas.append({"os": r["os"], "saiu_em": r["saiu_em"],
+                       **triagem.situacao(f, dev, r["os"] in na_fila)})
+
+    if gravar and linhas:
+        for i in range(0, len(linhas), 200):
+            rpc("esteira_aplicar_saidas", {"p_linhas": linhas[i:i + 200], "p_em": _agora().isoformat(),
+                                           "p_reclassificar": bool(reclassificar)})
+    motivos = {}
+    for l in linhas:
+        k = l.get("motivo") or "releitura"
+        motivos[k] = motivos.get(k, 0) + 1
+    log(f"saídas: {len(novas)} novas, {len(rever)} para reler, {len(linhas)} lidas "
+        + " ".join(f"{k}={v}" for k, v in sorted(motivos.items()))
+        + ("" if gravar else " (não gravado)"))
+    return linhas
 
 
 # ==========================================================================
@@ -621,7 +735,17 @@ def rodada(args):
             rpc("esteira_aplicar_status", {"p_status": status[i:i + 300], "p_em": _agora().isoformat()})
         log(f"  -> status gravado ({len(status)} fichas)")
 
-    # 4. Backlog oficial, no máximo 1x/hora
+    # 4. Saídas — por que cada OS saiu. Acessório como o backlog: a lista já
+    #    foi gravada, e uma falha aqui não derruba a rodada.
+    if time.monotonic() < prazo:
+        try:
+            saida["saidas"] = passo_saidas(sessao, set(por_os), prazo, gravar=not arquivo)
+        except TabelaFaltando:
+            log("  saídas: sem a migration 0025 (esteira_saidas) — passo desligado")
+        except Exception as e:  # noqa: BLE001
+            log(f"  !! saídas falharam: {e}")
+
+    # 5. Backlog oficial, no máximo 1x/hora
     precisa = args.backlog
     if not precisa and not arquivo:
         ultimo = ler_coleta().get("backlog_em")
@@ -642,6 +766,23 @@ def rodada(args):
     log(f"rodada concluída em {time.monotonic() - inicio:.0f}s")
 
 
+def carga_saidas(args):
+    """Carga retroativa: só o passo das saídas, sem teto, prazo de 1 h.
+    Sem `--arquivo` grava no banco; com ele, só no arquivo."""
+    desde = datetime.fromisoformat(args.saidas_desde).replace(tzinfo=BR_TZ)
+    if not _wvsa_alcancavel():
+        log("WVSA inalcançável — carga das saídas ignorada")
+        return 1
+    sessao = w8_client.login()
+    na_fila = set(ler_ativas())
+    linhas = passo_saidas(sessao, na_fila, time.monotonic() + 3600, desde=desde, maximo=100_000,
+                          reclassificar=args.reclassificar, gravar=not args.arquivo)
+    if args.arquivo:
+        Path(args.arquivo).write_text(json.dumps(linhas, ensure_ascii=False, indent=1), encoding="utf-8")
+        log(f"gravado em {args.arquivo} (nada foi para o banco)")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--arquivo", help="grava a coleta neste JSON em vez do banco")
@@ -649,7 +790,13 @@ def main():
                     help="aceita uma fila que encolheu mais da metade (queda real)")
     ap.add_argument("--backlog", action="store_true", help="força o backlog oficial")
     ap.add_argument("--agora", action="store_true", help="ignora a janela de horário")
+    ap.add_argument("--saidas-desde", help="AAAA-MM-DD: só classifica as saídas desde a data")
+    ap.add_argument("--reclassificar", action="store_true",
+                    help="com --saidas-desde: reescreve a classificação já gravada")
     args = ap.parse_args()
+
+    if args.saidas_desde:
+        return carga_saidas(args)
 
     hora = datetime.now(BR_TZ).hour
     if not args.agora and not args.arquivo and not (HORA_INI <= hora < HORA_FIM):
