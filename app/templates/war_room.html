@@ -51,7 +51,10 @@
   <div class="card"><div class="card-h"><span>Backlog da esteira</span>
       <span class="subnote" style="margin:0">última foto de cada dia · clique num dia</span></div>
     <div class="card-b"><div class="chart-box wr-baixo"><canvas id="wr-ch-backlog"></canvas></div>
-      <p class="subnote" style="margin:10px 0 0">Fila sem retirada e sem infra; em amarelo, as ainda não agendadas.</p></div></div>
+      <p class="subnote" style="margin:10px 0 0">Fila sem retirada e sem infra; em amarelo, as ainda não agendadas.</p>
+      {# Triagem (0025): UMA linha, e só quando houve devolução no dia. É ela
+         que explica a queda do backlog que não foi agendamento. #}
+      <p class="subnote wr-tri-linha" style="margin:6px 0 0;display:none" id="wr-tri-linha"></p></div></div>
 </div>
 
 {# Os mesmos números em tabela: o verde dos gráficos tem contraste baixo
@@ -60,6 +63,26 @@
   <div class="card-h"><span>Dia a dia, em tabela</span>
     <button class="btn-ghost" type="button" data-alternar="wr-tab-card">Mostrar</button></div>
   <div class="card-b tabela-wrap" hidden><table class="tbl" id="wr-tab-dias"></table></div>
+</div>
+
+{# Triagem da esteira (migration 0025, pedido de 25/11/2026): OS DEVOLVIDAS
+   ao dono antes de ir a campo — a triagem do Renan. Recolhido e fora da
+   leitura da mesa de propósito: não é trabalho do supervisor, só explica a
+   fila. "Devolvida" e não "rejeitada" nem "recusa": as duas outras palavras
+   já querem dizer outra coisa nesta página. Some sem a migration. #}
+<div class="card recolhido" style="margin-bottom:16px;display:none" id="wr-tri-card">
+  <div class="card-h"><span>Triagem da esteira: devolvidas antes de ir a campo <span class="subnote" style="margin:0" id="wr-tri-cont"></span></span>
+    <button class="btn-ghost" type="button" data-alternar="wr-tri-card">Mostrar</button></div>
+  <div class="card-b" hidden>
+    <p class="subnote" style="margin:0 0 12px" id="wr-tri-nota"></p>
+    <div class="grid wr-tri-grade">
+      <div><div class="wr-tri-t">Para quem voltou</div><div class="rank" id="wr-tri-destino"></div></div>
+      <div><div class="wr-tri-t">Depois da devolução</div><div class="rank" id="wr-tri-situacao"></div></div>
+      <div><div class="wr-tri-t">Motivo, pelo comentário</div><div class="rank" id="wr-tri-motivo"></div></div>
+    </div>
+    <div class="tabela-wrap" style="margin-top:14px"><table class="tbl wr-tri-lista" id="wr-tri-lista"></table></div>
+    <p class="subnote" style="margin:10px 0 0" id="wr-tri-conf"></p>
+  </div>
 </div>
 
 {# Recusas por tipo de OS e por motivo, com cross-filter (pedido de

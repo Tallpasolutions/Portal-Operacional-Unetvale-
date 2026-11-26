@@ -577,6 +577,82 @@
   });
 
   // ---------------------------------------------------------------------
+  // Triagem da esteira (migration 0025): OS DEVOLVIDAS ao dono antes de ir
+  // a campo. Discreto de propósito (decisão de 25/11/2026): uma linha sob o
+  // backlog e um cartão recolhido, nenhum número no topo. Não recorta por
+  // supervisor — a triagem é da fila inteira, não do time de ninguém.
+  // ---------------------------------------------------------------------
+  var DESTINO_ROT = { N1: "N1 (suporte)", Comercial: "Comercial", Relacionamento: "Relacionamento",
+    Suporte: "Suporte (fora da N1)", Infra: "Infra", "—": "Não identificado" };
+  function triagem() {
+    var T = D.triagem, card = $("wr-tri-card"), linha = $("wr-tri-linha");
+    if (!T) { card.style.display = "none"; linha.style.display = "none"; return; }
+    card.style.display = "";
+    var pd = T.por_dia[D.dia] || [0, 0, 0, 0];
+    var dev = pd[0], lidas = pd[0] + pd[1] + pd[2] + pd[3];
+    var sai = (D.esteira.saidas || {})[D.dia] || 0;
+    if (dev) {
+      linha.innerHTML = "Neste dia, <b>" + num(dev) + "</b> das " + num(sai) +
+        " OS que saíram da fila foram <b>devolvidas</b> ao dono na triagem: não foram a campo nem foram agendadas.";
+      linha.title = "Devolvida = a OS voltou ao consultor, N1, Comercial ou Relacionamento antes da visita " +
+        "(\"Rejeitando OS para o dono\" no WVSA). Não é recusa de técnico. O detalhe está no cartão Triagem da esteira, abaixo.";
+      linha.style.display = "";
+    } else {
+      linha.style.display = "none";
+    }
+    $("wr-tri-cont").textContent = "· " + rotDia(D.dia) + ": " + num(dev) +
+      (D.dia >= D.inicio ? " · desde " + rotDia(D.inicio) + ": " + num(T.desde.total) : "");
+    $("wr-tri-nota").textContent = "OS de cliente (sem retirada e sem infra) que saíram da esteira porque foram devolvidas ao dono " +
+      "(\"Rejeitando OS para o dono\" no WVSA), lidas na ficha de cada uma. Não é recusa de técnico, e vale para a fila inteira: " +
+      "o supervisor escolhido nas listas abaixo não recorta. O motivo é um palpite pelo comentário de quem devolveu.";
+
+    var SIT = {};
+    T.situacoes.forEach(function (x) { SIT[x.id] = x.rotulo; });
+    var porDest = {}, porSit = {}, porMot = {};
+    T.lista.forEach(function (o) {
+      var d = DESTINO_ROT[o.destino || "—"] || o.destino;
+      porDest[d] = (porDest[d] || 0) + 1;
+      var st = SIT[o.situacao] || o.situacao;
+      porSit[st] = (porSit[st] || 0) + 1;
+      var m = T.motivos[o.motivo] || o.motivo;
+      porMot[m] = (porMot[m] || 0) + 1;
+    });
+    var vazio = "Nenhuma devolução em " + rotDia(D.dia) + ".";
+    Dash.rank($("wr-tri-destino"), porDest, { vazio: vazio, destacarTopo: false });
+    Dash.rank($("wr-tri-situacao"), porSit, { vazio: vazio, destacarTopo: false });
+    Dash.rank($("wr-tri-motivo"), porMot, { vazio: vazio, destacarTopo: false, limite: 8 });
+
+    $("wr-tri-lista").innerHTML = T.lista.length ? "<thead><tr><th>Hora</th><th>OS</th><th>Tipo</th><th>Finalidade</th>" +
+      "<th>Para quem</th><th>Devolveu</th><th>Comentário</th><th>Depois</th></tr></thead><tbody>" +
+      T.lista.map(function (o) {
+        var depois = SIT[o.situacao] || o.situacao;
+        if (o.situacao === "agendada" && o.agendada_para) depois += " · " + rotDia(o.agendada_para);
+        return "<tr><td class='num'>" + esc(o.hora || "—") + "</td>" +
+          '<td><a href="' + D.wvsa_os + encodeURIComponent(o.os) + '" target="_blank" rel="noopener" title="Abrir a OS no WVSA">#' + esc(o.os) + "</a></td>" +
+          '<td><span class="wr-tipo-os wr-t-' + esc(o.tipo || "servicos") + '">' + esc(rotTipo(o.tipo)) + "</span></td>" +
+          "<td>" + esc(o.finalidade) + "</td><td>" + esc(DESTINO_ROT[o.destino || "—"] || o.destino) + "</td>" +
+          "<td>" + esc(nomeCurto(o.por)) + "</td>" +
+          "<td class='wr-tri-com' title='" + esc(T.motivos[o.motivo] || "") + "'>" + esc(o.comentario || "—") + "</td>" +
+          "<td>" + esc(depois) + "</td></tr>";
+      }).join("") + "</tbody>" : "";
+
+    // Conferência: o que a ficha disse de cada saída do dia. As saídas que
+    // a rodada ainda não leu aparecem como tais — não somem da conta.
+    var conf = "";
+    if (sai || lidas) {
+      conf = "Das " + num(sai) + " saídas de cliente do dia: " + num(pd[0]) + " devolvidas · " + num(pd[1]) + " agendadas · " +
+        num(pd[2]) + " fechadas · " + num(pd[3]) + " outro motivo";
+      if (sai > lidas) conf += " · " + num(sai - lidas) + " ainda sem leitura da ficha";
+      conf += ".";
+    }
+    if (T.lacuna[D.dia]) {
+      conf += (conf ? " " : "") + "Fora da conta, como no fluxo da esteira: " + num(T.lacuna[D.dia]) +
+        " saídas notadas depois de uma lacuna de coleta, sem dia certo.";
+    }
+    $("wr-tri-conf").textContent = conf;
+  }
+
+  // ---------------------------------------------------------------------
   // Trocar de dia e atualizar sozinha
   // ---------------------------------------------------------------------
   var carregando = false;
@@ -618,6 +694,7 @@
     fontes();
     numeros();
     graficos();
+    triagem();
     supOpcoes();
     tecnicosLista();
     semSucesso();
@@ -1533,6 +1610,7 @@
   fontes();
   numeros();
   graficos();
+  triagem();
   semSucesso();
   desvios();
   avisoResponsavel();
