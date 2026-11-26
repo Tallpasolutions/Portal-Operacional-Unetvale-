@@ -1534,10 +1534,6 @@ body.wr-carregando .wr-kpis, body.wr-carregando #wr-cap{ opacity:.55; transition
   .wr-tcard-n{ font-size:24px; } }
 /* Tendência em largura cheia: 28 dias de barras não cabem em meia tela. */
 .wr-tend{ grid-template-columns:minmax(0,1fr); }
-/* Triagem da esteira (0025): cartão recolhido sob a tendência */
-.wr-tri-grade{ grid-template-columns:repeat(auto-fit,minmax(min(240px,100%),1fr)); }
-.wr-tri-t{ font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin-bottom:8px; }
-.wr-tri-lista td.wr-tri-com{ max-width:420px; color:var(--muted); font-size:12px; }
 .wr-tend .chart-box{ height:330px; }
 .wr-tend .chart-box.wr-baixo{ height:230px; }
 @media (max-width:1180px){ .wr-barra-regua{ display:none; } }
