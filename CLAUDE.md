@@ -2696,12 +2696,14 @@ a.run(port=5001, use_reloader=False)"
   limpo.
 
   **Dados alinhados com a lista do Jhoni de 25/11/2026** no mesmo dia, pelas
-  funções do app (com histórico): NODE TECH do Davi para o Guilherme,
-  Gabriel André Feliciano (RETIRADA) no Adolar nome a nome, Mateus Janicio
-  da Silva (CLEITON TELECOM, externo) no cadastro, Lucas Alves Ramos com o
-  Guilherme no cadastro. Conferido depois: **40 técnicos ativos, os 40 com o
-  supervisor da lista** no vínculo e no cadastro; equipes — Davi MAYRA, PC
-  PRIME, RTM; Guilherme INFRASEG, JVM, NODE TECH, RM; Adolar 3 ELLO, CLEITON
+  funções do app (com histórico): Gabriel André Feliciano (RETIRADA) no
+  Adolar nome a nome e Mateus Janicio da Silva (CLEITON TELECOM, externo) no
+  cadastro. A NODE TECH (Lucas Alves Ramos) chegou a ir para o Guilherme,
+  como a lista dizia, e **voltou para o Davi em 26/11/2026** a pedido do
+  Jhoni — vínculo e cadastro, as duas idas no histórico. Conferido depois:
+  **40 técnicos ativos**, todos com o supervisor da lista, menos o Lucas, que
+  ficou com o Davi; equipes — Davi MAYRA, NODE TECH, PC PRIME, RTM;
+  Guilherme INFRASEG, JVM, RM; Adolar 3 ELLO, CLEITON
   TELECOM, INNOVA, JONI, WAVE (e o apelido WAVE SUPERVISOR). A lista tinha o
   Lucas Luiz da Silva Rolla duas vezes; é uma pessoa só. Os cinco avulsos
   antigos do Davi (Adnael, Cleber, Islas, Juliano, Levi) continuam

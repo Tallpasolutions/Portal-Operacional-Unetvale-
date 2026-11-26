@@ -662,7 +662,7 @@ def _esteira(dia_foco):
             "select": "dia,abertas_fin,nag_fin",
             "dia": f"gte.{_desde_grafico()}",
             "order": "dia.asc"}),
-        lambda: supa.select_one("esteira_coleta", {"id": "eq.1", "select": "ok_em"}),
+        lambda: supa.select_one("esteira_coleta", {"id": "eq.1", "select": "*"}),   # ver `versao`
     )
     entradas, lacuna = {}, {}
     for d, v in fluxo.items():
@@ -678,11 +678,154 @@ def _esteira(dia_foco):
             n[w] += 1
     return {
         "atualizado_em": (coleta or {}).get("ok_em"),
+        "saidas_em": (coleta or {}).get("saidas_em"),
+        # Saídas de cliente por dia — o "M" da linha da triagem ("N das M OS
+        # que saíram da fila…"), com a mesma régua das entradas.
+        "saidas": {d: _soma_cliente(((v.get("sai") or {}).get("fin")))
+                   for d, v in fluxo.items() if d >= _desde_grafico() or d == dia_foco.isoformat()},
         "entradas": {d: q for d, q in entradas.items() if d >= _desde_grafico() or d == dia_foco.isoformat()},
         "lacuna": lacuna,
         "base": {w: round(soma[w] / n[w]) for w in n},
         "backlog": {f["dia"]: [_soma_cliente(f.get("abertas_fin")), _soma_cliente(f.get("nag_fin"))]
                     for f in fotos},
+    }
+
+
+# ---------------------------------------------------------------------
+# Triagem da esteira: OS DEVOLVIDAS ao dono antes de ir a campo (0025)
+# ---------------------------------------------------------------------
+# Desde 25/11/2026 o Renan abre cada OS da esteira e devolve ao dono
+# ("Rejeitando OS para o dono") o que não deve ir a campo — 86 num dia. A OS
+# devolvida SAI da fila, e o backlog cai sem que nada na tela diga por quê:
+# "backlog −100" se lê como "o time agendou". O coletor da esteira lê a
+# ficha de cada OS que sai e grava o motivo em `esteira_saidas`.
+#
+# ⚠️ A palavra é DEVOLVIDA, nunca "rejeitada" nem "recusa". Na War Room
+# "recusa" é o técnico encerrando sem sucesso, e "Rejeitada" do WVSA é a
+# validação do fechamento (Produtividade). Três coisas diferentes na mesma
+# página; uma palavra só para cada.
+#
+# A tela é DISCRETA de propósito (decisão de 25/11/2026): uma linha sob o
+# backlog e um cartão recolhido. Nenhum número novo no topo — a mesa lê
+# executadas, recusas, entradas e backlog, e a triagem não é trabalho dela.
+DESTINOS = ["N1", "Comercial", "Relacionamento", "Suporte", "Infra"]
+SITUACOES = [
+    {"id": "aguardando", "rotulo": "Aguardando o consultor"},
+    {"id": "voltou_esteira", "rotulo": "Voltou para a esteira"},
+    {"id": "agendada", "rotulo": "Agendada de novo"},
+    {"id": "cancelada", "rotulo": "Fechada / cancelada"},
+]
+MOTIVOS_SAIDA = ("devolvida", "agendada", "fechada", "outro")
+
+# Motivo da devolução pelo comentário de quem devolveu — PALPITE, e a tela
+# diz isso. Mora aqui, e não no coletor, para que ajustar a regra não exija
+# recoletar: o comentário inteiro está gravado. A ordem importa (o primeiro
+# que casar): "cliente informou em CHAT que a conexão RETORNOU" é conexão,
+# não resolvido por chat. As regras vêm do documento do Renan (passo 4) e
+# dos comentários de 25/11/2026: o texto padrão dele ("OS aberta em X, Por
+# gentileza, entrar em contato com o cliente para confirmar se ainda possui
+# interesse…") foi 80 de 97.
+MOTIVO_DEVOLUCAO = [
+    ("interesse", [r"ainda (possui|tem) interesse", r"confirmar se ainda", r"tem interesse ainda",
+                   r"validar (se|com) o cliente"]),
+    ("conexao_ok", [r"normaliz", r"conexao (retornou|voltou)", r"sinal (voltou|retornou)",
+                    r"nao (precisa|ha) mais", r"esta funcionando"]),
+    ("remoto", [r"resolvid\w* (por|via|em) (ligacao|chat|telefone)", r"resolvido remot"]),
+    ("tentativas", [r"(tres|3) ou mais tentativas", r"\b[23]x no local", r"tentativas sem sucesso"]),
+    ("duplicada", [r"duplicad", r"foi aberto (a |uma )?os", r"consta atendimento", r"ja (possui|tem) os"]),
+    ("incorreta", [r"incorret", r"abertura errada"]),
+    # antes de "outro setor": o texto do fechamento do técnico costuma citar
+    # a infra ("…será necessário o pessoal da infra"), e o fato é a visita
+    ("apos_visita", [r"fechada sem sucesso pelo tecnico"]),
+    ("outro_setor", [r"\bn2\b", r"\binfra\b", r"rocket"]),
+    ("reagendar", [r"reagend", r"vai entrar em contato", r"retorno do cliente"]),
+    ("sem_contato", [r"sem contato", r"nao localizad", r"nao atende", r"tentativas? de contato"]),
+]
+MOTIVO_DEVOLUCAO_ROTULO = {
+    "interesse": "Confirmar interesse do cliente (OS antiga)",
+    "conexao_ok": "Conexão restabelecida / cliente OK",
+    "remoto": "Resolvido remotamente",
+    "tentativas": "Várias idas sem sucesso",
+    "duplicada": "OS duplicada / atendida em outra",
+    "incorreta": "OS aberta incorretamente",
+    "outro_setor": "Encaminhada a outro setor (N2/Infra)",
+    "reagendar": "Aguardando o cliente reagendar",
+    "sem_contato": "Cliente sem contato",
+    "apos_visita": "Depois de visita sem sucesso",
+    "outro": "Outro",
+}
+_MOTIVO_DEV_RE = [(m, [re.compile(p) for p in ps]) for m, ps in MOTIVO_DEVOLUCAO]
+
+
+def motivo_devolucao(comentario):
+    t = _norma(comentario)
+    return next((m for m, rs in _MOTIVO_DEV_RE if any(r.search(t) for r in rs)), "outro")
+
+
+def _triagem(dia_foco, ate):
+    """Saídas da esteira por motivo, por dia, e o detalhe das devolvidas.
+
+    Duas leituras em SÉRIE (está dentro do paralelo do `pacote` — §4,
+    Esteira): as contagens, leves, desde o começo do gráfico; e as devolvidas
+    do dia em foco com o comentário. Sem a migration 0025, None: a tela some
+    com a linha e o cartão, sem dizer nada à mesa.
+    """
+    try:
+        linhas = _paginado("esteira_saidas", {
+            "select": "dia_operacional,finalidade,motivo,destino,situacao,apos_lacuna",
+            "dia_operacional": f"gte.{_desde_grafico()}",
+            "and": f"(dia_operacional.lte.{ate.isoformat()})",
+            "order": "dia_operacional.asc,os.asc,saiu_em.asc"})
+    except Exception as e:
+        if supa.tabela_faltando(e):
+            return None
+        raise
+    det = _paginado("esteira_saidas", {
+        "select": "os,saiu_em,finalidade,destino,devolvida_em,devolvida_por,comentario,situacao,agendada_para",
+        "dia_operacional": f"eq.{dia_foco.isoformat()}", "motivo": "eq.devolvida", "apos_lacuna": "eq.false",
+        "order": "devolvida_em.asc.nullslast,os.asc"})
+
+    por_dia, lacuna = {}, Counter()
+    desde = {"total": 0, "destino": Counter(), "situacao": Counter()}
+    for l in linhas:
+        if not eh_cliente(l["finalidade"]) or l["motivo"] not in MOTIVOS_SAIDA:
+            continue
+        d = l["dia_operacional"]
+        # A régua do fluxo (0020): saída notada depois de uma lacuna de coleta
+        # não entra no dia. Contada à parte, para a conferência dizer.
+        if l.get("apos_lacuna"):
+            lacuna[d] += 1
+            continue
+        por_dia.setdefault(d, [0, 0, 0, 0])[MOTIVOS_SAIDA.index(l["motivo"])] += 1
+        if l["motivo"] == "devolvida" and INICIO.isoformat() <= d <= dia_foco.isoformat():
+            desde["total"] += 1
+            desde["destino"][l["destino"] or "—"] += 1
+            desde["situacao"][l["situacao"] or "aguardando"] += 1
+    lista = []
+    for l in det:
+        if not eh_cliente(l["finalidade"]):
+            continue
+        lista.append({
+            "os": l["os"],
+            "hora": _hora_local(l["devolvida_em"] or l["saiu_em"]),
+            "finalidade": l["finalidade"] or "",
+            "tipo": tipo_os(l["finalidade"]),
+            "destino": l["destino"],
+            "por": l["devolvida_por"] or "",
+            "comentario": (l["comentario"] or "")[:240],
+            "motivo": motivo_devolucao(l["comentario"]),
+            "situacao": l["situacao"] or "aguardando",
+            "agendada_para": l["agendada_para"],
+        })
+    return {
+        "por_dia": por_dia,
+        "lacuna": dict(lacuna),
+        "lista": lista,
+        "desde": {"total": desde["total"], "destino": dict(desde["destino"]),
+                  "situacao": dict(desde["situacao"])},
+        "destinos": DESTINOS,
+        "situacoes": SITUACOES,
+        "motivos": MOTIVO_DEVOLUCAO_ROTULO,
     }
 
 
@@ -731,9 +874,13 @@ def versao():
     a Produtividade inteira."""
     prod, est = supa.paralelo(
         lambda: supa.select_one("dados_modulo", {"modulo": "eq.produtividade", "select": "atualizado_em"}),
-        lambda: supa.select_one("esteira_coleta", {"id": "eq.1", "select": "ok_em"}),
+        # `*` e não "ok_em,saidas_em": sem a migration 0025 a coluna nova não
+        # existe, e pedi-la pelo nome daria 400 na pergunta que a tela faz de
+        # 2 em 2 min. A linha é uma só e pequena.
+        lambda: supa.select_one("esteira_coleta", {"id": "eq.1", "select": "*"}),
     )
-    return f"{(prod or {}).get('atualizado_em') or ''}|{(est or {}).get('ok_em') or ''}"
+    est = est or {}
+    return f"{(prod or {}).get('atualizado_em') or ''}|{est.get('ok_em') or ''}|{est.get('saidas_em') or ''}"
 
 
 def pacote(dia_foco):
@@ -797,10 +944,11 @@ def pacote(dia_foco):
                 return None
             raise
 
-    prod, est, (lista, tem_tabela), rod, nomes, alcance, vals, cad, pres, dec = supa.paralelo(
+    prod, est, (lista, tem_tabela), rod, nomes, alcance, vals, cad, pres, dec, tri = supa.paralelo(
         lambda: _produtividade(dia_foco), lambda: _esteira(dia_foco),
         desvios, rodadas, _nomes, _alcance_supervisores, validacoes, cadastro,
-        lambda: _presencas(_desde_grafico(), max(hoje(), dia_foco).isoformat()), decididos)
+        lambda: _presencas(_desde_grafico(), max(hoje(), dia_foco).isoformat()), decididos,
+        lambda: _triagem(dia_foco, max(hoje(), dia_foco)))
     _capacidades(prod, cad, dia_foco, alcance, nomes, pres)
     pendentes = _pendentes(prod.pop("_recentes"), alcance, dec, cad[0])
     # Cada encerrada sem sucesso leva os supervisores que respondem pelo
@@ -822,7 +970,9 @@ def pacote(dia_foco):
             f["sups"] = sups_de(f["empresa"], f["tecnico"])
             formatados.append(f)
     return {
-        "versao": f"{prod['atualizado_em'] or ''}|{est['atualizado_em'] or ''}",
+        # A MESMA string de `versao()`: a tela compara as duas para saber se
+        # relê o pacote, e uma diferença de formato a faria reler para sempre.
+        "versao": f"{prod['atualizado_em'] or ''}|{est['atualizado_em'] or ''}|{est.pop('saidas_em') or ''}",
         "dia": dia_foco.isoformat(),
         "hoje": hoje().isoformat(),
         "inicio": INICIO.isoformat(),
@@ -846,6 +996,8 @@ def pacote(dia_foco):
         "sem_responsavel": pendentes,
         "cap_externa": CAP_EXTERNA,
         "cap_interna": CAP_INTERNA,
+        # None = sem a migration 0025: a linha sob o backlog e o cartão somem.
+        "triagem": tri,
     }
 
 
