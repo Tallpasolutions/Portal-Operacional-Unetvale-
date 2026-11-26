@@ -2743,15 +2743,23 @@ a.run(port=5001, use_reloader=False)"
 
 - **Triagem da esteira na War Room** em 25-26/11/2026, migration `0025`
   (`esteira_saidas`, `esteira_aplicar_saidas`, `esteira_coleta.saidas_em`),
-  **ainda não aplicada em produção**. Sem ela a linha e o cartão somem e a
-  rodada da esteira registra "sem a migration 0025" e segue. O porquê está
-  no §4 (War Room, Esteira).
+  **aplicada em produção em 26/11/2026** pelo `psycopg` (DATABASE_URL do
+  monorepo), depois de a Vercel servir `?v=1722132d` (#78), e conferida numa
+  conexão NOVA e pelo PostgREST. Sem ela a linha e o cartão somem e a rodada
+  da esteira registra "sem a migration 0025" e segue. O porquê está no §4
+  (War Room, Esteira).
 
   Provado: migration no PGlite (com a 0020 antes), aplicada e reaplicada, 25
   travas — domínios recusados, destino só na devolvida, classificação mantida
   e reescrita com `p_reclassificar`, releitura só na devolvida, comentário
   cortado em 500, dia operacional às 21:30, `anon`/`authenticated` sem
-  acesso, `service_role` sem DELETE, RLS. Classificação por script em 321
+  acesso, RLS. ⚠️ No PGlite a `service_role` ficou sem DELETE; em PRODUÇÃO
+  ela tem todos os privilégios, pelos privilégios padrão do Supabase em
+  `public` — igual a `esteira_os`, `esteira_movimentos` e
+  `esteira_tentativas` (lido em 26/11/2026). A tabela é espelho e aceita
+  isso; para tabela que precisa recusar DELETE, a migration tem de fazer
+  `revoke delete` da `service_role` explicitamente, como a `warroom_desvios`.
+  Classificação por script em 321
   fichas reais das saídas de 25/11 (GET, só leitura). Coletor contra o WVSA
   real em arquivo: `--saidas-desde 2026-11-25` (336 saídas, 45 s) e
   `--saidas-desde 2026-11-19` (1.340 saídas, 134 devolvidas). Comparação com
@@ -2764,15 +2772,26 @@ a.run(port=5001, use_reloader=False)"
   redesenhando (5 de 54, a conta fecha); 375 px sem rolar de lado; console
   limpo.
 
-  **Ordem de deploy**: app → Vercel servindo → aplicar a `0025` → copiar
-  `coletor/esteira.py` e `coletor/triagem.py` para `~/unetvale-coletor` (o
-  launchd abre processo novo a cada 10 min) → `esteira.py --saidas-desde
-  2026-11-19` uma vez → o Renan compara com o painel dele e desliga a coleta
-  pelo navegador.
+  **Instalado em 26/11/2026**, nesta ordem: #78 mergeado, Vercel servindo
+  `?v=1722132d` às 11:41:59, `0025` aplicada, `esteira.py` e `triagem.py`
+  copiados para `~/unetvale-coletor` (backup em `bak-20261126-triagem/`; o
+  coletor inteiro ficou igual à `main`) e `esteira.py --saidas-desde
+  2026-11-19` gravando: 1.337 saídas em 2 min 54 s, 134 devolvidas, 8 fichas
+  com HTTP 500 do WVSA para as rodadas seguintes. O código da `main` lendo
+  produção pelo `test_client` (como Davi, escrita recusada): 25/11 com 94
+  devolvidas de 245 saídas de cliente (238 lidas, 37 após lacuna fora da
+  conta), 26/11 com 12 de 88 e a conta fechando exata, `versao` igual no
+  pacote e na rota. `Server-Timing` do pacote: 21–22 idas, ~1,8–2,1 s
+  medidos daqui (as duas leituras novas entram no paralelo).
+  A primeira rodada do launchd com o passo novo (11:49 de 26/11/2026): 12
+  saídas novas, 4 lidas (3 agendadas, 1 outro), rodada inteira em 188 s —
+  o mesmo de antes (~190 s). ⚠️ As 8 fichas que o WVSA devolve com HTTP 500
+  entram de novo a cada rodada enquanto estiverem na janela de 3 dias
+  (`SAIDAS_DIAS`): ~8 GET a mais por rodada, e depois saem sozinhas, sem
+  linha. São as mesmas da carga (#604076, #604004…), não um defeito novo.
 
-  **Ainda não exercitado:** a gravação real pelo PostgREST, o passo dentro de
-  uma rodada do launchd (tempo somado à rodada de ~190 s) e o
-  `Server-Timing` do pacote com as duas leituras novas.
+  **Falta:** o Renan comparar com o painel dele e desligar a coleta pelo
+  navegador.
 
   ⚠️ Visto de passagem: `esteira.parse_ficha` conta visitas e contatos só pela
   `tab-all` — a OS sem evento do app sai com 0 visitas. Mesma causa do segundo
