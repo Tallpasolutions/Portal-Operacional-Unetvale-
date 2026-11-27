@@ -349,6 +349,7 @@
          : '<p class="subnote" style="margin:12px 0 0">Clique num supervisor (aqui ou na capacidade) para ver o top 5 do time.</p>');
   }
   if ($("wr-of")) {
+    if (window.Ofensores) Ofensores.ligar($("wr-of"), desenharOfensores);
     $("wr-of").addEventListener("click", function (e) {
       var tr = e.target.closest("tr[data-ofs]");
       if (!tr) return;
