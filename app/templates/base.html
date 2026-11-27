@@ -92,7 +92,8 @@
         </button>
         <div class="page-title">{% block page_title %}{% endblock %}</div>
         <div class="topbar-right">
-          {% if not sem_sync %}
+          {# `nenhum` = a tela não depende de coleta do WVSA (`COLETAS_DA_TELA`). #}
+          {% if not sem_sync and status_upd.status != 'nenhum' %}
           {# O botão "Atualizar" saiu daqui e foi para o Monitoramento: forçar
              coleta é ação de operação, não algo para estar à mão em toda tela.
              Aqui fica só o estado, que é leitura. #}
@@ -104,7 +105,10 @@
             {% if status_upd.status == 'sem_dados' %}
               <span class="dot dot-gray"></span><span>Sem dados ainda</span>
             {% elif status_upd.status == 'erro' %}
-              <span class="dot dot-red"></span><span>Falha na última coleta</span>
+              {# Diz QUAL coleta: no Dashboard são oito, e "falha" sem nome faz
+                 a pessoa desconfiar de todos os blocos. #}
+              {% set f = status_upd.falhas %}
+              <span class="dot dot-red"></span><span title="Falhou: {{ f|join(', ') }}">{% if f|length == 1 %}Falha na coleta · {{ f[0]|replace('Dashboard · ', '') }}{% else %}Falha em {{ f|length }} coletas{% endif %}</span>
             {% else %}
               <span class="dot dot-green"></span><span>Atualizado</span>
             {% endif %}

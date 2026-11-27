@@ -21,19 +21,42 @@ from .auth import (login_obrigatorio, admin_obrigatorio, modulo_obrigatorio,
 bp = Blueprint("dash", __name__)
 
 
+# Coletas do WVSA (`dados_modulo`) de que cada tela depende. O selo da topbar
+# olha SÓ estas: falha de uma coleta aparece na tela que mostra aquele dado, e
+# não no portal inteiro. Tela fora da lista não mostra selo — Configurações e
+# Usuários não leem coleta para exibir número; Esteira e Troca de
+# Poste têm coleta própria, fora do WVSA da grade, e dizem o frescor dela na
+# própria página. O Monitoramento é o lugar de ver todas.
+COLETAS_DA_TELA = {
+    "dash.dashboard": ("iqi", "iqm") + gerencial.MODULOS,
+    "dash.produtividade": ("produtividade",),
+    "dash.iqi": ("iqi", "iqm", "ger_categorias"),
+    "dash.massivas": ("massivas",),
+    "dash.war_room_view": ("produtividade",),
+    "dash.equipe_view": ("produtividade",),   # OS de cada técnico em 30 dias
+    "dash.monitoramento": dados.MODULOS,
+}
+
+
 def _status_coleta():
     """Status da coleta para a topbar, uma vez por requisição.
 
     As rotas que mostram a topbar o pedem junto com as próprias leituras
-    (`supa.paralelo`); quem não pede paga a ida só se o template ler.
+    (`supa.paralelo`); quem não pede paga a ida só se o template ler. Tela que
+    não depende de coleta (`COLETAS_DA_TELA`) nem vai ao banco.
     """
     from flask import g
     if not hasattr(g, "_status_coleta"):
+        modulos = COLETAS_DA_TELA.get(request.endpoint)
+        if modulos is None:
+            g._status_coleta = {"tem_dados": False, "ultima": "—", "status": "nenhum",
+                                "falhas": [], "proxima": "—", "horarios": dados.HORARIOS}
+            return g._status_coleta
         try:
-            g._status_coleta = dados.status_geral()
+            g._status_coleta = dados.status_geral(modulos)
         except Exception:
             g._status_coleta = {"tem_dados": False, "ultima": "—", "status": "sem_dados",
-                                "proxima": "—", "horarios": dados.HORARIOS}
+                                "falhas": [], "proxima": "—", "horarios": dados.HORARIOS}
     return g._status_coleta
 
 
