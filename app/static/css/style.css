@@ -1614,3 +1614,13 @@ body.wr-carregando .wr-kpis, body.wr-carregando #wr-cap{ opacity:.55; transition
   .wr-tecs td:nth-child(5){ min-width:0; }
   .mt-tabela td:first-child{ min-width:150px; }
 }
+/* Lista de todos os técnicos × "Ver ofensores" (26/11/2026). */
+.ps-modo-l{ display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; margin:16px 0 8px; }
+.ps-modo-l .ps-sec{ margin:0; }
+.ps-todos th[data-of-ord]{ cursor:pointer; white-space:nowrap; }
+.ps-todos th.ord-asc::after{ content:" ▲"; font-size:9px; }
+.ps-todos th.ord-desc::after{ content:" ▼"; font-size:9px; }
+@media (max-width:600px){ .ps-todos th:first-child, .ps-todos td:first-child{ display:table-cell; } }
+.ps-todos td:first-child{ width:auto; color:inherit; min-width:200px; }
+.ps-todos td:nth-child(2){ min-width:0; }
+@media (max-width:600px){ .ps-todos td:first-child{ min-width:110px; } }

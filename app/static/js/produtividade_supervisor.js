@@ -88,6 +88,7 @@
       (DADOS.tem_cadastro ? "" : '<p class="subnote" style="margin:12px 0 0">Sem o cadastro da Equipe técnica, a capacidade total não é calculada.</p>');
   }
 
+  if (window.Ofensores) Ofensores.ligar(corpo, desenhar);
   corpo.addEventListener("click", function (e) {
     var tr = e.target.closest("tr[data-ofs]");
     if (!tr) return;

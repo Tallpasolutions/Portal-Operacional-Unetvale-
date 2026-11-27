@@ -43,22 +43,58 @@
       }).join("") + "</tbody></table></div>";
   }
 
+  // Cabeçalho das colunas pedidas, igual nas duas listas. No celular os
+  // títulos encurtam (.ps-curto) para a tabela caber sem rolar de lado.
+  // `ord` liga a ordenação por clique (lista de todos os técnicos).
+  var COLS = [
+    ["cap_campo", "Capacidade", "Cap.", "Capacidade em campo no período: dias em campo × 4 ou 6"],
+    ["exec", "Executadas", "Exec.", ""],
+    ["rec", "Recusadas", "Rec.", ""],
+    ["ap", "Aproveitamento", "%", "Executadas ÷ capacidade em campo"],
+  ];
+  function cabecalho(ord) {
+    function th(col, longo, curto, tit, cls) {
+      var marca = ord && ord.col === col ? (ord.dir > 0 ? " ord-asc" : " ord-desc") : "";
+      return '<th class="' + (cls || "") + marca + '"' + (ord ? ' data-of-ord="' + col + '"' : "") +
+        (tit ? ' title="' + tit + '"' : "") + '><span class="ps-longo">' + longo + '</span><span class="ps-curto">' + curto + "</span></th>";
+    }
+    return "<thead><tr>" + (ord ? "" : "<th>#</th>") + th("n", "Técnico", "Técnico", "") +
+      COLS.map(function (c) { return th(c[0], c[1], c[2], c[3], c[0] === "ap" ? "" : "num"); }).join("") + "</tr></thead>";
+  }
+  function celulas(f) {
+    return '<td class="num">' + num(f.cap_campo) + '</td><td class="num">' + num(f.exec) + '</td><td class="num">' + num(f.rec) +
+      "</td><td>" + barraAp(f.ap) + "</td>";
+  }
+
+  // Todos os técnicos do time (pedido de 26/11/2026: "ao invés de 5,
+  // aparecer todos"), ordenáveis pelo cabeçalho. Abaixo do nome: empresa,
+  // dias em campo e OS por dia — o que explica a linha.
+  var ORD = { col: "n", dir: 1 };
+  function todos(l) {
+    var lista = l.tecs.slice().sort(function (a, b) {
+      var x = a[ORD.col], y = b[ORD.col];
+      if (ORD.col === "n") return ORD.dir * String(x).localeCompare(String(y), "pt-BR");
+      if (x === null || x === undefined) return 1;          // sem capacidade: sempre no fim
+      if (y === null || y === undefined) return -1;
+      return ORD.dir * (x - y) || String(a.n).localeCompare(String(b.n), "pt-BR");
+    });
+    return '<div class="card ps-top ps-todos"><div class="card-b tabela-wrap"><table class="tbl">' + cabecalho(ORD) + "<tbody>" +
+      lista.map(function (f) {
+        return "<tr><td><b>" + esc(f.n) + '</b><span class="subnote ps-emp">' + esc(f.e || "—") +
+          (f.cad ? "" : " · fora do cadastro") + " · " + (f.dias_campo ? f.dias_campo + (f.dias_campo === 1 ? " dia" : " dias") +
+          " em campo · " + String(f.media).replace(".", ",") + " OS/dia" : "sem dia em campo") + "</span></td>" + celulas(f) + "</tr>";
+      }).join("") + "</tbody></table></div></div>";
+  }
+
   // Uma tabela de top 5. `extra(f)` vai abaixo do nome: o que explica a
   // posição do técnico naquele ranking (OS/dia, motivo da recusa).
   function top(tit, sub, lista, extra) {
     var corpo = lista.length ? lista.map(function (f, i) {
       return "<tr><td>" + (i + 1) + "</td><td><b>" + esc(f.n) + '</b><span class="subnote ps-emp">' + esc(f.e || "—") +
-        (f.cad ? "" : " · fora do cadastro") + "</span>" + (extra ? extra(f) : "") + "</td>" +
-        '<td class="num">' + num(f.cap_campo) + '</td><td class="num">' + num(f.exec) + '</td><td class="num">' + num(f.rec) +
-        "</td><td>" + barraAp(f.ap) + "</td></tr>";
+        (f.cad ? "" : " · fora do cadastro") + "</span>" + (extra ? extra(f) : "") + "</td>" + celulas(f) + "</tr>";
     }).join("") : '<tr><td colspan="6" class="subnote">Ninguém nesta régua no período.</td></tr>';
     return '<div class="card ps-top"><div class="card-h"><span>' + tit + '</span><span class="subnote" style="margin:0">' + sub +
-      '</span></div><div class="card-b tabela-wrap"><table class="tbl"><thead><tr><th>#</th><th>Técnico</th>' +
-      // No celular os cabeçalhos encurtam (.ps-curto) para a tabela caber sem rolar de lado.
-      '<th class="num" title="Capacidade em campo no período: dias em campo × 4 ou 6"><span class="ps-longo">Capacidade</span><span class="ps-curto">Cap.</span></th>' +
-      '<th class="num"><span class="ps-longo">Executadas</span><span class="ps-curto">Exec.</span></th>' +
-      '<th class="num"><span class="ps-longo">Recusadas</span><span class="ps-curto">Rec.</span></th>' +
-      '<th title="Executadas ÷ capacidade em campo"><span class="ps-longo">Aproveitamento</span><span class="ps-curto">%</span></th></tr></thead><tbody>' +
+      '</span></div><div class="card-b tabela-wrap"><table class="tbl">' + cabecalho(null) + "<tbody>" +
       corpo + "</tbody></table></div></div>";
   }
 
@@ -83,8 +119,12 @@
       '<div class="kpis ps-kpis">' + k.map(function (x) {
         return '<div class="kpi"><div class="v">' + x[0] + '</div><div class="l">' + x[1] + '</div><div class="l ps-kpi-b">' + x[2] + "</div></div>";
       }).join("") + "</div>" +
-      '<h4 class="ps-sec">Top 5 técnicos ofensores</h4>' +
-      '<div class="ps-tops">' +
+      '<div class="ps-modo-l"><h4 class="ps-sec">' + (MODO === "todos" ? "Técnicos do time (" + l.tecs.length + ")" : "Top 5 técnicos ofensores") +
+      '</h4><span class="toggle toggle-mini ps-modo">' +
+      '<button type="button" data-of-modo="todos" class="' + (MODO === "todos" ? "active" : "") + '">Todos os técnicos</button>' +
+      '<button type="button" data-of-modo="ofensores" class="' + (MODO === "ofensores" ? "active" : "") + '">Ver ofensores</button></span></div>' +
+      (MODO === "todos" ? todos(l) + '<p class="subnote" style="margin:8px 0 0">Clique no título de uma coluna para ordenar.</p>' : "") +
+      (MODO !== "todos" ? '<div class="ps-tops">' +
       top("Menor aproveitamento", "executadas ÷ capacidade em campo" + diasTxt, l.top_aproveitamento) +
       top("Menor média de produtividade", "OS executadas por dia em campo" + diasTxt, l.top_media, function (f) {
         return '<span class="subnote ps-emp"><b>' + String(f.media).replace(".", ",") + " OS/dia</b> em " + f.dias_campo +
@@ -94,12 +134,35 @@
         return (f.motivos[0] ? '<span class="subnote ps-emp">' + esc(f.motivos[0][0]) + " (" + f.motivos[0][1] + ")</span>" : "") +
           validacao(f.val);
       }) +
-      "</div>" +
+      "</div>" : "") +
       '<div class="grid charts-2 ps-baixo"><div class="card"><div class="card-h">Motivos das recusas do time</div><div class="card-b">' + motivos +
       '</div></div><div class="card"><div class="card-h">A recusa passou pelo supervisor?</div><div class="card-b">' + validacao(l.validacao) +
       '<p class="subnote" style="margin:10px 0 0">Resposta Sim/Não dada na War Room, que começou em 19/11/2026: recusa de antes ' +
       "aparece como sem resposta. OS sem número (coleta antiga) não tem como ser validada.</p></div></div></div>";
   }
 
-  window.Ofensores = { geral: geral, detalhe: detalhe, esc: esc };
+  // Lista de todos (padrão) × os três top 5, e a ordenação da lista. O
+  // estado vale para a página e sobrevive aos redesenhos (troca de dia, de
+  // supervisor, atualização automática). Cada tela liga o seu contêiner uma
+  // vez e diz como se redesenhar.
+  var MODO = "todos";
+  function ligar(el, redesenhar) {
+    el.addEventListener("click", function (e) {
+      var m = e.target.closest("[data-of-modo]");
+      if (m) {
+        if (MODO !== m.getAttribute("data-of-modo")) { MODO = m.getAttribute("data-of-modo"); redesenhar(); }
+        return;
+      }
+      var th = e.target.closest("th[data-of-ord]");
+      if (th) {
+        var col = th.getAttribute("data-of-ord");
+        // Primeiro clique: nome de A a Z, aproveitamento do pior para o
+        // melhor, quantidades da maior para a menor.
+        ORD = ORD.col === col ? { col: col, dir: -ORD.dir } : { col: col, dir: col === "n" || col === "ap" ? 1 : -1 };
+        redesenhar();
+      }
+    });
+  }
+
+  window.Ofensores = { geral: geral, detalhe: detalhe, ligar: ligar, esc: esc };
 })();
