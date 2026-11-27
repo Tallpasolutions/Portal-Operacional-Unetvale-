@@ -9,7 +9,8 @@
 //
 // Sem filtro próprio: segue o período (mês, semana, dia) e o supervisor da
 // barra da página, publicados por produtividade.js no evento `prodfiltro`.
-// Sem período escolhido, vale o mês atual.
+// Sem período escolhido, vale o DIA de hoje (pedido de 26/11/2026: "precisa
+// ser do dia"); mês, semana e dia da barra continuam mandando.
 (function () {
   "use strict";
   var corpo = document.getElementById("ps-corpo");
@@ -44,7 +45,7 @@
       var p = m.split("-").map(Number);
       lim.push(m + "-01", iso(new Date(Date.UTC(p[0], p[1], 0))));
     });
-    else { var h = hojeBR(); lim = [h.slice(0, 8) + "01", h]; }
+    else { var h = hojeBR(); lim = [h, h]; }
     lim.sort();
     var ate = lim[lim.length - 1] > hojeBR() ? hojeBR() : lim[lim.length - 1];
     return [lim[0], ate];
@@ -56,7 +57,7 @@
     var p = periodo(FILTRO), chave = p.join("|");
     if (chave === PEDIDO && DADOS) { desenhar(); return; }
     PEDIDO = chave;
-    document.getElementById("ps-periodo").textContent = "· " + br(p[0]) + " a " + br(p[1]);
+    document.getElementById("ps-periodo").textContent = "· " + (p[0] === p[1] ? br(p[0]) : br(p[0]) + " a " + br(p[1]));
     corpo.classList.add("ps-carregando");
     try {
       var r = await fetch("/produtividade/supervisores?de=" + p[0] + "&ate=" + p[1],

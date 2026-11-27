@@ -1346,7 +1346,7 @@ recusa passou pelo supervisor (`warroom_validacoes`). O cálculo é
 MESMAS regras da War Room (só cliente, cadastro de cada dia, correção de
 presença, recusa no dia da ficha — `_pela_ficha`, uma função para as duas),
 num PERÍODO: segue o Mês/Semana/Dia e o Supervisor da barra da página
-(evento `prodfiltro`); sem período, o mês atual; teto de 93 dias. A
+(evento `prodfiltro`); sem período, **o dia de hoje** (era o mês até 27/11/2026); teto de 93 dias. A
 capacidade só soma **dias com operação** (algum técnico fechou OS de
 cliente): domingo vazio não é "equipe parada". O recorte é do servidor:
 supervisor recebe só o próprio time. ⚠️ A validação começou em 19/11/2026:
